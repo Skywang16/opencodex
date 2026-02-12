@@ -71,7 +71,6 @@
     }
   }
 
-
   watch(
     () => props.block.isStreaming,
     isStreaming => {

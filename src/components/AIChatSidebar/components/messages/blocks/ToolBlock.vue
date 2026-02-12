@@ -200,7 +200,6 @@
     return typeof inputCommand === 'string' ? inputCommand : ''
   })
 
-
   const isError = computed(() => {
     return props.block.status === 'error'
   })
