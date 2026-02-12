@@ -1,0 +1,184 @@
+{
+  "menu": {
+    "about": "关于 OpenCodex",
+    "settings": "设置...",
+    "services": "服务",
+    "hide": "隐藏 OpenCodex",
+    "hide_others": "隐藏其他",
+    "show_all": "显示全部",
+    "quit": "退出 OpenCodex",
+    "new_terminal": "新建终端",
+    "edit": "编辑",
+    "undo": "撤销",
+    "redo": "重做",
+    "cut": "剪切",
+    "copy": "拷贝",
+    "paste": "粘贴",
+    "select_all": "全选",
+    "find": "查找...",
+    "clear_terminal": "清空终端",
+    "view": "显示",
+    "fullscreen": "进入全屏幕",
+    "toggle_terminal_panel": "显示/隐藏终端",
+    "window": "窗口",
+    "minimize": "最小化",
+    "always_on_top": "窗口置顶",
+    "help": "帮助",
+    "documentation": "OpenCodex 文档",
+    "report_issue": "报告问题..."
+  },
+  "common": {
+    "invalid_params": "参数无效",
+    "not_found": "资源不存在",
+    "invalid_id": "无效的ID",
+    "empty_content": "内容不能为空",
+    "path_empty": "路径不能为空",
+    "invalid_path": "路径无效",
+    "success": "操作成功",
+    "operation_failed": "操作失败",
+    "system_error": "系统错误"
+  },
+  "ai": {
+    "add_model_failed": "添加模型失败",
+    "add_model_success": "模型添加成功",
+    "remove_model_failed": "删除模型失败",
+    "remove_model_success": "模型删除成功",
+    "update_model_failed": "更新模型失败",
+    "update_model_success": "模型更新成功",
+    "get_models_failed": "获取模型配置失败",
+    "test_connection_error": "连接测试失败: {error}",
+    "test_connection_success": "连接测试成功",
+    "api_url_empty": "API URL不能为空",
+    "api_key_empty": "API Key不能为空",
+    "model_name_empty": "模型名称不能为空"
+  },
+  "completion": {
+    "get_failed": "获取补全建议失败",
+    "init_failed": "初始化补全引擎失败",
+    "engine_not_initialized": "补全引擎未初始化",
+    "stats_failed": "获取统计信息失败",
+    "clear_cache_failed": "清理补全缓存失败"
+  },
+  "git": {
+    "not_installed": "未找到 Git（请确认已安装并在 PATH 中）",
+    "not_a_repository": "当前目录不是 Git 仓库",
+    "parse_error": "解析 Git 输出失败",
+    "command_failed": "Git 命令执行失败"
+  },
+  "config": {
+    "get_failed": "获取配置失败",
+    "save_failed": "保存配置失败",
+    "update_failed": "更新配置失败",
+    "validate_failed": "配置校验失败",
+    "reset_failed": "重置配置失败",
+    "get_folder_path_failed": "获取配置目录失败",
+    "open_folder_failed": "打开配置目录失败"
+  },
+  "agent": {
+    "cancel_failed": "取消任务失败",
+    "command_not_found": "命令不存在",
+    "context": {
+      "file_status_failed": "获取文件上下文状态失败",
+      "summary_failed": "生成会话摘要失败"
+    },
+    "conversation": {
+      "create_failed": "创建会话失败",
+      "delete_failed": "删除会话失败",
+      "user_rules_failed": "获取规则失败",
+      "set_user_rules_failed": "设置规则失败",
+      "update_failed": "更新会话失败"
+    },
+    "execute_failed": "执行任务失败",
+    "too_many_active_tasks_global": "当前应用最多只能同时运行 5 个 Agent 任务",
+    "execute_tree_failed": "执行任务树失败",
+    "list_failed": "获取任务列表失败",
+    "pause_failed": "暂停任务失败",
+    "switch_failed": "切换 Agent 失败",
+    "tool_confirm_not_found": "工具确认请求不存在",
+    "unknown_agent_type": "未知 Agent 类型",
+    "ui": {
+      "conversations_failed": "获取会话列表失败",
+      "messages_failed": "获取消息列表失败"
+    }
+  },
+  "llm": {
+    "call_failed": "LLM调用失败",
+    "stream_failed": "流式调用失败",
+    "get_models_failed": "获取模型列表失败",
+    "test_connection_failed": "测试模型连接失败"
+  },
+  "shell": {
+    "pane_not_exist": "终端面板不存在",
+    "setup_integration_failed": "设置Shell集成失败",
+    "generate_script_failed": "生成集成脚本失败",
+    "execute_command_failed": "执行后台命令失败",
+    "command_empty": "命令不能为空",
+    "quotes_mismatch": "引号不匹配",
+    "shell_not_supported": "Shell类型不支持集成",
+    "terminal_size_invalid": "终端尺寸无效",
+    "create_terminal_failed": "创建终端失败",
+    "write_terminal_failed": "写入终端失败",
+    "resize_terminal_failed": "调整终端大小失败",
+    "close_terminal_failed": "关闭终端失败",
+    "find_shell_failed": "查找shell失败",
+    "shell_not_found": "未找到指定Shell",
+    "get_buffer_failed": "获取缓冲区失败"
+  },
+  "shortcuts": {
+    "get_failed": "获取快捷键配置失败",
+    "update_failed": "更新快捷键配置失败",
+    "validate_failed": "验证快捷键配置失败",
+    "detect_conflicts_failed": "检测快捷键冲突失败",
+    "add_failed": "添加快捷键失败",
+    "remove_failed": "删除快捷键失败",
+    "reset_failed": "重置快捷键失败",
+    "search_failed": "搜索快捷键失败",
+    "get_stats_failed": "获取快捷键统计失败",
+    "export_failed": "导出快捷键失败",
+    "import_failed": "导入快捷键失败",
+    "import_parse_failed": "解析快捷键导入文件失败"
+  },
+  "terminal": {
+    "get_context_failed": "获取终端上下文失败",
+    "get_active_context_failed": "获取活跃终端上下文失败",
+    "set_active_pane_failed": "设置活跃面板失败",
+    "clear_active_pane_failed": "清除活跃面板失败",
+    "pane_not_found": "终端面板不存在"
+  },
+  "window": {
+    "get_current_directory_failed": "获取当前目录失败",
+    "get_home_directory_failed": "获取家目录失败",
+    "get_instance_failed": "获取窗口实例失败",
+    "get_platform_info_failed": "获取平台信息失败",
+    "get_window_id_failed": "获取窗口标识失败",
+    "get_state_failed": "获取窗口状态失败",
+    "missing_always_on_top_param": "缺少置顶参数",
+    "set_always_on_top_failed": "设置置顶状态失败",
+    "toggle_always_on_top_failed": "切换置顶状态失败",
+    "reset_state_failed": "重置窗口状态失败",
+    "normalize_path_failed": "规范化路径失败",
+    "path_list_empty": "路径列表不能为空",
+    "path_component_empty": "路径组件不能为空",
+    "emit_event_failed": "发送事件失败"
+  },
+  "ck": {
+    "invalid_query": "搜索查询长度至少需要3个字符",
+    "search_failed": "代码搜索失败",
+    "index_not_found": "索引未就绪，请先构建索引或启用自动重建",
+    "delete_failed": "删除索引失败"
+  },
+  "storage": {
+    "get_config_failed": "获取配置失败",
+    "update_config_failed": "更新配置失败",
+    "save_session_failed": "保存会话状态失败"
+  },
+  "vector_db": {
+    "index_failed": "索引文件失败",
+    "status_failed": "获取索引状态失败",
+    "delete_failed": "删除索引失败",
+    "progress_unavailable": "索引构建进度不可用",
+    "update_failed": "更新文件索引失败",
+    "remove_failed": "移除文件索引失败",
+    "search_failed": "语义搜索失败"
+  }
+}

@@ -1,0 +1,163 @@
+// XUI component library type definitions
+
+// Basic types
+export type Size = 'small' | 'medium' | 'large'
+export type Theme = 'light' | 'dark'
+export type Placement = 'top' | 'top-start' | 'top-end' | 'bottom' | 'bottom-start' | 'bottom-end' | 'left' | 'right'
+
+// Button component property types
+export interface ButtonProps {
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'link'
+  size?: Size
+  disabled?: boolean
+  loading?: boolean
+  type?: 'button' | 'submit' | 'reset'
+  icon?: string
+  iconPosition?: 'left' | 'right'
+  block?: boolean
+  round?: boolean
+  circle?: boolean
+}
+
+// Button component event types
+export interface ButtonEmits {
+  click: (event: MouseEvent) => void
+}
+
+// Switch component property types
+export interface SwitchProps {
+  modelValue: boolean
+  disabled?: boolean
+  loading?: boolean
+  size?: Size
+  checkedText?: string
+  uncheckedText?: string
+  checkedColor?: string
+  uncheckedColor?: string
+}
+
+// Switch component event types
+export interface SwitchEmits {
+  'update:modelValue': (value: boolean) => void
+  change: (value: boolean) => void
+}
+
+// Modal component property types
+export interface ModalProps {
+  visible?: boolean
+  title?: string
+  size?: 'small' | 'medium' | 'large' | 'full'
+  closable?: boolean
+  maskClosable?: boolean
+  showHeader?: boolean
+  showFooter?: boolean
+  showCancelButton?: boolean
+  showConfirmButton?: boolean
+  cancelText?: string
+  confirmText?: string
+  loadingText?: string
+  closeButtonTitle?: string
+  loading?: boolean
+  noPadding?: boolean
+  zIndex?: number
+}
+
+// Modal component event types
+export interface ModalEmits {
+  'update:visible': (visible: boolean) => void
+  close: () => void
+  cancel: () => void
+  confirm: () => void
+  opened: () => void
+  closed: () => void
+}
+
+// Search input component property types
+export interface SearchInputProps {
+  modelValue?: string
+  placeholder?: string
+  disabled?: boolean
+  clearable?: boolean
+  autofocus?: boolean
+  debounce?: number
+  size?: Size
+  maxLength?: number
+  showWordLimit?: boolean
+}
+
+// Search input component event types
+export interface SearchInputEmits {
+  'update:modelValue': (value: string) => void
+  search: (value: string) => void
+  focus: (event: FocusEvent) => void
+  blur: (event: FocusEvent) => void
+  clear: () => void
+  input: (value: string) => void
+}
+
+// Message component property types
+export interface MessageProps {
+  visible: boolean
+  message: string
+  type?: 'success' | 'warning' | 'error' | 'info'
+  duration?: number
+  closable?: boolean
+  showIcon?: boolean
+  dangerouslyUseHTMLString?: boolean
+}
+
+// Message component event types
+export interface MessageEmits {
+  close: () => void
+}
+
+// Selector option types
+export interface SelectOption {
+  label: string
+  value: string | number
+  disabled?: boolean
+  icon?: string
+  description?: string
+}
+
+// Selector component property types
+export interface SelectProps {
+  modelValue?: string | number | null
+  options: SelectOption[]
+  placeholder?: string
+  disabled?: boolean
+  clearable?: boolean
+  filterable?: boolean
+  size?: Size
+  borderless?: boolean
+  placement?: 'top' | 'bottom' | 'auto'
+  maxHeight?: string | number
+  noDataText?: string
+  filterPlaceholder?: string
+  loading?: boolean
+  multiple?: boolean
+  multipleLimit?: number
+  collapseTags?: boolean
+  allowCreate?: boolean
+  remote?: boolean
+  remoteMethod?: (query: string) => void
+}
+
+// Selector component event types
+export interface SelectEmits {
+  'update:modelValue': (value: string | number | null | Array<string | number>) => void
+  change: (value: string | number | null | Array<string | number>) => void
+  focus: (event: FocusEvent) => void
+  blur: (event: FocusEvent) => void
+  clear: () => void
+  'visible-change': (visible: boolean) => void
+  'remove-tag': (value: string | number) => void
+}
+
+// Component instance types
+export type ButtonInstance = InstanceType<typeof import('./Button.vue').default>
+export type SwitchInstance = InstanceType<typeof import('./Switch.vue').default>
+export type ModalInstance = InstanceType<typeof import('./Modal.vue').default>
+export type SearchInputInstance = InstanceType<typeof import('./SearchInput.vue').default>
+export type MessageInstance = InstanceType<typeof import('./Message.vue').default>
+export type SelectInstance = InstanceType<typeof import('./Select.vue').default>

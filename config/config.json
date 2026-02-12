@@ -1,0 +1,57 @@
+{
+  "version": "1.0.0",
+  "app": {
+    "language": "zh-CN",
+    "confirmOnExit": true,
+    "startupBehavior": "restore"
+  },
+  "appearance": {
+    "uiScale": 100,
+    "animationsEnabled": true,
+    "themeConfig": {
+      "terminalTheme": "tokyo-night",
+      "lightTheme": "light",
+      "darkTheme": "dark",
+      "followSystem": false
+    },
+    "font": {
+      "family": "Menlo, Monaco, \"SF Mono\", \"Microsoft YaHei UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Source Han Sans CN\", \"WenQuanYi Micro Hei\", \"Courier New\", monospace",
+      "size": 14,
+      "weight": "normal",
+      "style": "normal",
+      "lineHeight": 1.2,
+      "letterSpacing": 0
+    },
+    "opacity": 1
+  },
+  "terminal": {
+    "scrollback": 1000,
+    "shell": {
+      "default": "zsh",
+      "args": [],
+      "workingDirectory": "~"
+    },
+    "cursor": {
+      "style": "block",
+      "blink": true,
+      "color": "#ffffff",
+      "thickness": 0.15
+    },
+    "behavior": {
+      "closeOnExit": true,
+      "confirmClose": false
+    }
+  },
+  "shortcuts": [
+    { "key": "c", "modifiers": ["cmd"], "action": "copy_to_clipboard" },
+    { "key": "v", "modifiers": ["cmd"], "action": "paste_from_clipboard" },
+    { "key": "k", "modifiers": ["cmd"], "action": "command_palette" },
+    { "key": "f", "modifiers": ["cmd"], "action": "terminal_search" },
+    { "key": "s", "modifiers": ["cmd"], "action": "open_settings" },
+    { "key": "t", "modifiers": ["cmd"], "action": "new_terminal" },
+    { "key": "right", "modifiers": ["cmd"], "action": "accept_completion" },
+    { "key": "l", "modifiers": ["cmd"], "action": "clear_terminal" },
+    { "key": "`", "modifiers": ["cmd"], "action": "toggle_terminal_panel" },
+    { "key": "p", "modifiers": ["cmd", "shift"], "action": "toggle_window_pin" }
+  ]
+}

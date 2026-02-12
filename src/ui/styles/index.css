@@ -1,0 +1,255 @@
+:root {
+  --x-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --x-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
+  --x-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1), 0 4px 6px rgba(0, 0, 0, 0.05);
+  --x-shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.1), 0 10px 10px rgba(0, 0, 0, 0.04);
+
+  --x-duration-fast: 0.15s;
+  --x-duration-normal: 0.2s;
+  --x-duration-slow: 0.3s;
+
+  --x-ease-out: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --x-ease-in: cubic-bezier(0.55, 0.055, 0.675, 0.19);
+  --x-ease-in-out: cubic-bezier(0.645, 0.045, 0.355, 1);
+
+  --x-z-dropdown: 1050;
+  --x-z-sticky: 1020;
+  --x-z-fixed: 1030;
+  --x-z-modal-backdrop: 1040;
+  --x-z-modal: 1050;
+  --x-z-popover: 1060;
+  --x-z-tooltip: 1070;
+  --x-z-toast: 1080;
+}
+
+[data-theme='dark'] {
+  --x-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --x-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.2);
+  --x-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3), 0 4px 6px rgba(0, 0, 0, 0.2);
+  --x-shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.3), 0 10px 10px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme='one-dark'],
+[data-theme='dracula'],
+[data-theme='monokai'] {
+  --x-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --x-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+  --x-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.4), 0 4px 6px rgba(0, 0, 0, 0.3);
+  --x-shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.4), 0 10px 10px rgba(0, 0, 0, 0.3);
+}
+
+.x-button,
+.x-message,
+.x-modal,
+.x-search-input,
+.x-switch {
+  box-sizing: border-box;
+}
+
+.x-button *,
+.x-message *,
+.x-modal *,
+.x-search-input *,
+.x-switch * {
+  box-sizing: border-box;
+}
+
+.confirm-modal {
+  --modal-max-width: 400px;
+}
+
+.confirm-content {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) 0;
+}
+
+.confirm-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.confirm-icon--warning {
+  color: var(--color-warning);
+}
+
+.confirm-icon--danger {
+  color: var(--color-error);
+}
+
+.confirm-icon--info {
+  color: var(--color-primary);
+}
+
+.confirm-message {
+  flex: 1;
+  line-height: 1.5;
+  color: var(--text-200);
+  font-size: var(--font-size-sm);
+}
+
+.x-button:focus-visible,
+.x-search-input:focus-within,
+.x-switch input:focus-visible + .slider,
+.default-trigger:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.x-button:disabled,
+.x-search-input--disabled,
+.x-switch.is-disabled {
+  pointer-events: none;
+  user-select: none;
+}
+
+.x-button,
+.x-message,
+.x-modal-container,
+.x-search-input,
+.x-switch .slider {
+  will-change: auto;
+}
+
+@media (prefers-contrast: high) {
+  .x-button,
+  .x-message,
+  .x-modal-container,
+  .x-search-input {
+    border-width: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .x-button,
+  .x-message,
+  .x-modal-container,
+  .x-search-input,
+  .x-switch .slider,
+  .x-switch .slider:before {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .x-button {
+    min-height: 44px;
+  }
+
+  .x-search-input {
+    min-height: 44px;
+  }
+
+  .x-switch {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+/* Globally disable text selection to prevent accidental UI element selection */
+* {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Allow text selection in specific areas */
+/* AI chat message render area */
+.message-list,
+.message-list * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* AI input area */
+.message-input,
+.message-input * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Terminal render area: xterm.js has its own Canvas selection mechanism, disable native browser selection to avoid blue overlay on drag */
+.terminal-container,
+.terminal-container * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@media print {
+  .x-message,
+  .x-modal {
+    display: none !important;
+  }
+
+  .x-button {
+    border: 1px solid var(--text-100) !important;
+    background: transparent !important;
+    color: var(--text-100) !important;
+  }
+}
+
+[dir='rtl'] .x-search-input .search-icon {
+  left: auto;
+  right: var(--spacing-sm);
+}
+
+[dir='rtl'] .x-search-input .clear-button {
+  right: auto;
+  left: var(--spacing-sm);
+}
+
+[dir='rtl'] .x-search-input .search-field {
+  padding: 0 var(--spacing-md) 0 var(--spacing-xl);
+}
+
+[dir='rtl'] .menu-item-icon {
+  margin-right: 0;
+  margin-left: var(--spacing-sm);
+}
+
+[dir='rtl'] .x-switch input:checked + .slider:before {
+  transform: translateX(-22px);
+}
+
+[dir='rtl'] .x-switch--small input:checked + .slider:before {
+  transform: translateX(-16px);
+}
+
+[dir='rtl'] .x-switch--large input:checked + .slider:before {
+  transform: translateX(-28px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .x-button {
+    border: 1px solid ButtonText;
+  }
+
+  .x-button:hover {
+    border-color: Highlight;
+  }
+
+  .x-button--primary {
+    background: ButtonText;
+    color: ButtonFace;
+  }
+
+  .x-switch input:checked + .slider {
+    background: Highlight;
+  }
+}
