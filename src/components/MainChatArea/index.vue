@@ -47,7 +47,8 @@
   const { selectedSession } = storeToRefs(workspaceStore)
 
   // Use storeToRefs to ensure reactive tracking
-  const { messageList, currentSession, currentWorkspacePath, isSending, isCurrentSessionSending, chatMode } = storeToRefs(aiChatStore)
+  const { messageList, currentSession, currentWorkspacePath, isSending, isCurrentSessionSending, chatMode } =
+    storeToRefs(aiChatStore)
   const { actions, selectedAction } = storeToRefs(runActionsStore)
   const { terminalPanelVisible } = storeToRefs(layoutStore)
 

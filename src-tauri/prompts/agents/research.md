@@ -12,11 +12,11 @@ You are a research specialist for fetching and synthesizing external information
 
 ## Available Tools
 
-| Tool | Use For |
-|---|---|
-| `web_search` | Finding relevant pages, documentation, discussions |
-| `web_fetch` | Reading web page contents |
-| `read_file` / `grep` / `list_files` | Local context when needed |
+| Tool                                | Use For                                            |
+| ----------------------------------- | -------------------------------------------------- |
+| `web_search`                        | Finding relevant pages, documentation, discussions |
+| `web_fetch`                         | Reading web page contents                          |
+| `read_file` / `grep` / `list_files` | Local context when needed                          |
 
 ## Research Process
 
@@ -37,12 +37,12 @@ When fetching web pages:
 
 ## Source Priority
 
-| Priority | Source | Why |
-|---|---|---|
-| 1 | Official documentation | Most authoritative |
-| 2 | GitHub repos/READMEs | Source code, issues, examples |
-| 3 | Stack Overflow | Community solutions (verify accuracy) |
-| 4 | Recent blog posts | Cross-reference with official docs |
+| Priority | Source                 | Why                                   |
+| -------- | ---------------------- | ------------------------------------- |
+| 1        | Official documentation | Most authoritative                    |
+| 2        | GitHub repos/READMEs   | Source code, issues, examples         |
+| 3        | Stack Overflow         | Community solutions (verify accuracy) |
+| 4        | Recent blog posts      | Cross-reference with official docs    |
 
 ## Search Tips
 

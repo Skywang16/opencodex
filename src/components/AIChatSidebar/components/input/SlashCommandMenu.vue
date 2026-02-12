@@ -122,41 +122,41 @@
 
     <template v-else>
       <div class="search-wrapper">
-      <input
-        ref="searchInput"
-        v-model="searchQuery"
-        type="text"
-        class="search-input"
-        :placeholder="t('slash_commands.search_placeholder')"
-      />
-    </div>
-
-    <div class="commands-list">
-      <template v-for="group in groupedCommands" :key="group.name || 'default'">
-        <div v-if="group.name" class="group-header">
-          {{ group.name }}
-        </div>
-        <button
-          v-for="command in group.commands"
-          :key="command.id"
-          class="command-item"
-          :class="{ selected: flatCommands.indexOf(command) === selectedIndex }"
-          @click="handleSelect(command)"
-          @mouseenter="selectedIndex = flatCommands.indexOf(command)"
-        >
-          <span class="command-icon" v-html="getIcon(command.icon)" />
-          <span class="command-content">
-            <span class="command-label">{{ t(command.labelKey) }}</span>
-            <span v-if="command.descriptionKey" class="command-description">{{ t(command.descriptionKey) }}</span>
-          </span>
-          <span v-if="command.badge" class="command-badge">{{ command.badge }}</span>
-        </button>
-      </template>
-
-      <div v-if="filteredCommands.length === 0" class="no-results">
-        {{ t('slash_commands.no_results') }}
+        <input
+          ref="searchInput"
+          v-model="searchQuery"
+          type="text"
+          class="search-input"
+          :placeholder="t('slash_commands.search_placeholder')"
+        />
       </div>
-    </div>
+
+      <div class="commands-list">
+        <template v-for="group in groupedCommands" :key="group.name || 'default'">
+          <div v-if="group.name" class="group-header">
+            {{ group.name }}
+          </div>
+          <button
+            v-for="command in group.commands"
+            :key="command.id"
+            class="command-item"
+            :class="{ selected: flatCommands.indexOf(command) === selectedIndex }"
+            @click="handleSelect(command)"
+            @mouseenter="selectedIndex = flatCommands.indexOf(command)"
+          >
+            <span class="command-icon" v-html="getIcon(command.icon)" />
+            <span class="command-content">
+              <span class="command-label">{{ t(command.labelKey) }}</span>
+              <span v-if="command.descriptionKey" class="command-description">{{ t(command.descriptionKey) }}</span>
+            </span>
+            <span v-if="command.badge" class="command-badge">{{ command.badge }}</span>
+          </button>
+        </template>
+
+        <div v-if="filteredCommands.length === 0" class="no-results">
+          {{ t('slash_commands.no_results') }}
+        </div>
+      </div>
     </template>
   </div>
 </template>

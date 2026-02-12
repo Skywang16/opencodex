@@ -17,7 +17,6 @@
   const loadError = ref<string | null>(null)
 
   const isRunning = computed(() => props.block.status === 'running' || props.block.status === 'pending')
-  const isCompleted = computed(() => props.block.status === 'completed')
   const isError = computed(() => props.block.status === 'error')
   const isCancelled = computed(() => props.block.status === 'cancelled')
 

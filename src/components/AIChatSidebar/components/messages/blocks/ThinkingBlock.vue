@@ -71,16 +71,6 @@
     }
   }
 
-  const displayDuration = computed(() => {
-    if (props.block.isStreaming) {
-      return elapsedSeconds.value > 0 ? `${elapsedSeconds.value}s` : null
-    }
-    if (props.block.content && props.block.content.length > 0) {
-      const estimatedSeconds = Math.max(1, Math.ceil(props.block.content.length / 200))
-      return `${estimatedSeconds}s`
-    }
-    return null
-  })
 
   watch(
     () => props.block.isStreaming,

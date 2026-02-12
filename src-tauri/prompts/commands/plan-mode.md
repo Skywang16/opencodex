@@ -32,4 +32,3 @@ In plan mode, you should:
    - List any questions or clarifications needed before implementation
 
 **Important**: Focus on thorough planning and research. Do NOT make any code changes in plan mode. The goal is to create a comprehensive design document that will guide the implementation phase.
-

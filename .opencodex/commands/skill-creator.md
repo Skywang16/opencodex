@@ -8,6 +8,7 @@ Create a new skill with the following requirements:
 {{input}}
 
 The skill should include:
+
 1. Clear skill metadata (name, description, version)
 2. Detailed instructions for the AI agent
 3. Example usage scenarios

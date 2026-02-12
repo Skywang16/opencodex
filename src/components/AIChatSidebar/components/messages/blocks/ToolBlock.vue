@@ -189,11 +189,6 @@
     const paneId = toolMetadata.value?.paneId
     return typeof paneId === 'number' ? paneId : null
   })
-  const shellTerminalId = computed(() => {
-    if (!isShellTool.value) return null
-    const terminalId = toolMetadata.value?.terminalId
-    return typeof terminalId === 'string' ? terminalId : null
-  })
   // Get command from input when loading, from metadata when completed
   const shellCommandDisplay = computed(() => {
     if (!isShellTool.value) return ''
@@ -205,11 +200,6 @@
     return typeof inputCommand === 'string' ? inputCommand : ''
   })
 
-  const openShellTerminal = () => {
-    if (!shellTerminalId.value || shellPaneId.value == null) return
-    // TODO: Implement shell terminal viewer without tab system
-    console.warn('Shell terminal viewer not yet implemented:', shellTerminalId.value)
-  }
 
   const isError = computed(() => {
     return props.block.status === 'error'

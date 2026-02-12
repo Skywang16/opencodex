@@ -5,7 +5,9 @@ Create a new skill to extend the agent's capabilities with specialized knowledge
 ## Skill Creation Guidelines
 
 ### 1. Skill Metadata
+
 Define clear metadata for the skill:
+
 - **Name**: Short, descriptive identifier (kebab-case)
 - **Description**: One-line summary of what the skill does
 - **Version**: Semantic version (e.g., 1.0.0)
@@ -13,7 +15,9 @@ Define clear metadata for the skill:
 - **Tags**: Relevant categories for discoverability
 
 ### 2. Skill Instructions
+
 Provide detailed, step-by-step instructions for the AI agent:
+
 - Clear objectives and goals
 - Specific actions to take
 - Decision-making criteria
@@ -21,21 +25,27 @@ Provide detailed, step-by-step instructions for the AI agent:
 - Expected outcomes
 
 ### 3. Usage Examples
+
 Include concrete examples showing:
+
 - Typical use cases
 - Input formats and parameters
 - Expected outputs
 - Common variations
 
 ### 4. Technical Specifications
+
 Document technical details:
+
 - Required tools or dependencies
 - File structure and locations
 - Configuration requirements
 - Integration points with existing code
 
 ### 5. Best Practices
+
 Include guidance on:
+
 - When to use this skill
 - When NOT to use this skill
 - Common pitfalls to avoid
@@ -58,6 +68,7 @@ Create a markdown file following this structure:
 ## Usage Examples
 
 ### Example 1: [Scenario]
+
 [Input and expected output]
 
 ## Technical Details
@@ -70,4 +81,3 @@ Create a markdown file following this structure:
 ```
 
 Save the skill to `.opencodex/skills/[skill-name]/SKILL.md` in the workspace.
-

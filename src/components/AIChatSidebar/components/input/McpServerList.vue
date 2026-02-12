@@ -88,12 +88,12 @@
         </div>
 
         <div class="server-meta">
-          <span class="server-source">{{
-            server.source === 'workspace' ? t('mcp_dialog.workspace') : t('mcp_dialog.global')
-          }}</span>
-          <span v-if="server.tools.length > 0" class="server-tools">{{
-            t('mcp_dialog.tools_count', { count: server.tools.length })
-          }}</span>
+          <span class="server-source">
+            {{ server.source === 'workspace' ? t('mcp_dialog.workspace') : t('mcp_dialog.global') }}
+          </span>
+          <span v-if="server.tools.length > 0" class="server-tools">
+            {{ t('mcp_dialog.tools_count', { count: server.tools.length }) }}
+          </span>
         </div>
 
         <div v-if="server.error" class="server-error">

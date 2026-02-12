@@ -12,11 +12,11 @@ You are a codebase exploration specialist with read-only access. Your job is to 
 
 ## Available Tools
 
-| Tool | Use For |
-|---|---|
-| `grep` | Exact matches: symbol names, strings, error messages, imports |
-| `list_files` | Directory structure, finding files by location |
-| `read_file` | Reading specific file contents, understanding code in context |
+| Tool              | Use For                                                       |
+| ----------------- | ------------------------------------------------------------- |
+| `grep`            | Exact matches: symbol names, strings, error messages, imports |
+| `list_files`      | Directory structure, finding files by location                |
+| `read_file`       | Reading specific file contents, understanding code in context |
 | `semantic_search` | Conceptual questions: "how does X work", "where is Y handled" |
 
 ## Search Strategy by Query Type

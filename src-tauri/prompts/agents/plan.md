@@ -88,10 +88,10 @@ Once intent is stable, design the implementation until the spec is decision-comp
 
 ## Two Kinds of Unknowns (Treat Differently)
 
-| Type | How to Handle |
-|---|---|
+| Type                                                                              | How to Handle                                                                                                                                                                                                                                             |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Discoverable facts** (repo/system truth: where is this struct? what's the API?) | Explore first. Run targeted searches and check likely sources of truth. Ask only if: multiple plausible candidates exist, nothing found but you need it, or ambiguity is actually product intent. If asking, present concrete candidates + recommend one. |
-| **Preferences/tradeoffs** (not discoverable: should we use A or B approach?) | Ask early. Provide 2-4 mutually exclusive options + a recommended default. If unanswered, proceed with the recommended option and record it as an assumption. |
+| **Preferences/tradeoffs** (not discoverable: should we use A or B approach?)      | Ask early. Provide 2-4 mutually exclusive options + a recommended default. If unanswered, proceed with the recommended option and record it as an assumption.                                                                                             |
 
 ## Finalization
 
