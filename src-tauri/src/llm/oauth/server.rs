@@ -52,7 +52,7 @@ impl OAuthCallbackServer {
     async fn start_server(server: Arc<Mutex<Self>>) -> OAuthResult<()> {
         use tiny_http::{Response, Server};
 
-        let http_server = Server::http(format!("127.0.0.1:{}", OAUTH_PORT))
+        let http_server = Server::http(format!("127.0.0.1:{OAUTH_PORT}"))
             .map_err(|e| OAuthError::Other(format!("Failed to bind server: {}", e)))?;
 
         info!("OAuth callback server started on port {}", OAUTH_PORT);
@@ -191,7 +191,7 @@ impl OAuthCallbackServer {
 
     /// Get callback URL
     pub fn callback_url() -> String {
-        format!("http://localhost:{}{}", OAUTH_PORT, OAUTH_CALLBACK_PATH)
+        format!("http://localhost:{OAUTH_PORT}{OAUTH_CALLBACK_PATH}")
     }
 }
 

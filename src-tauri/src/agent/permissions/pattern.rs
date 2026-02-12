@@ -33,7 +33,7 @@ fn map_tool_alias_with_optional_glob(lower: &str, from: &str, to: &str) -> Optio
         return Some(to.to_string());
     }
     if lower.starts_with(from) {
-        let rest = &lower[from.len()..];
+        let rest = lower.strip_prefix(from).unwrap_or(lower);
         if !rest.is_empty() && rest.chars().all(|c| c == '*' || c == '?') {
             return Some(format!("{to}{rest}"));
         }

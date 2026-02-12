@@ -309,7 +309,7 @@ mod tests {
         std_fs::create_dir_all(&opencodex_skills).unwrap();
 
         for i in 1..=3 {
-            let name = format!("skill-{}", i);
+            let name = format!("skill-{i}");
             let skill_dir = opencodex_skills.join(&name);
             create_test_skill(&skill_dir, &name).unwrap();
         }

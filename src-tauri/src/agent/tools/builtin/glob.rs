@@ -170,10 +170,12 @@ Examples:
             glob_search_sync(&search_path_clone, &effective_pattern_clone, max_results)
         })
         .await
-        .map_err(|e| crate::agent::error::ToolExecutorError::ExecutionFailed {
-            tool_name: "glob".to_string(),
-            error: format!("Glob search task failed: {e}"),
-        })?;
+        .map_err(
+            |e| crate::agent::error::ToolExecutorError::ExecutionFailed {
+                tool_name: "glob".to_string(),
+                error: format!("Glob search task failed: {e}"),
+            },
+        )?;
 
         let elapsed_ms = started.elapsed().as_millis() as u64;
 
@@ -200,8 +202,7 @@ Examples:
                 if paths.is_empty() {
                     return Ok(ToolResult {
                         content: vec![ToolResultContent::Success(format!(
-                            "No files matching pattern \"{}\"",
-                            effective_pattern
+                            "No files matching pattern \"{effective_pattern}\""
                         ))],
                         status: ToolResultStatus::Success,
                         cancel_reason: None,
@@ -243,8 +244,7 @@ fn glob_search_sync(
     pattern: &str,
     max_results: usize,
 ) -> Result<Vec<(String, u64)>, String> {
-    let matcher =
-        glob::Pattern::new(pattern).map_err(|e| format!("Invalid glob pattern: {e}"))?;
+    let matcher = glob::Pattern::new(pattern).map_err(|e| format!("Invalid glob pattern: {e}"))?;
 
     let mut builder = WalkBuilder::new(path);
     builder

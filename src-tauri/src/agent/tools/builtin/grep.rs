@@ -103,7 +103,14 @@ impl GrepTool {
         let include = include.map(|s| s.to_string());
 
         tokio::task::spawn_blocking(move || {
-            Self::grep_search_sync(&path, &pattern, max_results, include.as_deref(), context_lines, ignore_case)
+            Self::grep_search_sync(
+                &path,
+                &pattern,
+                max_results,
+                include.as_deref(),
+                context_lines,
+                ignore_case,
+            )
         })
         .await
         .map_err(|e| format!("Search task failed: {e}"))?
@@ -211,7 +218,7 @@ impl GrepTool {
                 };
 
                 let mut res = results.borrow_mut();
-                for (&match_line, _) in &matches {
+                for &match_line in matches.keys() {
                     if res.len() >= max_results {
                         break;
                     }
@@ -223,7 +230,12 @@ impl GrepTool {
                         if ln <= file_lines.len() {
                             let prefix = if ln == match_line { ":" } else { "-" };
                             let line_content = &file_lines[ln - 1];
-                            snippet_parts.push(format!("{}{}{}", ln, prefix, truncate_snippet(line_content.trim_end())));
+                            snippet_parts.push(format!(
+                                "{}{}{}",
+                                ln,
+                                prefix,
+                                truncate_snippet(line_content.trim_end())
+                            ));
                         }
                     }
 

@@ -34,11 +34,7 @@ struct EditFileArgs {
     old_text: String,
     #[serde(alias = "newString", alias = "new_string")]
     new_text: String,
-    #[serde(
-        default,
-        alias = "replaceAll",
-        alias = "replace_all"
-    )]
+    #[serde(default, alias = "replaceAll", alias = "replace_all")]
     replace_all: bool,
 }
 
@@ -76,13 +72,13 @@ fn line_trimmed_replacer(content: &str, find: &str) -> Vec<String> {
 
         if window_trimmed == search_trimmed {
             // Compute byte range in original content
-            let mut start_idx = 0;
-            for k in 0..i {
-                start_idx += original_lines[k].len() + 1;
-            }
+            let start_idx = original_lines[..i]
+                .iter()
+                .map(|line| line.len() + 1)
+                .sum::<usize>();
             let mut end_idx = start_idx;
-            for k in 0..search_lines.len() {
-                end_idx += original_lines[i + k].len();
+            for (k, line) in original_lines[i..i + search_lines.len()].iter().enumerate() {
+                end_idx += line.len();
                 if k < search_lines.len() - 1 {
                     end_idx += 1; // newline
                 }
@@ -126,11 +122,14 @@ fn block_anchor_replacer(content: &str, find: &str) -> Vec<String> {
         if original_lines[i].trim() != first_search {
             continue;
         }
-        for j in (i + 2)..original_lines.len() {
-            if original_lines[j].trim() == last_search {
-                candidates.push(Candidate { start: i, end: j });
-                break;
-            }
+        if let Some(j) = original_lines[(i + 2)..]
+            .iter()
+            .position(|line| line.trim() == last_search)
+        {
+            candidates.push(Candidate {
+                start: i,
+                end: i + 2 + j,
+            });
         }
     }
 
@@ -144,7 +143,9 @@ fn block_anchor_replacer(content: &str, find: &str) -> Vec<String> {
 
     for c in &candidates {
         let actual_size = c.end - c.start + 1;
-        let middle_count = search_block_size.saturating_sub(2).min(actual_size.saturating_sub(2));
+        let middle_count = search_block_size
+            .saturating_sub(2)
+            .min(actual_size.saturating_sub(2));
 
         let similarity = if middle_count > 0 {
             let mut sim = 0.0;
@@ -163,22 +164,20 @@ fn block_anchor_replacer(content: &str, find: &str) -> Vec<String> {
             1.0
         };
 
-        if similarity >= threshold {
-            if best.is_none() || similarity > best.unwrap().2 {
-                best = Some((c.start, c.end, similarity));
-            }
+        if similarity >= threshold && (best.is_none() || similarity > best.unwrap().2) {
+            best = Some((c.start, c.end, similarity));
         }
     }
 
     if let Some((start, end, _)) = best {
-        let mut start_idx = 0;
-        for k in 0..start {
-            start_idx += original_lines[k].len() + 1;
-        }
+        let start_idx = original_lines[..start]
+            .iter()
+            .map(|line| line.len() + 1)
+            .sum::<usize>();
         let mut end_idx = start_idx;
-        for k in start..=end {
-            end_idx += original_lines[k].len();
-            if k < end {
+        for (idx, line) in original_lines[start..=end].iter().enumerate() {
+            end_idx += line.len();
+            if start + idx < end {
                 end_idx += 1;
             }
         }
@@ -270,14 +269,38 @@ fn escape_normalized_replacer(content: &str, find: &str) -> Vec<String> {
         while let Some(c) = chars.next() {
             if c == '\\' {
                 match chars.peek() {
-                    Some('n') => { chars.next(); result.push('\n'); }
-                    Some('t') => { chars.next(); result.push('\t'); }
-                    Some('r') => { chars.next(); result.push('\r'); }
-                    Some('\\') => { chars.next(); result.push('\\'); }
-                    Some('\'') => { chars.next(); result.push('\''); }
-                    Some('"') => { chars.next(); result.push('"'); }
-                    Some('`') => { chars.next(); result.push('`'); }
-                    Some('$') => { chars.next(); result.push('$'); }
+                    Some('n') => {
+                        chars.next();
+                        result.push('\n');
+                    }
+                    Some('t') => {
+                        chars.next();
+                        result.push('\t');
+                    }
+                    Some('r') => {
+                        chars.next();
+                        result.push('\r');
+                    }
+                    Some('\\') => {
+                        chars.next();
+                        result.push('\\');
+                    }
+                    Some('\'') => {
+                        chars.next();
+                        result.push('\'');
+                    }
+                    Some('"') => {
+                        chars.next();
+                        result.push('"');
+                    }
+                    Some('`') => {
+                        chars.next();
+                        result.push('`');
+                    }
+                    Some('$') => {
+                        chars.next();
+                        result.push('$');
+                    }
                     _ => result.push(c),
                 }
             } else {
@@ -406,7 +429,12 @@ fn multi_occurrence_replacer(content: &str, find: &str) -> Vec<String> {
 
 /// Replace old_text with new_text in content, using a pipeline of increasingly
 /// fuzzy matching strategies. Returns the new content or an error message.
-fn replace(content: &str, old_text: &str, new_text: &str, replace_all: bool) -> Result<String, String> {
+fn replace(
+    content: &str,
+    old_text: &str,
+    new_text: &str,
+    replace_all: bool,
+) -> Result<String, String> {
     if old_text == new_text {
         return Err("oldString and newString must be different".to_string());
     }
@@ -483,10 +511,12 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
     for i in 1..=a_len {
         curr[0] = i;
         for j in 1..=b_len {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
-            curr[j] = (prev[j] + 1)
-                .min(curr[j - 1] + 1)
-                .min(prev[j - 1] + cost);
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -629,7 +659,12 @@ Parameters:
         let normalized_old = args.old_text.replace("\r\n", "\n");
 
         // Run the replace pipeline
-        let updated = match replace(&normalized_content, &normalized_old, &args.new_text, args.replace_all) {
+        let updated = match replace(
+            &normalized_content,
+            &normalized_old,
+            &args.new_text,
+            args.replace_all,
+        ) {
             Ok(result) => result,
             Err(err_msg) => return Ok(error_result(err_msg)),
         };
@@ -713,10 +748,7 @@ async fn track_edit(context: &TaskContext, path: &Path) -> ToolExecutorResult<()
         ))
         .await?;
 
-    context
-        .file_tracker()
-        .record_file_mtime(path)
-        .await?;
+    context.file_tracker().record_file_mtime(path).await?;
 
     Ok(())
 }

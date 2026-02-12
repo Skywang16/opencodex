@@ -227,7 +227,7 @@ async fn exa_mcp_search(
         let error_text = response.text().await.unwrap_or_default();
         return Err(ToolExecutorError::ExecutionFailed {
             tool_name: "web_search".into(),
-            error: format!("HTTP {}: {}", status, error_text),
+            error: format!("HTTP {status}: {error_text}"),
         });
     }
 

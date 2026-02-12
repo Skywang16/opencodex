@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use tauri::ipc::Channel;
 
-use crate::agent::common::truncate_chars;
 use crate::agent::agents::AgentConfigLoader;
 use crate::agent::command_system::CommandConfigLoader;
+use crate::agent::common::truncate_chars;
 use crate::agent::config::TaskExecutionConfig;
 use crate::agent::core::context::TaskContext;
 use crate::agent::core::executor::{ExecuteTaskParams, TaskExecutor};

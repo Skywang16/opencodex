@@ -12,7 +12,7 @@ use tracing::error;
 
 /// Extract the process name from a command line string.
 fn extract_process_name(command_line: &str) -> String {
-    let first_token = command_line.trim().split_whitespace().next().unwrap_or("");
+    let first_token = command_line.split_whitespace().next().unwrap_or("");
     first_token
         .rsplit(['/', '\\'])
         .next()
@@ -112,7 +112,7 @@ pub async fn storage_get_terminals_state(
                 .and_then(|s| s.current_command.as_ref())
                 .filter(|cmd| !cmd.is_finished())
                 .and_then(|cmd| cmd.command_line.as_deref())
-                .map(|line| extract_process_name(line));
+                .map(extract_process_name);
 
             let display_title =
                 compute_display_title(&cwd, &shell, window_title, current_process.as_deref());
@@ -162,7 +162,7 @@ pub async fn storage_get_terminal_state(
         .and_then(|s| s.current_command.as_ref())
         .filter(|cmd| !cmd.is_finished())
         .and_then(|cmd| cmd.command_line.as_deref())
-        .map(|line| extract_process_name(line));
+        .map(extract_process_name);
 
     let display_title =
         compute_display_title(&cwd, &shell, window_title, current_process.as_deref());

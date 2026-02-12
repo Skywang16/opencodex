@@ -328,7 +328,10 @@ pub async fn workspace_set_selected_run_action(
     database: State<'_, Arc<DatabaseManager>>,
 ) -> TauriApiResult<EmptyData> {
     let service = WorkspaceService::new(Arc::clone(&database));
-    match service.set_selected_run_action(&path, action_id.as_deref()).await {
+    match service
+        .set_selected_run_action(&path, action_id.as_deref())
+        .await
+    {
         Ok(()) => Ok(api_success!()),
         Err(e) => {
             tracing::error!("workspace_set_selected_run_action failed: {}", e);

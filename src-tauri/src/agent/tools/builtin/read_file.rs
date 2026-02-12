@@ -755,7 +755,7 @@ Examples:
 
         // Process based on mode
         let mode = args.mode.as_deref().unwrap_or("full");
-        let result = match mode {
+        match mode {
             "outline" => Ok(self.read_outline(&path, &raw_content)),
             "symbol" => {
                 if let Some(symbol_name) = args.symbol {
@@ -768,8 +768,7 @@ Examples:
             }
             "full" => Ok(self.read_full(&raw_content, args.offset, args.limit)),
             _ => Ok(self.read_full(&raw_content, args.offset, args.limit)),
-        };
-        result
+        }
     }
 }
 

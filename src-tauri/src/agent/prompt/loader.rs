@@ -113,7 +113,7 @@ impl PromptLoader {
 
     /// Load prompt, prefer workspace override, otherwise use builtin
     pub async fn load(&mut self, category: &str, name: &str) -> Option<String> {
-        let cache_key = format!("{}/{}", category, name);
+        let cache_key = format!("{category}/{name}");
 
         // Check cache
         if let Some(cached) = self.cache.get(&cache_key) {
@@ -126,7 +126,7 @@ impl PromptLoader {
                 .join(".opencodex")
                 .join("prompts")
                 .join(category)
-                .join(format!("{}.md", name));
+                .join(format!("{name}.md"));
 
             if let Ok(content) = fs::read_to_string(&workspace_file).await {
                 self.cache.insert(cache_key, content.clone());

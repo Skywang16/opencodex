@@ -142,7 +142,7 @@ fn truncate_middle_chars(s: &str, max_chars: usize) -> TruncatedResult {
 
     if max_chars == 0 {
         return TruncatedResult::truncated(
-            format!("[{} chars truncated]", char_count),
+            format!("[{char_count} chars truncated]"),
             TruncationInfo {
                 chars: char_count,
                 lines: s.lines().count(),
@@ -169,10 +169,10 @@ fn truncate_middle_chars(s: &str, max_chars: usize) -> TruncatedResult {
         .collect();
 
     let removed = char_count.saturating_sub(max_chars);
-    let marker = format!("\n\n... [{} chars truncated] ...\n\n", removed);
+    let marker = format!("\n\n... [{removed} chars truncated] ...\n\n");
 
     TruncatedResult::truncated(
-        format!("{}{}{}", head, marker, tail),
+        format!("{head}{marker}{tail}"),
         TruncationInfo {
             chars: char_count,
             lines: s.lines().count(),
@@ -191,7 +191,7 @@ fn truncate_middle_tokens(s: &str, max_tokens: usize) -> TruncatedResult {
 
     // Adjust the info to show tokens instead of chars
     if let Some(mut info) = result.info {
-        info.removed_count = info.removed_count / APPROX_BYTES_PER_TOKEN;
+        info.removed_count /= APPROX_BYTES_PER_TOKEN;
         info.removed_unit = "tokens".to_string();
         TruncatedResult::truncated(
             result.text.replace("chars truncated", "tokens truncated"),
@@ -214,7 +214,7 @@ fn truncate_middle_lines(s: &str, head_lines: usize, tail_lines: usize) -> Trunc
 
     if head_lines == 0 && tail_lines == 0 {
         return TruncatedResult::truncated(
-            format!("[{} lines truncated]", total),
+            format!("[{total} lines truncated]"),
             TruncationInfo {
                 chars: char_count,
                 lines: total,
@@ -230,11 +230,10 @@ fn truncate_middle_lines(s: &str, head_lines: usize, tail_lines: usize) -> Trunc
         let head_part = lines[..head_lines].join("\n");
         let removed = total.saturating_sub(head_lines);
         let marker = format!(
-            "\n\n...{} lines truncated...\n\nOutput exceeded {} lines. Use Grep to search or Read with offset/limit to view specific sections.",
-            removed, head_lines
+            "\n\n...{removed} lines truncated...\n\nOutput exceeded {head_lines} lines. Use Grep to search or Read with offset/limit to view specific sections."
         );
         return TruncatedResult::truncated(
-            format!("{}{}", head_part, marker),
+            format!("{head_part}{marker}"),
             TruncationInfo {
                 chars: char_count,
                 lines: total,
@@ -251,12 +250,11 @@ fn truncate_middle_lines(s: &str, head_lines: usize, tail_lines: usize) -> Trunc
     let removed = total.saturating_sub(head_lines).saturating_sub(tail_lines);
 
     let marker = format!(
-        "\n\n... [{} lines truncated, total {} lines] ...\n\n",
-        removed, total
+        "\n\n... [{removed} lines truncated, total {total} lines] ...\n\n"
     );
 
     TruncatedResult::truncated(
-        format!("{}{}{}", head_part, marker, tail_part),
+        format!("{head_part}{marker}{tail_part}"),
         TruncationInfo {
             chars: char_count,
             lines: total,
@@ -305,16 +303,16 @@ impl ExecOutputFormatter {
         let mut sections = Vec::new();
 
         if let Some(code) = self.exit_code {
-            sections.push(format!("Exit code: {}", code));
+            sections.push(format!("Exit code: {code}"));
         }
 
         if let Some(secs) = self.duration_secs {
-            sections.push(format!("Wall time: {:.1} seconds", secs));
+            sections.push(format!("Wall time: {secs:.1} seconds"));
         }
 
         if self.was_truncated {
             if let Some(lines) = self.original_lines {
-                sections.push(format!("Total output lines: {}", lines));
+                sections.push(format!("Total output lines: {lines}"));
             }
         }
 
@@ -370,14 +368,14 @@ mod tests {
     #[test]
     fn test_truncate_lines_under_limit() {
         let text = "line1\nline2\nline3";
-        let result = truncate_middle(&text, TruncationPolicy::Lines { head: 5, tail: 5 });
+        let result = truncate_middle(text, TruncationPolicy::Lines { head: 5, tail: 5 });
         assert!(!result.was_truncated);
         assert_eq!(result.text, text);
     }
 
     #[test]
     fn test_truncate_lines_over_limit() {
-        let lines: Vec<String> = (1..=100).map(|i| format!("line {}", i)).collect();
+        let lines: Vec<String> = (1..=100).map(|i| format!("line {i}")).collect();
         let text = lines.join("\n");
         let result = truncate_middle(&text, TruncationPolicy::Lines { head: 5, tail: 10 });
 
@@ -410,7 +408,7 @@ mod tests {
 
     #[test]
     fn test_exec_formatter_with_truncation() {
-        let lines: Vec<String> = (1..=1000).map(|i| format!("log line {}", i)).collect();
+        let lines: Vec<String> = (1..=1000).map(|i| format!("log line {i}")).collect();
         let output = lines.join("\n");
 
         let formatter = ExecOutputFormatter::new(&output, Some(0), Some(5.0))

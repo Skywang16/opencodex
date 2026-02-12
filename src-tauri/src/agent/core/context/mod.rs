@@ -635,7 +635,7 @@ impl TaskContext {
                 .map(|r| format!("<system-reminder>\n{}\n</system-reminder>", r.trim()))
                 .collect::<Vec<_>>()
                 .join("\n\n");
-            format!("{}\n\n{}", reminder_block, text)
+            format!("{reminder_block}\n\n{text}")
         };
 
         self.add_user_message_with_images(final_text, images).await

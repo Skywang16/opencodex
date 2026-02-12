@@ -130,7 +130,7 @@ async fn execute_parallel(
     // Execute in batches, at most MAX_CONCURRENCY per batch
     let mut results = Vec::with_capacity(calls.len());
 
-    for (_chunk_idx, chunk) in calls.chunks(MAX_CONCURRENCY).enumerate() {
+    for chunk in calls.chunks(MAX_CONCURRENCY) {
         let futures = chunk.iter().map(|call| async {
             let result = registry
                 .execute_tool(&call.name, context, call.params.clone())

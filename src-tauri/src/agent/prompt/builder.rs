@@ -101,8 +101,7 @@ impl PromptBuilder {
                 sections.push(trimmed.to_string());
             } else {
                 sections.push(format!(
-                    "<system-reminder>\n{}\n</system-reminder>",
-                    trimmed
+                    "<system-reminder>\n{trimmed}\n</system-reminder>"
                 ));
             }
         }
@@ -122,12 +121,11 @@ impl PromptBuilder {
         let date = Utc::now().format("%Y-%m-%d").to_string();
 
         let mut env = format!(
-            "Here is useful information about the environment you are running in:\n\n<env>\nWorking directory: {}\nPlatform: {}\nToday's date: {}",
-            wd, platform, date
+            "Here is useful information about the environment you are running in:\n\n<env>\nWorking directory: {wd}\nPlatform: {platform}\nToday's date: {date}"
         );
 
         if let Some(git) = git_info {
-            env.push_str("\n");
+            env.push('\n');
             env.push_str(git);
         }
 
@@ -157,7 +155,7 @@ impl PromptBuilder {
     pub fn render_template(template: &str, vars: &HashMap<String, String>) -> String {
         let mut result = template.to_string();
         for (key, value) in vars {
-            result = result.replace(&format!("{{{{{}}}}}", key), value);
+            result = result.replace(&format!("{{{{{key}}}}}"), value);
         }
         result
     }

@@ -136,7 +136,7 @@ impl PromptOrchestrator {
         {
             if output.status.success() {
                 let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                info_parts.push(format!("Git branch: {}", branch));
+                info_parts.push(format!("Git branch: {branch}"));
             }
         }
 
@@ -150,7 +150,7 @@ impl PromptOrchestrator {
                 let status = String::from_utf8_lossy(&output.stdout);
                 let changed_count = status.lines().count();
                 if changed_count > 0 {
-                    info_parts.push(format!("Git status: {} file(s) changed", changed_count));
+                    info_parts.push(format!("Git status: {changed_count} file(s) changed"));
                 } else {
                     info_parts.push("Git status: clean".to_string());
                 }

@@ -217,22 +217,22 @@ impl AIService {
         } else {
             // All other providers use OpenAI-compatible API
             let (url, headers) = if model.auth_type == AuthType::OAuth {
-                let oauth = model.oauth_config.as_ref().ok_or_else(|| {
-                    AIServiceError::Configuration {
-                        message: "OAuth configuration is required".to_string(),
-                    }
-                })?;
+                let oauth =
+                    model
+                        .oauth_config
+                        .as_ref()
+                        .ok_or_else(|| AIServiceError::Configuration {
+                            message: "OAuth configuration is required".to_string(),
+                        })?;
                 let access_token = get_auth_token(model)?;
 
                 // OpenAI Codex uses ChatGPT backend API
                 let mut headers =
-                    header_map(&[("authorization", format!("Bearer {}", access_token))])?;
+                    header_map(&[("authorization", format!("Bearer {access_token}"))])?;
 
                 // Add ChatGPT-Account-Id (if available)
                 if let Some(metadata) = &oauth.metadata {
-                    if let Some(account_id) =
-                        metadata.get("account_id").and_then(|v| v.as_str())
-                    {
+                    if let Some(account_id) = metadata.get("account_id").and_then(|v| v.as_str()) {
                         headers.insert(
                             HeaderName::from_static("chatgpt-account-id"),
                             HeaderValue::from_str(account_id).map_err(|err| {
@@ -260,7 +260,7 @@ impl AIService {
                         })?;
                 let api_key = get_auth_token(model)?;
                 let url = join_url(api_url.trim(), "chat/completions");
-                let headers = header_map(&[("authorization", format!("Bearer {}", api_key))])?;
+                let headers = header_map(&[("authorization", format!("Bearer {api_key}"))])?;
                 (url, headers)
             };
 

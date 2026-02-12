@@ -561,8 +561,7 @@ impl ReactOrchestrator {
                         }
 
                         return Err(TaskExecutorError::InternalError(format!(
-                            "LLM output contained fabricated tool results (count={})",
-                            fabricated_tool_output_count
+                            "LLM output contained fabricated tool results (count={fabricated_tool_output_count})"
                         )));
                     }
                 }
@@ -594,7 +593,10 @@ impl ReactOrchestrator {
                         // Tool use without pending calls - shouldn't happen, but treat as empty
                         IterationOutcome::Empty
                     }
-                    Some(StopReason::EndTurn) | Some(StopReason::MaxTokens) | Some(StopReason::StopSequence) | None => {
+                    Some(StopReason::EndTurn)
+                    | Some(StopReason::MaxTokens)
+                    | Some(StopReason::StopSequence)
+                    | None => {
                         // Task complete: LLM ended turn or reached limits
                         if final_text.as_deref().is_some_and(|s| !s.trim().is_empty())
                             || final_thinking.is_some()
@@ -659,8 +661,7 @@ impl ReactOrchestrator {
                         let _ = context
                             .set_system_prompt_overlay(Some(
                                 crate::llm::anthropic_types::SystemPrompt::Text(format!(
-                                    "<system-reminder type=\"duplicate-tools\">\n{}\n</system-reminder>",
-                                    warning
+                                    "<system-reminder type=\"duplicate-tools\">\n{warning}\n</system-reminder>"
                                 )),
                             ))
                             .await;

@@ -195,7 +195,10 @@ async fn load_from_disk() -> Option<HashMap<String, ProviderDef>> {
         Ok(content) => match serde_json::from_str::<CachedData>(&content) {
             Ok(cached) => {
                 if is_cache_valid(cached.timestamp) {
-                    debug!("Loaded models from cache (age: {}s)", chrono::Utc::now().timestamp() - cached.timestamp);
+                    debug!(
+                        "Loaded models from cache (age: {}s)",
+                        chrono::Utc::now().timestamp() - cached.timestamp
+                    );
                     Some(cached.providers)
                 } else {
                     debug!("Cache expired, will refresh");
@@ -217,7 +220,7 @@ async fn load_from_disk() -> Option<HashMap<String, ProviderDef>> {
 /// Save data to disk cache
 async fn save_to_disk(providers: &HashMap<String, ProviderDef>) {
     let path = get_cache_path();
-    
+
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent).await;
@@ -245,18 +248,18 @@ async fn save_to_disk(providers: &HashMap<String, ProviderDef>) {
 /// Fetch models from models.dev API
 async fn fetch_from_api() -> Result<HashMap<String, ProviderDef>, String> {
     info!("Fetching models from {}", MODELS_DEV_URL);
-    
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
     let response = client
         .get(MODELS_DEV_URL)
         .header("User-Agent", "OpenCodex/0.2.0")
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch models: {}", e))?;
+        .map_err(|e| format!("Failed to fetch models: {e}"))?;
 
     if !response.status().is_success() {
         return Err(format!("API returned status: {}", response.status()));
@@ -265,10 +268,10 @@ async fn fetch_from_api() -> Result<HashMap<String, ProviderDef>, String> {
     let text = response
         .text()
         .await
-        .map_err(|e| format!("Failed to read response: {}", e))?;
+        .map_err(|e| format!("Failed to read response: {e}"))?;
 
     let providers: HashMap<String, ProviderDef> =
-        serde_json::from_str(&text).map_err(|e| format!("Failed to parse JSON: {}", e))?;
+        serde_json::from_str(&text).map_err(|e| format!("Failed to parse JSON: {e}"))?;
 
     info!("Fetched {} providers from models.dev", providers.len());
     Ok(providers)
@@ -278,7 +281,10 @@ async fn fetch_from_api() -> Result<HashMap<String, ProviderDef>, String> {
 pub async fn get_providers() -> HashMap<String, ProviderDef> {
     // Check memory cache first
     {
-        let cache = MODELS_CACHE.read().unwrap();
+        let cache = MODELS_CACHE.read().unwrap_or_else(|e| {
+            warn!("Models cache poisoned, recovering: {}", e);
+            e.into_inner()
+        });
         if let Some(ref providers) = *cache {
             return providers.clone();
         }
@@ -286,7 +292,10 @@ pub async fn get_providers() -> HashMap<String, ProviderDef> {
 
     // Try disk cache
     if let Some(providers) = load_from_disk().await {
-        let mut cache = MODELS_CACHE.write().unwrap();
+        let mut cache = MODELS_CACHE.write().unwrap_or_else(|e| {
+            warn!("Models cache poisoned, recovering: {}", e);
+            e.into_inner()
+        });
         *cache = Some(providers.clone());
         return providers;
     }
@@ -296,9 +305,12 @@ pub async fn get_providers() -> HashMap<String, ProviderDef> {
         Ok(providers) => {
             // Save to disk cache
             save_to_disk(&providers).await;
-            
+
             // Update memory cache
-            let mut cache = MODELS_CACHE.write().unwrap();
+            let mut cache = MODELS_CACHE.write().unwrap_or_else(|e| {
+                warn!("Models cache poisoned, recovering: {}", e);
+                e.into_inner()
+            });
             *cache = Some(providers.clone());
             providers
         }
@@ -314,10 +326,13 @@ pub async fn get_providers() -> HashMap<String, ProviderDef> {
 pub async fn refresh() -> Result<(), String> {
     let providers = fetch_from_api().await?;
     save_to_disk(&providers).await;
-    
-    let mut cache = MODELS_CACHE.write().unwrap();
+
+    let mut cache = MODELS_CACHE.write().unwrap_or_else(|e| {
+        warn!("Models cache poisoned, recovering: {}", e);
+        e.into_inner()
+    });
     *cache = Some(providers);
-    
+
     Ok(())
 }
 
@@ -338,10 +353,10 @@ pub fn filter_common_providers(providers: &HashMap<String, ProviderDef>) -> Vec<
     const COMMON_PROVIDERS: &[&str] = &[
         "anthropic",
         "openai",
-        "google",        // Gemini
+        "google", // Gemini
         "deepseek",
-        "xai",           // Grok
-        "alibaba",       // Qwen
+        "xai",     // Grok
+        "alibaba", // Qwen
         "openrouter",
         "ollama-cloud",
     ];
@@ -392,15 +407,11 @@ pub struct ProviderInfo {
 
 impl From<&ProviderDef> for ProviderInfo {
     fn from(provider: &ProviderDef) -> Self {
-        let mut models: Vec<ModelInfo> = provider
-            .models
-            .values()
-            .map(ModelInfo::from)
-            .collect();
-        
+        let mut models: Vec<ModelInfo> = provider.models.values().map(ModelInfo::from).collect();
+
         // Sort by name
         models.sort_by(|a, b| a.name.cmp(&b.name));
-        
+
         Self {
             id: provider.id.clone(),
             name: provider.name.clone(),
@@ -473,10 +484,10 @@ mod tests {
     #[test]
     fn test_cache_validity() {
         let now = chrono::Utc::now().timestamp();
-        
+
         // Fresh cache should be valid
         assert!(is_cache_valid(now - 3600)); // 1 hour ago
-        
+
         // Old cache should be invalid
         assert!(!is_cache_valid(now - 100000)); // ~28 hours ago
     }

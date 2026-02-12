@@ -263,24 +263,27 @@ impl DatabaseManager {
                 DatabaseError::internal(format!("Failed to inspect messages schema: {err}"))
             })?;
 
-        let mut has_is_internal = false;
-        for row in rows {
-            let name: String = row.try_get("name").unwrap_or_default();
-            if name == "is_internal" {
-                has_is_internal = true;
-                break;
-            }
-        }
+        let has_is_internal = rows.iter().any(|row| {
+            row.try_get::<String, _>("name").unwrap_or_default() == "is_internal"
+        });
 
         if !has_is_internal {
-            self.pool
-                .execute("ALTER TABLE messages ADD COLUMN is_internal INTEGER NOT NULL DEFAULT 0")
+            let mut tx = self.pool.begin().await.map_err(|err| {
+                DatabaseError::internal(format!("Failed to begin transaction: {err}"))
+            })?;
+
+            sqlx::query("ALTER TABLE messages ADD COLUMN is_internal INTEGER NOT NULL DEFAULT 0")
+                .execute(&mut *tx)
                 .await
                 .map_err(|err| {
                     DatabaseError::internal(format!(
                         "Failed to migrate messages schema (add is_internal): {err}"
                     ))
                 })?;
+
+            tx.commit().await.map_err(|err| {
+                DatabaseError::internal(format!("Failed to commit transaction: {err}"))
+            })?;
         }
 
         Ok(())
@@ -294,19 +297,27 @@ impl DatabaseManager {
                 DatabaseError::internal(format!("Failed to inspect workspaces schema: {err}"))
             })?;
 
-        let has_selected_run_action_id = rows
-            .iter()
-            .any(|row| row.try_get::<String, _>("name").unwrap_or_default() == "selected_run_action_id");
+        let has_selected_run_action_id = rows.iter().any(|row| {
+            row.try_get::<String, _>("name").unwrap_or_default() == "selected_run_action_id"
+        });
 
         if !has_selected_run_action_id {
-            self.pool
-                .execute("ALTER TABLE workspaces ADD COLUMN selected_run_action_id TEXT")
+            let mut tx = self.pool.begin().await.map_err(|err| {
+                DatabaseError::internal(format!("Failed to begin transaction: {err}"))
+            })?;
+
+            sqlx::query("ALTER TABLE workspaces ADD COLUMN selected_run_action_id TEXT")
+                .execute(&mut *tx)
                 .await
                 .map_err(|err| {
                     DatabaseError::internal(format!(
                         "Failed to migrate workspaces schema (add selected_run_action_id): {err}"
                     ))
                 })?;
+
+            tx.commit().await.map_err(|err| {
+                DatabaseError::internal(format!("Failed to commit transaction: {err}"))
+            })?;
         }
 
         Ok(())

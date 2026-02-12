@@ -115,7 +115,7 @@ impl AgentConfigLoader {
             .filter_map(|(name, content)| {
                 Self::parse_agent_content(content, None, true)
                     .map_err(|e| {
-                        eprintln!("Failed to parse builtin agent {}: {}", name, e);
+                        eprintln!("Failed to parse builtin agent {name}: {e}");
                         e
                     })
                     .ok()

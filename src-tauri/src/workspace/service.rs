@@ -523,7 +523,10 @@ fn build_run_action(row: sqlx::sqlite::SqliteRow) -> RunActionRecord {
 }
 
 impl WorkspaceService {
-    pub async fn list_run_actions(&self, workspace_path: &str) -> WorkspaceResult<Vec<RunActionRecord>> {
+    pub async fn list_run_actions(
+        &self,
+        workspace_path: &str,
+    ) -> WorkspaceResult<Vec<RunActionRecord>> {
         let normalized = self.normalize_path(workspace_path).await?;
         let rows = sqlx::query(
             "SELECT id, workspace_path, name, command, sort_order
@@ -547,12 +550,11 @@ impl WorkspaceService {
         let normalized = self.normalize_path(workspace_path).await?;
         let id = uuid::Uuid::new_v4().to_string();
 
-        let max_sort: Option<i64> = sqlx::query_scalar(
-            "SELECT MAX(sort_order) FROM run_actions WHERE workspace_path = ?",
-        )
-        .bind(&normalized)
-        .fetch_one(self.pool())
-        .await?;
+        let max_sort: Option<i64> =
+            sqlx::query_scalar("SELECT MAX(sort_order) FROM run_actions WHERE workspace_path = ?")
+                .bind(&normalized)
+                .fetch_one(self.pool())
+                .await?;
         let sort_order = max_sort.unwrap_or(-1) + 1;
 
         sqlx::query(
@@ -582,17 +584,18 @@ impl WorkspaceService {
         name: &str,
         command: &str,
     ) -> WorkspaceResult<()> {
-        let result = sqlx::query(
-            "UPDATE run_actions SET name = ?, command = ? WHERE id = ?",
-        )
-        .bind(name)
-        .bind(command)
-        .bind(id)
-        .execute(self.pool())
-        .await?;
+        let result = sqlx::query("UPDATE run_actions SET name = ?, command = ? WHERE id = ?")
+            .bind(name)
+            .bind(command)
+            .bind(id)
+            .execute(self.pool())
+            .await?;
 
         if result.rows_affected() == 0 {
-            return Err(WorkspaceError::internal(format!("Run action not found: {}", id)));
+            return Err(WorkspaceError::internal(format!(
+                "Run action not found: {}",
+                id
+            )));
         }
         Ok(())
     }

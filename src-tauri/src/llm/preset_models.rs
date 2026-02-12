@@ -88,12 +88,26 @@ impl PresetModel {
 
     /// Create a reasoning model (with extended thinking)
     fn reasoning(id: &str, name: &str, max_tokens: Option<u32>, context_window: u32) -> Self {
-        Self::new(id, name, max_tokens, context_window, None, ModelCapabilities::full())
+        Self::new(
+            id,
+            name,
+            max_tokens,
+            context_window,
+            None,
+            ModelCapabilities::full(),
+        )
     }
 
     /// Create a standard model (no reasoning)
     fn standard(id: &str, name: &str, max_tokens: Option<u32>, context_window: u32) -> Self {
-        Self::new(id, name, max_tokens, context_window, None, ModelCapabilities::standard())
+        Self::new(
+            id,
+            name,
+            max_tokens,
+            context_window,
+            None,
+            ModelCapabilities::standard(),
+        )
     }
 }
 
@@ -162,11 +176,26 @@ pub static OPENAI_MODELS: Lazy<Vec<PresetModel>> = Lazy::new(|| {
     vec![
         // GPT-5 series - supports Reasoning
         PresetModel::reasoning("gpt-5", "GPT-5", Some(128000), 400_000),
-        PresetModel::reasoning("gpt-5-2025-08-07", "GPT-5 (2025-08-07)", Some(128000), 400_000),
+        PresetModel::reasoning(
+            "gpt-5-2025-08-07",
+            "GPT-5 (2025-08-07)",
+            Some(128000),
+            400_000,
+        ),
         PresetModel::reasoning("gpt-5-mini", "GPT-5 Mini", Some(128000), 400_000),
-        PresetModel::reasoning("gpt-5-mini-2025-08-07", "GPT-5 Mini (2025-08-07)", Some(128000), 400_000),
+        PresetModel::reasoning(
+            "gpt-5-mini-2025-08-07",
+            "GPT-5 Mini (2025-08-07)",
+            Some(128000),
+            400_000,
+        ),
         PresetModel::reasoning("gpt-5-nano", "GPT-5 Nano", Some(128000), 400_000),
-        PresetModel::reasoning("gpt-5-nano-2025-08-07", "GPT-5 Nano (2025-08-07)", Some(128000), 400_000),
+        PresetModel::reasoning(
+            "gpt-5-nano-2025-08-07",
+            "GPT-5 Nano (2025-08-07)",
+            Some(128000),
+            400_000,
+        ),
         // o-series - reasoning models
         PresetModel::reasoning("o3", "o3", Some(100_000), 200_000),
         PresetModel::reasoning("o3-mini", "o3 Mini", Some(100_000), 200_000),
@@ -273,12 +302,7 @@ pub static GEMINI_MODELS: Lazy<Vec<PresetModel>> = Lazy::new(|| {
             1_048_576,
         ),
         // Gemini 2.5 series - supports reasoning
-        PresetModel::reasoning(
-            "gemini-2.5-pro",
-            "Gemini 2.5 Pro",
-            Some(65_536),
-            1_048_576,
-        ),
+        PresetModel::reasoning("gemini-2.5-pro", "Gemini 2.5 Pro", Some(65_536), 1_048_576),
         PresetModel::reasoning(
             "gemini-2.5-flash",
             "Gemini 2.5 Flash",
@@ -315,12 +339,7 @@ pub static GEMINI_MODELS: Lazy<Vec<PresetModel>> = Lazy::new(|| {
             Some(8192),
             1_048_576,
         ),
-        PresetModel::standard(
-            "gemini-1.5-pro",
-            "Gemini 1.5 Pro",
-            Some(8192),
-            2_097_152,
-        ),
+        PresetModel::standard("gemini-1.5-pro", "Gemini 1.5 Pro", Some(8192), 2_097_152),
     ]
 });
 
@@ -347,14 +366,20 @@ mod tests {
             .iter()
             .find(|m| m.id.contains("claude-sonnet-4"))
             .expect("Should have Claude Sonnet 4");
-        assert!(claude_4.capabilities.reasoning, "Claude 4 should support reasoning");
-        
+        assert!(
+            claude_4.capabilities.reasoning,
+            "Claude 4 should support reasoning"
+        );
+
         // Claude 3.5 should not support reasoning
         let claude_35 = ANTHROPIC_MODELS
             .iter()
             .find(|m| m.id.contains("claude-3-5-sonnet"))
             .expect("Should have Claude 3.5 Sonnet");
-        assert!(!claude_35.capabilities.reasoning, "Claude 3.5 should not support reasoning");
+        assert!(
+            !claude_35.capabilities.reasoning,
+            "Claude 3.5 should not support reasoning"
+        );
     }
 
     #[test]
@@ -376,21 +401,27 @@ mod tests {
             .iter()
             .find(|m| m.id == "gpt-5")
             .expect("Should have GPT-5");
-        assert!(gpt5.capabilities.reasoning, "GPT-5 should support reasoning");
-        
+        assert!(
+            gpt5.capabilities.reasoning,
+            "GPT-5 should support reasoning"
+        );
+
         // o3 should support reasoning
         let o3 = OPENAI_MODELS
             .iter()
             .find(|m| m.id == "o3")
             .expect("Should have o3");
         assert!(o3.capabilities.reasoning, "o3 should support reasoning");
-        
+
         // GPT-4o should not support reasoning
         let gpt4o = OPENAI_MODELS
             .iter()
             .find(|m| m.id == "gpt-4o")
             .expect("Should have GPT-4o");
-        assert!(!gpt4o.capabilities.reasoning, "GPT-4o should not support reasoning");
+        assert!(
+            !gpt4o.capabilities.reasoning,
+            "GPT-4o should not support reasoning"
+        );
     }
 
     #[test]

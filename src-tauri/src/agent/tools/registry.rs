@@ -1468,12 +1468,18 @@ impl Default for ToolRegistry {
     }
 }
 
-impl ToolConfirmationManager {
-    pub fn new() -> Self {
+impl Default for ToolConfirmationManager {
+    fn default() -> Self {
         Self {
             pending_confirmations: DashMap::new(),
             confirmation_state: tokio::sync::Mutex::new(ConfirmationState::default()),
         }
+    }
+}
+
+impl ToolConfirmationManager {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn lookup_task_id(&self, request_id: &str) -> Option<String> {

@@ -17,6 +17,7 @@ pub struct OpenAiCodexProvider {
 }
 
 impl OpenAiCodexProvider {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -77,10 +78,10 @@ impl OAuthProvider for OpenAiCodexProvider {
             ("state", state),
         ];
 
-        let query = serde_urlencoded::to_string(&params)
+        let query = serde_urlencoded::to_string(params)
             .map_err(|e| OAuthError::Other(format!("Failed to encode query: {}", e)))?;
 
-        Ok(format!("{}?{}", AUTH_ENDPOINT, query))
+        Ok(format!("{AUTH_ENDPOINT}?{query}"))
     }
 
     async fn exchange_code_for_tokens(
@@ -172,7 +173,7 @@ impl OAuthProvider for OpenAiCodexProvider {
     ) -> OAuthResult<RequestBuilder> {
         // Add Bearer token
         if let Some(access_token) = &oauth_config.access_token {
-            request = request.header("Authorization", format!("Bearer {}", access_token));
+            request = request.header("Authorization", format!("Bearer {access_token}"));
         }
 
         // Add ChatGPT-Account-Id (for organization subscriptions)

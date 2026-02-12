@@ -212,8 +212,6 @@ impl AnthropicProvider {
 /// Anthropic recommended caching strategy:
 /// 1. Add caching to system prompt
 /// 2. Add caching to the last two user messages
-///
-
 pub fn apply_prompt_caching(mut request: CreateMessageRequest) -> CreateMessageRequest {
     // 1. Add cache control to system prompt
     if let Some(SystemPrompt::Text(text)) = request.system.take() {

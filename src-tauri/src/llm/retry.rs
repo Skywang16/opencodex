@@ -101,7 +101,7 @@ fn is_reqwest_retryable(e: &reqwest::Error) -> bool {
         || e.is_connect()
         || e.is_request()
         || e.is_body()
-        || e.status().is_some_and(|s| is_status_retryable(s))
+        || e.status().is_some_and(is_status_retryable)
 }
 
 fn is_status_retryable(status: reqwest::StatusCode) -> bool {

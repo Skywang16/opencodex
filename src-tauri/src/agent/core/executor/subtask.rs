@@ -81,8 +81,7 @@ pub async fn run_subtask(
         .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?
         .ok_or_else(|| {
             TaskExecutorError::StatePersistenceFailed(format!(
-                "child session {} not found",
-                child_session_id
+                "child session {child_session_id} not found"
             ))
         })?;
 

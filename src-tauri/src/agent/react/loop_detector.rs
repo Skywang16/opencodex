@@ -106,8 +106,7 @@ impl LoopDetector {
         let builder = PromptBuilder::new(None);
         let warning = builder.get_loop_warning(*count, &sig.name);
         Some(format!(
-            "<system-reminder type=\"loop-warning\">\n{}\n</system-reminder>",
-            warning
+            "<system-reminder type=\"loop-warning\">\n{warning}\n</system-reminder>"
         ))
     }
 }

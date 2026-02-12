@@ -166,7 +166,9 @@ Examples:
             if !matchers.is_empty() {
                 entries.retain(|entry| {
                     let clean = entry.trim_end_matches('/');
-                    !matchers.iter().any(|m| m.matches(clean) || m.matches(entry))
+                    !matchers
+                        .iter()
+                        .any(|m| m.matches(clean) || m.matches(entry))
                 });
             }
         }

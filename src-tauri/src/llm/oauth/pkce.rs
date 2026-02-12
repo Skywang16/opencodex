@@ -7,7 +7,7 @@ pub fn generate_pkce() -> OAuthResult<PkceCodes> {
     // Generate 32-byte random code_verifier
     let mut verifier_bytes = [0u8; 32];
     getrandom::getrandom(&mut verifier_bytes).map_err(|e| {
-        super::types::OAuthError::Other(format!("Failed to generate random bytes: {}", e))
+        super::types::OAuthError::Other(format!("Failed to generate random bytes: {e}"))
     })?;
 
     let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
@@ -28,7 +28,7 @@ pub fn generate_pkce() -> OAuthResult<PkceCodes> {
 pub fn generate_state() -> OAuthResult<String> {
     let mut state_bytes = [0u8; 32];
     getrandom::getrandom(&mut state_bytes).map_err(|e| {
-        super::types::OAuthError::Other(format!("Failed to generate random bytes: {}", e))
+        super::types::OAuthError::Other(format!("Failed to generate random bytes: {e}"))
     })?;
 
     Ok(URL_SAFE_NO_PAD.encode(state_bytes))

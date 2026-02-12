@@ -135,5 +135,7 @@ pub async fn llm_get_model_info(
     model_id: String,
 ) -> TauriApiResult<Option<super::models_dev::ModelInfo>> {
     let model = super::models_dev::get_model(&provider_id, &model_id).await;
-    Ok(api_success!(model.map(|m| super::models_dev::ModelInfo::from(&m))))
+    Ok(api_success!(
+        model.map(|m| super::models_dev::ModelInfo::from(&m))
+    ))
 }

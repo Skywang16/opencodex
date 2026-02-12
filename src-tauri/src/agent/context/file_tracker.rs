@@ -103,15 +103,13 @@ impl FileContextTracker {
         let normalized_path = self.normalized_path(record.path);
         let now = record.recorded_at;
 
-        let state = record
-            .state_override
-            .unwrap_or_else(|| match record.source {
-                FileRecordSource::ReadTool | FileRecordSource::AgentEdited => {
-                    FileRecordState::Active
-                }
-                FileRecordSource::UserEdited => FileRecordState::Stale,
-                FileRecordSource::FileMentioned => FileRecordState::Active,
-            });
+        let state = record.state_override.unwrap_or(match record.source {
+            FileRecordSource::ReadTool | FileRecordSource::AgentEdited => {
+                FileRecordState::Active
+            }
+            FileRecordSource::UserEdited => FileRecordState::Stale,
+            FileRecordSource::FileMentioned => FileRecordState::Active,
+        });
 
         match state {
             FileRecordState::Active => {
@@ -223,8 +221,7 @@ impl FileContextTracker {
         let mtimes = self.file_mtimes.read().await;
         let recorded_mtime = mtimes.get(&normalized).ok_or_else(|| {
             crate::agent::error::AgentError::Internal(format!(
-                "File '{}' has not been read in this session. Please use read_file first.",
-                normalized
+                "File '{normalized}' has not been read in this session. Please use read_file first."
             ))
         })?;
 
@@ -232,8 +229,7 @@ impl FileContextTracker {
             if let Ok(current_mtime) = metadata.modified() {
                 if current_mtime > *recorded_mtime {
                     return Err(crate::agent::error::AgentError::Internal(format!(
-                        "File '{}' has been modified since it was last read. Please read the file again before editing.",
-                        normalized
+                        "File '{normalized}' has been modified since it was last read. Please read the file again before editing."
                     )));
                 }
             }

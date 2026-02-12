@@ -111,7 +111,7 @@ pub fn parse_tool_filter(frontmatter: &str) -> AgentResult<ToolFilter> {
 ///      - List
 ///    ```
 fn parse_tools_field(frontmatter: &str, field_name: &str) -> AgentResult<Option<Vec<String>>> {
-    let field_prefix = format!("{}:", field_name);
+    let field_prefix = format!("{field_name}:");
     let mut in_list = false;
     let mut tools: Vec<String> = Vec::new();
 
