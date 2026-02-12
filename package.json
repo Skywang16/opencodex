@@ -1,7 +1,7 @@
 {
   "name": "opencodex",
   "private": false,
-  "version": "0.2.0",
+  "version": "0.1.0",
   "description": "OpenCodex - The open source AI coding agent with a beautiful desktop interface",
   "type": "module",
   "engines": {
