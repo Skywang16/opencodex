@@ -41,6 +41,9 @@ pub enum McpError {
 
     #[error("Workspace root is not absolute: {0}")]
     WorkspaceNotAbsolute(PathBuf),
+
+    #[error("Unsupported transport type (only stdio is supported)")]
+    UnsupportedTransport,
 }
 
 pub type McpResult<T> = Result<T, McpError>;

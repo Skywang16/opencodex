@@ -37,7 +37,13 @@
     useCustomModel: false,
     oauthProvider: '' as string,
     oauthConfig: undefined as OAuthConfig | undefined,
-    options: { maxContextTokens: 128000, temperature: 0.5, timeout: 300000, maxTokens: -1, enableDeepThinking: false },
+    options: {
+      maxContextTokens: 128000,
+      temperature: 0.5,
+      timeoutSeconds: 300,
+      maxTokens: -1,
+      enableDeepThinking: false,
+    },
   })
 
   const availableModels = computed<ModelOption[]>(() => {
@@ -99,7 +105,7 @@
     formData.options = {
       maxContextTokens: 128000,
       temperature: 0.7,
-      timeout: 300000,
+      timeoutSeconds: 300,
       maxTokens: -1,
       enableDeepThinking: false,
     }
@@ -135,7 +141,7 @@
     formData.options = {
       maxContextTokens: model.options?.maxContextTokens ?? 128000,
       temperature: model.options?.temperature ?? 0.5,
-      timeout: model.options?.timeout ?? 300000,
+      timeoutSeconds: model.options?.timeoutSeconds ?? 300,
       maxTokens: model.options?.maxTokens ?? -1,
       enableDeepThinking: model.options?.enableDeepThinking ?? false,
     }

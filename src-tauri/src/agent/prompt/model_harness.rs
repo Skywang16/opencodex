@@ -1,8 +1,9 @@
 //! Model-specific prompt harness.
 //!
-//! Maps a `model_id` string to supplementary system-prompt instructions.
-//! Detection happens once via `ModelFamily::detect()`, then both `hints()` and
-//! `name()` are zero-cost lookups on the resulting enum.
+//! Maps a `model_id` string to a stable model-family identifier and the
+//! corresponding prompt-profile key under `prompts/models/*.md`.
+//! Detection happens once via `ModelFamily::detect()`, then both `name()` and
+//! `profile_key()` are zero-cost lookups on the resulting enum.
 
 /// Recognized model families.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,51 +57,29 @@ impl ModelFamily {
         }
     }
 
-    /// Model-family-specific prompt hints, or `None` if no special treatment.
-    pub fn hints(self) -> Option<&'static str> {
+    /// Prompt profile key under `prompts/models/{profile_key}.md`.
+    pub fn profile_key(self) -> &'static str {
         match self {
-            Self::OpenAICodex => Some(OPENAI_CODEX_HINTS),
-            Self::OpenAIOSeries => Some(OPENAI_O_SERIES_HINTS),
-            Self::DeepSeek => Some(DEEPSEEK_HINTS),
-            _ => None,
+            Self::OpenAICodex => "openai-codex",
+            Self::OpenAIOSeries => "openai-o-series",
+            Self::OpenAIGPT => "openai-gpt",
+            Self::AnthropicClaude => "anthropic-claude",
+            Self::GoogleGemini => "google-gemini",
+            Self::DeepSeek => "deepseek",
+            Self::Generic => "generic",
         }
     }
 }
 
 // ── Convenience free functions (thin wrappers) ───────────────────────────
 
-pub fn hints_for_model(model_id: &str) -> Option<&'static str> {
-    ModelFamily::detect(model_id).hints()
+pub fn profile_for_model(model_id: &str) -> &'static str {
+    ModelFamily::detect(model_id).profile_key()
 }
 
 pub fn model_family(model_id: &str) -> &'static str {
     ModelFamily::detect(model_id).name()
 }
-
-// ── Hint blocks ──────────────────────────────────────────────────────────
-
-const OPENAI_CODEX_HINTS: &str = "\
-## Model-Specific Notes (OpenAI Codex)
-
-- If a tool exists for an action, **always** prefer the tool over shell commands (e.g. `read_file` over `cat`, `grep` over shell `rg`).
-- Keep reasoning summaries to 1–2 sentences. Note new discoveries or tactic changes; avoid commenting on your own communication.
-- Do not communicate mid-turn intentions. Focus on producing code and tool calls; save explanations for the final message.
-- Unless the user explicitly asks for a plan, assume they want code changes. Go ahead and implement rather than proposing in a message.
-- Reasoning traces are critical for your performance. They will be preserved and forwarded across turns automatically.";
-
-const OPENAI_O_SERIES_HINTS: &str = "\
-## Model-Specific Notes (OpenAI o-series)
-
-- Your reasoning traces are preserved across turns. Use them to maintain continuity in long tasks.
-- If a tool exists for an action, prefer the tool over shell commands.
-- Be decisive: when the task is clear, implement directly instead of proposing.";
-
-const DEEPSEEK_HINTS: &str = "\
-## Model-Specific Notes (DeepSeek)
-
-- Use `reasoning_content` for extended thinking. It will be preserved across turns.
-- Prefer structured tool calls over shell commands for file operations.
-- When editing files, use the edit tool rather than writing inline Python scripts.";
 
 #[cfg(test)]
 mod tests {
@@ -129,12 +108,13 @@ mod tests {
     }
 
     #[test]
-    fn hints_only_for_special_families() {
-        assert!(ModelFamily::OpenAICodex.hints().is_some());
-        assert!(ModelFamily::OpenAIOSeries.hints().is_some());
-        assert!(ModelFamily::DeepSeek.hints().is_some());
-        assert!(ModelFamily::AnthropicClaude.hints().is_none());
-        assert!(ModelFamily::GoogleGemini.hints().is_none());
-        assert!(ModelFamily::Generic.hints().is_none());
+    fn all_families_have_profile_keys() {
+        assert_eq!(ModelFamily::OpenAICodex.profile_key(), "openai-codex");
+        assert_eq!(ModelFamily::OpenAIOSeries.profile_key(), "openai-o-series");
+        assert_eq!(ModelFamily::OpenAIGPT.profile_key(), "openai-gpt");
+        assert_eq!(ModelFamily::AnthropicClaude.profile_key(), "anthropic-claude");
+        assert_eq!(ModelFamily::GoogleGemini.profile_key(), "google-gemini");
+        assert_eq!(ModelFamily::DeepSeek.profile_key(), "deepseek");
+        assert_eq!(ModelFamily::Generic.profile_key(), "generic");
     }
 }

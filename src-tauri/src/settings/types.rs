@@ -11,16 +11,34 @@ pub struct PermissionRules {
     pub ask: Vec<String>,
 }
 
-/// Standard MCP server configuration (stdio transport).
+/// MCP server configuration supporting multiple transport types.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpServerConfig {
-    pub command: String,
-    #[serde(default)]
-    pub args: Vec<String>,
-    #[serde(default)]
-    pub env: HashMap<String, String>,
-    #[serde(default)]
-    pub disabled: bool,
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum McpServerConfig {
+    Stdio {
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        env: HashMap<String, String>,
+        #[serde(default)]
+        disabled: bool,
+    },
+    Sse {
+        url: String,
+        #[serde(default)]
+        headers: HashMap<String, String>,
+        #[serde(default)]
+        disabled: bool,
+    },
+    #[serde(rename = "streamable_http")]
+    StreamableHttp {
+        url: String,
+        #[serde(default)]
+        headers: HashMap<String, String>,
+        #[serde(default)]
+        disabled: bool,
+    },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -181,5 +199,36 @@ fn apply_agent_patch(target: &mut AgentConfig, patch: &AgentConfigPatch) {
     }
     if let Some(v) = patch.auto_summary_threshold {
         target.auto_summary_threshold = v;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mcp_config_stdio_serde() {
+        let json = r#"{"type":"stdio","command":"npx","args":["-y","test"],"disabled":false}"#;
+        let config: McpServerConfig = serde_json::from_str(json).unwrap();
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(serialized.contains(r#""type":"stdio""#));
+        assert!(serialized.contains(r#""command":"npx""#));
+    }
+
+    #[test]
+    fn test_mcp_config_sse_serde() {
+        let json = r#"{"type":"sse","url":"https://example.com","disabled":false}"#;
+        let config: McpServerConfig = serde_json::from_str(json).unwrap();
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(serialized.contains(r#""type":"sse""#));
+        assert!(serialized.contains(r#""url":"https://example.com""#));
+    }
+
+    #[test]
+    fn test_mcp_config_streamable_http_serde() {
+        let json = r#"{"type":"streamable_http","url":"https://example.com"}"#;
+        let config: McpServerConfig = serde_json::from_str(json).unwrap();
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(serialized.contains(r#""type":"streamable_http""#));
     }
 }

@@ -210,6 +210,7 @@ pub fn register_all_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> t
         crate::vector_db::commands::vector_build_index_status,
         crate::vector_db::commands::vector_build_index_subscribe,
         crate::vector_db::commands::vector_build_index_cancel,
+        crate::vector_db::commands::vector_reload_embedding_config,
         // Checkpoint system commands
         crate::checkpoint::commands::checkpoint_list,
         crate::checkpoint::commands::checkpoint_rollback,

@@ -80,22 +80,24 @@ pub async fn ai_models_test_connection(
     config: AIModelConfig,
     state: State<'_, AIManagerState>,
 ) -> TauriApiResult<EmptyData> {
-    if config
-        .api_url
-        .as_ref()
-        .map_or(true, |url| url.trim().is_empty())
-    {
-        return Ok(api_error!("ai.api_url_empty"));
-    }
-    if config
-        .api_key
-        .as_ref()
-        .map_or(true, |key| key.trim().is_empty())
-    {
-        return Ok(api_error!("ai.api_key_empty"));
-    }
     if config.model.trim().is_empty() {
         return Ok(api_error!("ai.model_name_empty"));
+    }
+    if config.auth_type == crate::storage::repositories::AuthType::ApiKey {
+        if config
+            .api_url
+            .as_ref()
+            .map_or(true, |url| url.trim().is_empty())
+        {
+            return Ok(api_error!("ai.api_url_empty"));
+        }
+        if config
+            .api_key
+            .as_ref()
+            .map_or(true, |key| key.trim().is_empty())
+        {
+            return Ok(api_error!("ai.api_key_empty"));
+        }
     }
 
     match state.ai_service.test_connection_with_config(&config).await {

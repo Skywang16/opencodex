@@ -42,7 +42,7 @@ export interface AIModelConfig {
   options?: {
     maxContextTokens?: number
     temperature?: number
-    timeout?: number
+    timeoutSeconds?: number
     dimension?: number // Dimension of the vector model
     contextWindow?: number
     maxTokens?: number

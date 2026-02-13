@@ -263,9 +263,9 @@ impl DatabaseManager {
                 DatabaseError::internal(format!("Failed to inspect messages schema: {err}"))
             })?;
 
-        let has_is_internal = rows.iter().any(|row| {
-            row.try_get::<String, _>("name").unwrap_or_default() == "is_internal"
-        });
+        let has_is_internal = rows
+            .iter()
+            .any(|row| row.try_get::<String, _>("name").unwrap_or_default() == "is_internal");
 
         if !has_is_internal {
             let mut tx = self.pool.begin().await.map_err(|err| {

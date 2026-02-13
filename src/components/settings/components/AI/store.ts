@@ -1,4 +1,5 @@
 import { aiApi } from '@/api'
+import { AuthType } from '@/types/oauth'
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
@@ -34,27 +35,34 @@ export const useAISettingsStore = defineStore('ai-settings', () => {
 
   const loadModels = async () => {
     isLoading.value = true
-    const models = await aiApi.getModels()
+    error.value = null
+    try {
+      const models = await aiApi.getModels()
 
-    if (!settings.value) {
-      settings.value = {
-        models,
-        features: {
-          chat: { enabled: true, maxHistoryLength: 1000, autoSaveHistory: true, contextWindowSize: 4000 },
-        },
-        performance: {
-          requestTimeout: 30,
-          maxConcurrentRequests: 5,
-          cacheEnabled: true,
-          cacheTtl: 3600,
-        },
-      } as AISettings
-    } else {
-      settings.value.models = models
+      if (!settings.value) {
+        settings.value = {
+          models,
+          features: {
+            chat: { enabled: true, maxHistoryLength: 1000, autoSaveHistory: true, contextWindowSize: 4000 },
+          },
+          performance: {
+            requestTimeout: 30,
+            maxConcurrentRequests: 5,
+            cacheEnabled: true,
+            cacheTtl: 3600,
+          },
+        } as AISettings
+      } else {
+        settings.value.models = models
+      }
+
+      dataVersion.value++
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+      throw e
+    } finally {
+      isLoading.value = false
     }
-
-    dataVersion.value++
-    isLoading.value = false
   }
 
   const loadSettings = async (forceRefresh = false) => {
@@ -93,11 +101,13 @@ export const useAISettingsStore = defineStore('ai-settings', () => {
       id: modelId,
       changes: {
         provider: updatedModel.provider,
+        authType: updatedModel.authType,
         apiUrl: updatedModel.apiUrl,
         apiKey: updatedModel.apiKey,
         model: updatedModel.model,
         modelType: updatedModel.modelType,
         options: updatedModel.options,
+        oauthConfig: updatedModel.authType === AuthType.OAuth ? (updatedModel.oauthConfig ?? null) : null,
         useCustomBaseUrl: updatedModel.useCustomBaseUrl,
       },
     }

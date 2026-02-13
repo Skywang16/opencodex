@@ -95,6 +95,35 @@ impl BuiltinPrompts {
     pub fn system_conversation_summary() -> &'static str {
         include_str!("../../../prompts/system/conversation_summary.md")
     }
+
+    // === Model prompt profiles ===
+    pub fn model_openai_codex() -> &'static str {
+        include_str!("../../../prompts/models/openai-codex.md")
+    }
+
+    pub fn model_openai_o_series() -> &'static str {
+        include_str!("../../../prompts/models/openai-o-series.md")
+    }
+
+    pub fn model_openai_gpt() -> &'static str {
+        include_str!("../../../prompts/models/openai-gpt.md")
+    }
+
+    pub fn model_anthropic_claude() -> &'static str {
+        include_str!("../../../prompts/models/anthropic-claude.md")
+    }
+
+    pub fn model_google_gemini() -> &'static str {
+        include_str!("../../../prompts/models/google-gemini.md")
+    }
+
+    pub fn model_deepseek() -> &'static str {
+        include_str!("../../../prompts/models/deepseek.md")
+    }
+
+    pub fn model_generic() -> &'static str {
+        include_str!("../../../prompts/models/generic.md")
+    }
 }
 
 /// Runtime prompt loader
@@ -159,6 +188,13 @@ impl PromptLoader {
             ("system", "conversation_summary") => {
                 Some(BuiltinPrompts::system_conversation_summary())
             }
+            ("models", "openai-codex") => Some(BuiltinPrompts::model_openai_codex()),
+            ("models", "openai-o-series") => Some(BuiltinPrompts::model_openai_o_series()),
+            ("models", "openai-gpt") => Some(BuiltinPrompts::model_openai_gpt()),
+            ("models", "anthropic-claude") => Some(BuiltinPrompts::model_anthropic_claude()),
+            ("models", "google-gemini") => Some(BuiltinPrompts::model_google_gemini()),
+            ("models", "deepseek") => Some(BuiltinPrompts::model_deepseek()),
+            ("models", "generic") => Some(BuiltinPrompts::model_generic()),
             _ => None,
         };
 
@@ -215,5 +251,7 @@ mod tests {
         assert!(!BuiltinPrompts::rules().is_empty());
         assert!(!BuiltinPrompts::methodology().is_empty());
         assert!(!BuiltinPrompts::agent_coder().is_empty());
+        assert!(!BuiltinPrompts::model_generic().is_empty());
+        assert!(!BuiltinPrompts::model_openai_codex().is_empty());
     }
 }

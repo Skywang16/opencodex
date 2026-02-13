@@ -16,19 +16,24 @@ export interface AIModelCreateInput {
 }
 
 export type AIModelUpdateChanges = Partial<
-  Pick<
-    AIModelConfig,
-    | 'provider'
-    | 'authType'
-    | 'apiUrl'
-    | 'apiKey'
-    | 'model'
-    | 'modelType'
-    | 'options'
-    | 'oauthConfig'
-    | 'useCustomBaseUrl'
+  Omit<
+    Pick<
+      AIModelConfig,
+      | 'provider'
+      | 'authType'
+      | 'apiUrl'
+      | 'apiKey'
+      | 'model'
+      | 'modelType'
+      | 'options'
+      | 'oauthConfig'
+      | 'useCustomBaseUrl'
+    >,
+    'oauthConfig'
   >
->
+> & {
+  oauthConfig?: OAuthConfig | null
+}
 
 export interface AIModelUpdateInput {
   id: string

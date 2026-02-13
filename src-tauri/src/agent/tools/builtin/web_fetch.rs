@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 use tokio::net::lookup_host;
+use tracing::warn;
 use url::Url;
 
 use crate::agent::core::context::TaskContext;
@@ -79,7 +80,6 @@ Best Practices:
 
     fn metadata(&self) -> ToolMetadata {
         ToolMetadata::new(ToolCategory::Network, ToolPriority::Expensive)
-            .with_confirmation()
             .with_rate_limit(RateLimitConfig {
                 max_calls: 10,
                 window_secs: 60,
@@ -97,7 +97,10 @@ Best Practices:
         _context: &TaskContext,
         args: serde_json::Value,
     ) -> ToolExecutorResult<ToolResult> {
+        use tracing::{debug, info};
+
         let args: WebFetchArgs = serde_json::from_value(args)?;
+        info!("WebFetch starting for URL: {}", args.url);
 
         let parsed_url = match Url::parse(&args.url) {
             Ok(url) => url,
@@ -115,33 +118,13 @@ Best Practices:
             ));
         }
 
+        debug!("Validating URL: {}", parsed_url);
         if let Err(err) = validate_fetch_url(&parsed_url).await {
             return Ok(validation_error(err.to_string()));
         }
 
         let timeout_ms = 30_000; // Fixed 30 second timeout
         let max_len = 2000; // Fixed 2000 character limit
-
-        match try_jina_reader(&parsed_url, timeout_ms).await {
-            Ok(Some(jina_content)) => {
-                return Ok(ToolResult {
-                    content: vec![ToolResultContent::Success(jina_content.clone())],
-                    status: ToolResultStatus::Success,
-                    cancel_reason: None,
-                    execution_time_ms: None,
-                    ext_info: Some(json!({
-                        "url": parsed_url.as_str(),
-                        "source": "jina",
-                    })),
-                });
-            }
-            Ok(None) => {
-                // Fall through to direct fetching below
-            }
-            Err(err_result) => {
-                return Ok(err_result);
-            }
-        }
 
         let client_builder = reqwest::Client::builder()
             .timeout(Duration::from_millis(timeout_ms))
@@ -151,6 +134,7 @@ Best Practices:
         let client = client_builder.build()?;
 
         let started = std::time::Instant::now();
+        debug!("Starting direct HTTP request to: {}", parsed_url);
         let resp = match fetch_follow_redirects(&client, parsed_url.clone(), 10).await {
             Ok(r) => r,
             Err(err) => {
@@ -174,9 +158,23 @@ Best Practices:
         }
         let content_type = headers.get("content-type").cloned();
 
-        let raw_text = match resp.text().await {
-            Ok(t) => t,
-            Err(e) => format!("<read-error>{e}"),
+        debug!("Reading response body...");
+        let raw_text = match tokio::time::timeout(
+            Duration::from_secs(30),
+            resp.text()
+        ).await {
+            Ok(Ok(t)) => t,
+            Ok(Err(e)) => format!("<read-error>{e}"),
+            Err(_) => {
+                warn!("Response body read timeout");
+                return Ok(ToolResult {
+                    content: vec![ToolResultContent::Error("Response body read timeout".to_string())],
+                    status: ToolResultStatus::Error,
+                    cancel_reason: None,
+                    execution_time_ms: Some(started.elapsed().as_millis() as u64),
+                    ext_info: None,
+                });
+            }
         };
 
         let (data_text, extracted_text) = if content_type
@@ -196,7 +194,7 @@ Best Practices:
             "content_type": content_type,
             "extracted": extracted_text.is_some(),
             "elapsed_ms": started.elapsed().as_millis() as u64,
-            "source": "direct",
+            "source": "local",
         });
 
         let status_flag = if (200..400).contains(&status) {
@@ -274,6 +272,8 @@ fn is_private_ip(addr: &IpAddr) -> bool {
 }
 
 async fn validate_fetch_url(url: &Url) -> ToolExecutorResult<()> {
+    use tracing::debug;
+
     if !matches!(url.scheme(), "http" | "https") {
         return Err(ToolExecutorError::InvalidArguments {
             tool_name: "web_fetch".to_string(),
@@ -318,7 +318,17 @@ async fn validate_fetch_url(url: &Url) -> ToolExecutorResult<()> {
                 });
             }
 
-            let addrs = lookup_host((host, port)).await.map_err(|e| {
+            debug!("Resolving host: {}", host);
+            let addrs = tokio::time::timeout(
+                Duration::from_secs(5),
+                lookup_host((host, port))
+            )
+            .await
+            .map_err(|_| ToolExecutorError::ExecutionFailed {
+                tool_name: "web_fetch".to_string(),
+                error: format!("DNS lookup timeout for host '{host}'"),
+            })?
+            .map_err(|e| {
                 ToolExecutorError::ExecutionFailed {
                     tool_name: "web_fetch".to_string(),
                     error: format!("Failed to resolve host '{host}': {e}"),
@@ -333,6 +343,7 @@ async fn validate_fetch_url(url: &Url) -> ToolExecutorResult<()> {
                     });
                 }
             }
+            debug!("Host validation passed for: {}", host);
         }
     }
 
@@ -344,15 +355,21 @@ async fn fetch_follow_redirects(
     mut url: Url,
     max_redirects: usize,
 ) -> ToolExecutorResult<reqwest::Response> {
-    for _ in 0..=max_redirects {
+    use tracing::{debug, warn};
+
+    for redirect_count in 0..=max_redirects {
         validate_fetch_url(&url).await?;
 
+        debug!("Fetching URL (redirect {}): {}", redirect_count, url);
         let resp = client.get(url.clone()).send().await.map_err(|e| {
+            warn!("HTTP request failed for {}: {}", url, e);
             ToolExecutorError::ExecutionFailed {
                 tool_name: "web_fetch".to_string(),
                 error: format!("request failed: {e}"),
             }
         })?;
+
+        debug!("Received response with status: {}", resp.status());
 
         if resp.status().is_redirection() {
             let location = resp
@@ -363,6 +380,7 @@ async fn fetch_follow_redirects(
                 .filter(|s| !s.is_empty());
 
             if let Some(location) = location {
+                debug!("Following redirect to: {}", location);
                 url = url
                     .join(location)
                     .map_err(|e| ToolExecutorError::InvalidArguments {
@@ -376,46 +394,14 @@ async fn fetch_follow_redirects(
         return Ok(resp);
     }
 
+    warn!("Too many redirects for URL: {}", url);
     Err(ToolExecutorError::ResourceLimitExceeded {
         tool_name: "web_fetch".to_string(),
         resource_type: format!("too many redirects (max: {max_redirects})"),
     })
 }
 
-async fn try_jina_reader(url: &Url, timeout_ms: u64) -> Result<Option<String>, ToolResult> {
-    let jina_url = format!("https://r.jina.ai/{}", url.as_str());
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(timeout_ms))
-        .user_agent("OpenCodex-Agent/1.0")
-        .build()
-        .map_err(|e| tool_error(format!("Failed to build request client: {e}")))?;
-
-    let response = match client.get(jina_url).send().await {
-        Ok(resp) => resp,
-        Err(_) => return Ok(None),
-    };
-
-    if !response.status().is_success() {
-        return Ok(None);
-    }
-
-    match response.text().await {
-        Ok(text) if text.trim().len() > 50 => Ok(Some(text)),
-        _ => Ok(None),
-    }
-}
-
 fn validation_error(message: impl Into<String>) -> ToolResult {
-    ToolResult {
-        content: vec![ToolResultContent::Error(message.into())],
-        status: ToolResultStatus::Error,
-        cancel_reason: None,
-        execution_time_ms: None,
-        ext_info: None,
-    }
-}
-
-fn tool_error(message: impl Into<String>) -> ToolResult {
     ToolResult {
         content: vec![ToolResultContent::Error(message.into())],
         status: ToolResultStatus::Error,

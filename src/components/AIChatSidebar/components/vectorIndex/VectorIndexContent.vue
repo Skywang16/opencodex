@@ -1,6 +1,6 @@
 <script setup lang="ts">
   import { computed, ref, watch, onMounted, reactive } from 'vue'
-  import { terminalContextApi, aiApi } from '@/api'
+  import { terminalContextApi, aiApi, vectorDbApi as vdbApi } from '@/api'
   import { useI18n } from 'vue-i18n'
   import { useTerminalStore } from '@/stores/Terminal'
   import { homeDir } from '@tauri-apps/api/path'
@@ -194,6 +194,7 @@
       } else {
         await aiSettingsStore.addModel(modelData)
       }
+      await vdbApi.reloadEmbeddingConfig()
       showForm.value = false
     } finally {
       isSubmitting.value = false

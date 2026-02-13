@@ -242,86 +242,23 @@ pub fn initialize_app_states<R: tauri::Runtime>(app: &tauri::App<R>) -> SetupRes
 
     // Initialize vector database state (and inject search_engine into TaskExecutor for agent's semantic_search tool)
     let vector_search_engine = {
-        use crate::llm::types::LLMProviderConfig;
-        use crate::storage::repositories::{AIModels, ModelType};
-        use crate::vector_db::{
-            commands::VectorDbState,
-            core::{RemoteEmbeddingConfig, VectorDbConfig},
-            search::SemanticSearchEngine,
-        };
+        use crate::vector_db::commands::VectorDbState;
         use std::sync::Arc;
 
-        // Read embedding model configuration from database
         let database = app
             .state::<Arc<crate::storage::DatabaseManager>>()
             .inner()
             .clone();
-        let embedding_config = tauri::async_runtime::block_on(async {
-            let models = AIModels::new(&database)
-                .find_all()
-                .await
-                .unwrap_or_default();
-            models
-                .into_iter()
-                .find(|m| m.model_type == ModelType::Embedding)
-        });
-
-        let config =
-            if let Some(model) = embedding_config {
-                // Read dimension from options, default 1024
-                let dimension = model
-                    .options
-                    .as_ref()
-                    .and_then(|opts| opts.get("dimension"))
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as usize)
-                    .unwrap_or(1024);
-
-                tracing::info!(
-                    "Using configured embedding model: {} @ {:?}, dimension: {}",
-                    model.model,
-                    model.api_url,
-                    dimension
-                );
-                VectorDbConfig {
-                    embedding: RemoteEmbeddingConfig {
-                        provider_config: LLMProviderConfig {
-                            provider_type: model.provider.as_str().to_string(),
-                            api_key: model.api_key.unwrap_or_default(),
-                            api_url: model.api_url,
-                            options: model.options.as_ref().and_then(|v| v.as_object()).map(
-                                |obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-                            ),
-                            oauth_config: None,
-                        },
-                        model_name: model.model,
-                        dimension,
-                        chunk_size: 512,
-                        chunk_overlap: 100,
-                    },
-                    ..VectorDbConfig::default()
-                }
-            } else {
-                tracing::warn!("Embedding model configuration not found, using defaults");
-                VectorDbConfig::default()
-            };
-
-        if let Err(e) = config.validate() {
-            warn!("Vector DB config validate failed: {}", e);
-        }
-
-        match (|| -> Result<VectorDbState, crate::vector_db::core::VectorDbError> {
-            let embedder = crate::vector_db::embedding::create_embedder(&config.embedding)?;
-            let search_engine = Arc::new(SemanticSearchEngine::new(embedder, config));
-            Ok(VectorDbState::new(search_engine))
-        })() {
-            Ok(state) => {
-                let search_engine = Arc::clone(&state.search_engine);
+        match tauri::async_runtime::block_on(crate::vector_db::build_search_engine_from_database(
+            database,
+        )) {
+            Ok(search_engine) => {
+                let state = VectorDbState::new(Arc::clone(&search_engine));
                 app.manage(state);
                 Some(search_engine)
             }
-            Err(_) => {
-                warn!("Failed to initialize vector DB");
+            Err(e) => {
+                warn!("Failed to initialize vector DB: {}", e);
                 None
             }
         }

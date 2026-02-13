@@ -1,6 +1,6 @@
 use crate::ai::error::{AIServiceError, AIServiceResult};
 use crate::ai::types::{AIModelConfig, AIProvider, ModelType};
-use crate::storage::repositories::{AIModels, AuthType};
+use crate::storage::repositories::{AIModels, AuthType, OAuthConfig};
 use crate::storage::DatabaseManager;
 use chrono::Utc;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
@@ -20,10 +20,12 @@ pub struct AIService {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AIModelUpdatePayload {
     provider: Option<AIProvider>,
+    auth_type: Option<AuthType>,
     api_url: Option<String>,
     api_key: Option<String>,
     model: Option<String>,
     model_type: Option<ModelType>,
+    oauth_config: Option<Option<OAuthConfig>>,
     options: Option<Value>,
     use_custom_base_url: Option<bool>,
 }
@@ -100,6 +102,9 @@ impl AIService {
         if let Some(provider) = update_payload.provider {
             existing.provider = provider;
         }
+        if let Some(auth_type) = update_payload.auth_type {
+            existing.auth_type = auth_type;
+        }
         if let Some(url) = update_payload.api_url.and_then(trimmed) {
             existing.api_url = Some(url);
         }
@@ -112,11 +117,24 @@ impl AIService {
         if let Some(model_type) = update_payload.model_type {
             existing.model_type = model_type;
         }
+        if let Some(oauth_config) = update_payload.oauth_config {
+            existing.oauth_config = oauth_config;
+        }
         if let Some(options) = update_payload.options {
             existing.options = Some(options);
         }
         if let Some(use_custom_base_url) = update_payload.use_custom_base_url {
             existing.use_custom_base_url = Some(use_custom_base_url);
+        }
+
+        // Keep authentication data consistent when auth mode changes.
+        match existing.auth_type {
+            AuthType::OAuth => {
+                existing.api_key = None;
+            }
+            AuthType::ApiKey => {
+                existing.oauth_config = None;
+            }
         }
 
         existing.updated_at = Utc::now();
@@ -216,7 +234,25 @@ impl AIService {
             }))
         } else {
             // All other providers use OpenAI-compatible API
+            let payload = if model.model_type == ModelType::Embedding {
+                basic_embedding_payload(&model.model)
+            } else {
+                basic_chat_payload(&model.model)
+            };
+            let endpoint = if model.model_type == ModelType::Embedding {
+                "embeddings"
+            } else {
+                "chat/completions"
+            };
+
             let (url, headers) = if model.auth_type == AuthType::OAuth {
+                if model.model_type == ModelType::Embedding {
+                    return Err(AIServiceError::Configuration {
+                        message:
+                            "OAuth authentication currently supports chat models only for connection testing."
+                                .to_string(),
+                    });
+                }
                 let oauth =
                     model
                         .oauth_config
@@ -245,7 +281,7 @@ impl AIService {
                     }
                 }
 
-                // ChatGPT backend API test endpoint
+                // OAuth branch already assembled fixed URL/headers above.
                 (
                     "https://chatgpt.com/backend-api/conversation".to_string(),
                     headers,
@@ -259,12 +295,11 @@ impl AIService {
                             message: "API URL is required".to_string(),
                         })?;
                 let api_key = get_auth_token(model)?;
-                let url = join_url(api_url.trim(), "chat/completions");
+                let url = join_url(api_url.trim(), endpoint);
                 let headers = header_map(&[("authorization", format!("Bearer {api_key}"))])?;
                 (url, headers)
             };
 
-            let payload = basic_chat_payload(&model.model);
             Ok(ConnectionProbe::Http(ProviderHttpRequest {
                 provider_label: model.provider.clone(),
                 url,
@@ -347,14 +382,16 @@ impl AIService {
     }
 
     fn resolve_timeout(&self, model: &AIModelConfig) -> Duration {
-        model
-            .options
-            .as_ref()
-            .and_then(|opts| opts.get("timeoutSeconds"))
-            .and_then(Value::as_u64)
-            .map(|secs| secs.clamp(1, 60))
-            .map(Duration::from_secs)
-            .unwrap_or_else(|| Duration::from_secs(12))
+        let Some(opts) = model.options.as_ref() else {
+            return Duration::from_secs(12);
+        };
+
+        // Strict single-field contract: use timeoutSeconds only.
+        if let Some(secs) = get_positive_u64(opts, "timeoutSeconds") {
+            return Duration::from_secs(secs.clamp(1, 600));
+        }
+
+        Duration::from_secs(12)
     }
 }
 
@@ -386,6 +423,23 @@ fn basic_chat_payload(model: &str) -> Value {
         "max_tokens": 1,
         "temperature": 0,
     })
+}
+
+fn basic_embedding_payload(model: &str) -> Value {
+    json!({
+        "model": model,
+        "input": "hello",
+    })
+}
+
+fn get_positive_u64(options: &Value, key: &str) -> Option<u64> {
+    if let Some(v) = options.get(key).and_then(Value::as_u64) {
+        return Some(v);
+    }
+    options
+        .get(key)
+        .and_then(Value::as_i64)
+        .and_then(|v| u64::try_from(v).ok())
 }
 
 fn join_url(base: &str, suffix: &str) -> String {

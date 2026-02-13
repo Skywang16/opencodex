@@ -80,6 +80,8 @@ export class VectorDbApi {
 
   cancelBuild = async (params: { root: string }): Promise<void> =>
     invoke('vector_build_index_cancel', { path: params.root })
+
+  reloadEmbeddingConfig = async (): Promise<void> => invoke('vector_reload_embedding_config')
 }
 
 export const vectorDbApi = new VectorDbApi()

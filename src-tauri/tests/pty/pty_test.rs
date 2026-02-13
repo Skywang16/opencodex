@@ -1,4 +1,4 @@
-use terminal_lib::mux::{LocalPane, Pane, PaneId, PtySize, TerminalConfig};
+use terminal_lib::mux::{LocalPane, MuxSessionConfig, Pane, PaneId, PtySize};
 
 #[test]
 fn test_pty_creation() {
@@ -20,7 +20,7 @@ fn test_pty_creation() {
 fn test_pty_with_config() {
     let pane_id = PaneId::new(2);
     let size = PtySize::new(30, 100);
-    let config = TerminalConfig::default();
+    let config = MuxSessionConfig::default();
 
     // 测试使用配置创建PTY
     let result = LocalPane::new_with_config(pane_id, size, &config);

@@ -20,8 +20,8 @@ pub struct SystemPromptParts {
     pub reminder: Option<String>,
     /// User custom instructions (CLAUDE.md / project rules)
     pub custom_instructions: Option<String>,
-    /// Model-specific hints (from model_harness module)
-    pub model_hints: Option<String>,
+    /// Model-family prompt profile (loaded from prompts/models/*.md)
+    pub model_profile: Option<String>,
 }
 
 /// Prompt builder
@@ -41,11 +41,12 @@ impl PromptBuilder {
     /// Assembly order (each section builds on the previous):
     /// 1. Role — identity, personality, output format, progress updates
     /// 2. Agent-specific prompt — mode-specific behavior (coder, plan, explore, etc.)
-    /// 3. Rules — autonomous execution, tone, tool usage, proactiveness
-    /// 4. Methodology — conventions, code style, task workflow, git safety, validation
-    /// 5. Environment — working directory, platform, date, project structure
-    /// 6. Project instructions — AGENTS.md, CLAUDE.md, user custom rules
-    /// 7. Reminder — runtime context (plan mode, max steps, loop warnings)
+    /// 3. Model profile — model-family-specific execution guidance
+    /// 4. Rules — autonomous execution, tone, tool usage, proactiveness
+    /// 5. Methodology — conventions, code style, task workflow, git safety, validation
+    /// 6. Environment — working directory, platform, date, project structure
+    /// 7. Project instructions — AGENTS.md, CLAUDE.md, user custom rules
+    /// 8. Reminder — runtime context (plan mode, max steps, loop warnings)
     pub async fn build_system_prompt(&mut self, parts: SystemPromptParts) -> String {
         let mut sections = Vec::new();
 
@@ -60,49 +61,48 @@ impl PromptBuilder {
             }
         }
 
-        // 3. Rules — autonomous execution, tone, proactiveness
+        // 3. Model profile — family-specific behavior tuning
+        if let Some(model_profile) = parts.model_profile {
+            let trimmed = model_profile.trim();
+            if !trimmed.is_empty() {
+                sections.push(format!("# Model Instructions\n\n{trimmed}"));
+            }
+        }
+
+        // 4. Rules — autonomous execution, tone, proactiveness
         if let Some(rules) = parts.rules {
             sections.push(rules);
         } else {
             sections.push(BuiltinPrompts::rules().to_string());
         }
 
-        // 4. Methodology — conventions, workflow, git safety, validation
+        // 5. Methodology — conventions, workflow, git safety, validation
         if let Some(methodology) = parts.methodology {
             sections.push(methodology);
         } else {
             sections.push(BuiltinPrompts::methodology().to_string());
         }
 
-        // 5. Environment information
+        // 6. Environment information
         if let Some(env_info) = parts.env_info {
             sections.push(env_info);
         }
 
-        // 6. Project instructions (AGENTS.md / CLAUDE.md / user custom rules)
+        // 7. Project instructions (AGENTS.md / CLAUDE.md / user custom rules)
         if let Some(custom) = parts.custom_instructions {
             if !custom.trim().is_empty() {
                 sections.push(format!("# Project Instructions\n\n{}", custom.trim()));
             }
         }
 
-        // 6.5. Model-specific hints (after project instructions, before reminder)
-        if let Some(hints) = parts.model_hints {
-            if !hints.trim().is_empty() {
-                sections.push(hints.trim().to_string());
-            }
-        }
-
-        // 7. Runtime reminder (placed last, highest priority override)
+        // 8. Runtime reminder (placed last, highest priority override)
         if let Some(reminder) = parts.reminder {
             // Check if reminder already contains system-reminder tags
             let trimmed = reminder.trim();
             if trimmed.starts_with("<system-reminder>") {
                 sections.push(trimmed.to_string());
             } else {
-                sections.push(format!(
-                    "<system-reminder>\n{trimmed}\n</system-reminder>"
-                ));
+                sections.push(format!("<system-reminder>\n{trimmed}\n</system-reminder>"));
             }
         }
 
@@ -144,6 +144,11 @@ impl PromptBuilder {
     /// Get agent prompt
     pub async fn get_agent_prompt(&mut self, agent_type: &str) -> Option<String> {
         self.loader.load("agents", agent_type).await
+    }
+
+    /// Get model profile prompt
+    pub async fn get_model_profile_prompt(&mut self, profile_key: &str) -> Option<String> {
+        self.loader.load("models", profile_key).await
     }
 
     /// Get reminder

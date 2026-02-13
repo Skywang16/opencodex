@@ -249,9 +249,7 @@ fn truncate_middle_lines(s: &str, head_lines: usize, tail_lines: usize) -> Trunc
     let tail_part = lines[total.saturating_sub(tail_lines)..].join("\n");
     let removed = total.saturating_sub(head_lines).saturating_sub(tail_lines);
 
-    let marker = format!(
-        "\n\n... [{removed} lines truncated, total {total} lines] ...\n\n"
-    );
+    let marker = format!("\n\n... [{removed} lines truncated, total {total} lines] ...\n\n");
 
     TruncatedResult::truncated(
         format!("{head_part}{marker}{tail_part}"),

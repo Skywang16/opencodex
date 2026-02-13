@@ -2,6 +2,7 @@ use crate::utils::{EmptyData, TauriApiResult};
 use crate::vector_db::commands::VectorDbState;
 use crate::{api_error, api_success};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tauri::State;
 use tracing::{error, warn};
 
@@ -22,7 +23,7 @@ pub async fn get_index_status(
         }));
     }
 
-    let config = state.search_engine.config().clone();
+    let config = state.current_search_engine().config().clone();
     match crate::vector_db::storage::IndexManager::new(&workspace_path, config) {
         Ok(manager) => Ok(api_success!(manager.get_status_with_size_bytes())),
         Err(e) => {
@@ -40,7 +41,7 @@ pub async fn delete_workspace_index(
     let root = PathBuf::from(&path);
     let index_dir = root.join(".opencodex").join("index");
 
-    state.search_engine.invalidate_workspace_index(&root);
+    state.current_search_engine().invalidate_workspace_index(&root);
 
     if index_dir.exists() {
         let dir = index_dir.clone();
@@ -57,4 +58,21 @@ pub async fn delete_workspace_index(
         }
     }
     Ok(api_success!())
+}
+
+#[tauri::command]
+pub async fn vector_reload_embedding_config(
+    state: State<'_, VectorDbState>,
+    database: State<'_, Arc<crate::storage::DatabaseManager>>,
+) -> TauriApiResult<EmptyData> {
+    match crate::vector_db::build_search_engine_from_database(database.inner().clone()).await {
+        Ok(search_engine) => {
+            state.replace_search_engine(search_engine);
+            Ok(api_success!())
+        }
+        Err(e) => {
+            warn!(error = %e, "Failed to reload vector embedding config");
+            Ok(api_error!("vector_db.status_failed"))
+        }
+    }
 }

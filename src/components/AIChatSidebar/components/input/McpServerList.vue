@@ -80,20 +80,20 @@
     <div v-else class="servers-list">
       <div v-for="server in servers" :key="server.name" class="server-item">
         <div class="server-header">
-          <div class="server-name">{{ server.name }}</div>
+          <div class="server-info">
+            <span class="server-name">{{ server.name }}</span>
+            <span class="server-source">
+              {{ server.source === 'workspace' ? t('mcp_dialog.workspace') : t('mcp_dialog.global') }}
+            </span>
+          </div>
           <div class="server-status" :style="{ color: getStatusColor(server.status) }">
             <span class="status-dot" :style="{ backgroundColor: getStatusColor(server.status) }" />
             {{ getStatusText(server.status) }}
           </div>
         </div>
 
-        <div class="server-meta">
-          <span class="server-source">
-            {{ server.source === 'workspace' ? t('mcp_dialog.workspace') : t('mcp_dialog.global') }}
-          </span>
-          <span v-if="server.tools.length > 0" class="server-tools">
-            {{ t('mcp_dialog.tools_count', { count: server.tools.length }) }}
-          </span>
+        <div v-if="server.tools.length > 0" class="server-tools-count">
+          {{ t('mcp_dialog.tools_count', { count: server.tools.length }) }}
         </div>
 
         <div v-if="server.error" class="server-error">
@@ -167,24 +167,39 @@
 
   .servers-list {
     overflow-y: auto;
-    padding: 8px;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 8px;
   }
 
   .server-item {
-    padding: 12px;
+    padding: 12px 16px;
     background: var(--bg-secondary);
-    border-radius: 6px;
-    border: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    transition: background 0.15s;
+  }
+
+  .server-item:hover {
+    background: var(--bg-tertiary);
+  }
+
+  .server-item:first-child {
+    border-top: 1px solid var(--border-color);
   }
 
   .server-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 6px;
+    gap: 12px;
+  }
+
+  .server-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
   }
 
   .server-name {
@@ -193,11 +208,21 @@
     color: var(--text-primary);
   }
 
+  .server-source {
+    padding: 2px 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+  }
+
   .server-status {
     display: flex;
     align-items: center;
     gap: 4px;
     font-size: 11px;
+    flex-shrink: 0;
   }
 
   .status-dot {
@@ -206,18 +231,18 @@
     border-radius: 50%;
   }
 
+  .server-tools-count {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+  }
+
   .server-meta {
     display: flex;
     gap: 8px;
     font-size: 11px;
     color: var(--text-secondary);
     margin-bottom: 6px;
-  }
-
-  .server-source {
-    padding: 1px 6px;
-    background: var(--bg-tertiary);
-    border-radius: 3px;
   }
 
   .server-error {

@@ -5,6 +5,7 @@
 //! - `prompts/agents/` - complete agent prompts (with frontmatter configuration)
 //! - `prompts/reminders/` - runtime-injected prompts
 //! - `prompts/system/` - system-level prompts (compaction, summary, etc.)
+//! - `prompts/models/` - model-family prompt profiles (openai-codex, claude, etc.)
 
 mod builder;
 mod loader;

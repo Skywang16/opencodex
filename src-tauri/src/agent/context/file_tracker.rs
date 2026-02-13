@@ -104,9 +104,7 @@ impl FileContextTracker {
         let now = record.recorded_at;
 
         let state = record.state_override.unwrap_or(match record.source {
-            FileRecordSource::ReadTool | FileRecordSource::AgentEdited => {
-                FileRecordState::Active
-            }
+            FileRecordSource::ReadTool | FileRecordSource::AgentEdited => FileRecordState::Active,
             FileRecordSource::UserEdited => FileRecordState::Stale,
             FileRecordSource::FileMentioned => FileRecordState::Active,
         });

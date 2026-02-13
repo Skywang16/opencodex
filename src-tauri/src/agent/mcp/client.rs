@@ -5,15 +5,21 @@ use serde_json::{json, Value};
 
 use crate::agent::mcp::error::{McpError, McpResult};
 use crate::agent::mcp::protocol::jsonrpc::{JsonRpcRequest, JsonRpcResponse};
+use crate::agent::mcp::transport::sse::SseTransport;
 use crate::agent::mcp::transport::stdio::{
     ensure_abs_workspace, expand_args, expand_env_map, StdioTransport,
 };
 use crate::agent::mcp::types::{McpCallResult, McpToolDefinition, ServerInfo};
 use crate::settings::types::McpServerConfig;
 
+enum Transport {
+    Stdio(Arc<StdioTransport>),
+    Sse(Arc<SseTransport>),
+}
+
 pub struct McpClient {
     name: String,
-    transport: Arc<StdioTransport>,
+    transport: Transport,
     server_info: Option<ServerInfo>,
     tools: Vec<McpToolDefinition>,
 }
@@ -24,16 +30,40 @@ impl McpClient {
         config: &McpServerConfig,
         workspace_root: &Path,
     ) -> McpResult<Self> {
-        if config.disabled {
-            return Err(McpError::Disabled);
-        }
-
-        let workspace_root = ensure_abs_workspace(workspace_root)?;
-        let args = expand_args(&config.args, &workspace_root);
-        let env = expand_env_map(&config.env, &workspace_root);
-        let transport = Arc::new(
-            StdioTransport::spawn(&config.command, &args, &env, Some(&workspace_root)).await?,
-        );
+        let transport = match config {
+            McpServerConfig::Stdio {
+                command,
+                args,
+                env,
+                disabled,
+            } => {
+                if *disabled {
+                    return Err(McpError::Disabled);
+                }
+                let workspace_root = ensure_abs_workspace(workspace_root)?;
+                let args = expand_args(args, &workspace_root);
+                let env = expand_env_map(env, &workspace_root);
+                let t = StdioTransport::spawn(command, &args, &env, Some(&workspace_root)).await?;
+                Transport::Stdio(Arc::new(t))
+            }
+            McpServerConfig::Sse {
+                url,
+                headers,
+                disabled,
+            } => {
+                if *disabled {
+                    return Err(McpError::Disabled);
+                }
+                let t = SseTransport::new(url, headers).await?;
+                Transport::Sse(Arc::new(t))
+            }
+            McpServerConfig::StreamableHttp { disabled, .. } => {
+                if *disabled {
+                    return Err(McpError::Disabled);
+                }
+                return Err(McpError::UnsupportedTransport);
+            }
+        };
 
         let mut client = Self {
             name,
@@ -58,7 +88,6 @@ impl McpClient {
 
     pub async fn call_tool(&self, name: &str, arguments: Value) -> McpResult<McpCallResult> {
         let resp = self
-            .transport
             .request(JsonRpcRequest::new_request(
                 0,
                 "tools/call",
@@ -72,9 +101,22 @@ impl McpClient {
         parse_result(resp, "tools/call")
     }
 
+    async fn request(&self, req: JsonRpcRequest) -> McpResult<JsonRpcResponse> {
+        match &self.transport {
+            Transport::Stdio(t) => t.request(req).await,
+            Transport::Sse(t) => t.request(req).await,
+        }
+    }
+
+    async fn notify(&self, req: JsonRpcRequest) -> McpResult<()> {
+        match &self.transport {
+            Transport::Stdio(t) => t.notify(req).await,
+            Transport::Sse(t) => t.notify(req).await,
+        }
+    }
+
     async fn initialize(&mut self) -> McpResult<()> {
         let resp = self
-            .transport
             .request(JsonRpcRequest::new_request(
                 0,
                 "initialize",
@@ -93,7 +135,6 @@ impl McpClient {
         }
 
         let _ = self
-            .transport
             .notify(JsonRpcRequest::new_notification("initialized", None))
             .await;
 
@@ -102,7 +143,6 @@ impl McpClient {
 
     async fn refresh_tools(&mut self) -> McpResult<()> {
         let resp = self
-            .transport
             .request(JsonRpcRequest::new_request(0, "tools/list", None))
             .await?;
 

@@ -40,6 +40,13 @@ impl McpRegistry {
         Arc::from(workspace_root.to_string_lossy().to_string())
     }
 
+    fn normalize_workspace_key(workspace_key: &str) -> String {
+        std::fs::canonicalize(Path::new(workspace_key))
+            .unwrap_or_else(|_| PathBuf::from(workspace_key))
+            .to_string_lossy()
+            .to_string()
+    }
+
     /// Initialize workspace MCP servers (effective = merged result of global + workspace)
     pub async fn init_workspace_servers(
         &self,
@@ -81,6 +88,19 @@ impl McpRegistry {
                     );
                 }
                 Err(McpError::Disabled) => continue,
+                Err(McpError::UnsupportedTransport) => {
+                    servers.insert(
+                        name.clone(),
+                        ClientEntry {
+                            source,
+                            status: McpConnectionStatus::Error,
+                            error: Some(
+                                "Unsupported transport type (only stdio is supported)".to_string(),
+                            ),
+                            client: None,
+                        },
+                    );
+                }
                 Err(e) => {
                     tracing::warn!(target: "mcp", server = %name, error = %e, "Failed to init MCP server");
                     servers.insert(
@@ -105,8 +125,22 @@ impl McpRegistry {
     /// Get all available tools for workspace (workspace_key = canonical workspace path string)
     pub fn get_tools_for_workspace(&self, workspace_key: &str) -> Vec<McpToolAdapter> {
         let mut out = Vec::new();
+        let normalized = Self::normalize_workspace_key(workspace_key);
 
-        if let Some(workspace) = self.workspaces.get(workspace_key) {
+        if let Some(workspace) = self.workspaces.get(normalized.as_str()) {
+            for entry in workspace.value().servers.values() {
+                let Some(client) = entry.client.as_ref() else {
+                    continue;
+                };
+                out.extend(
+                    client
+                        .tools()
+                        .iter()
+                        .cloned()
+                        .map(|tool| McpToolAdapter::new(Arc::clone(client), tool)),
+                );
+            }
+        } else if let Some(workspace) = self.workspaces.get(workspace_key) {
             for entry in workspace.value().servers.values() {
                 let Some(client) = entry.client.as_ref() else {
                     continue;
@@ -191,5 +225,9 @@ impl McpRegistry {
 }
 
 fn is_disabled(config: &McpServerConfig) -> bool {
-    config.disabled
+    match config {
+        McpServerConfig::Stdio { disabled, .. } => *disabled,
+        McpServerConfig::Sse { disabled, .. } => *disabled,
+        McpServerConfig::StreamableHttp { disabled, .. } => *disabled,
+    }
 }

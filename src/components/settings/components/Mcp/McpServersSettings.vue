@@ -1,9 +1,10 @@
 <script setup lang="ts">
-  import { settingsApi } from '@/api'
+  import { mcpApi, settingsApi } from '@/api'
   import type { McpServerConfig } from '@/api/settings/types'
+  import { useWorkspaceStore } from '@/stores/workspace'
   import { XModal, XSwitch, createMessage } from '@/ui'
   import { debounce } from 'lodash-es'
-  import { onMounted, ref, watch } from 'vue'
+  import { computed, onMounted, ref, watch } from 'vue'
   import { useI18n } from 'vue-i18n'
 
   interface SmitheryServer {
@@ -32,9 +33,17 @@
   }
 
   const { t } = useI18n()
+  const workspaceStore = useWorkspaceStore()
   const SMITHERY_API = 'https://registry.smithery.ai/servers'
 
   const isLoading = ref(false)
+  const currentWorkspace = computed(() => workspaceStore.currentWorkspacePath)
+
+  const reloadMcpRegistry = async () => {
+    if (currentWorkspace.value) {
+      await mcpApi.reloadServers(currentWorkspace.value)
+    }
+  }
   const mcpServers = ref<Record<string, McpServerConfig>>({})
   const showAddModal = ref(false)
   const showEditModal = ref(false)
@@ -104,6 +113,7 @@
     await settingsApi.updateGlobal(settings)
     createMessage.success(t('mcp_settings.server_added'))
     await loadServers()
+    await reloadMcpRegistry()
   }
 
   const loadServers = async () => {
@@ -132,6 +142,7 @@
       await settingsApi.updateGlobal(settings)
       createMessage.success(t('mcp_settings.config_saved'))
       await loadServers()
+      await reloadMcpRegistry()
     } catch (e) {
       jsonError.value = t('mcp_settings.invalid_json')
     }
@@ -145,6 +156,7 @@
       settings.mcpServers = mcpServers.value
       await settingsApi.updateGlobal(settings)
       createMessage.success(enabled ? t('mcp_settings.server_enabled') : t('mcp_settings.server_disabled'))
+      await reloadMcpRegistry()
     }
   }
 
@@ -216,6 +228,7 @@
     resetForm()
     createMessage.success(t('mcp_settings.server_added'))
     await loadServers()
+    await reloadMcpRegistry()
   }
 
   const updateServer = async () => {
@@ -251,6 +264,7 @@
     resetForm()
     createMessage.success(t('mcp_settings.server_updated'))
     await loadServers()
+    await reloadMcpRegistry()
   }
 
   const deleteServer = async (name: string) => {
@@ -260,6 +274,7 @@
     await settingsApi.updateGlobal(settings)
     createMessage.success(t('mcp_settings.server_deleted'))
     await loadServers()
+    await reloadMcpRegistry()
   }
 
   const openDocs = () => {

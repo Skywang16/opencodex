@@ -230,12 +230,33 @@ impl PromptOrchestrator {
 
         let agent_prompt = agent_cfg.map(|cfg| cfg.system_prompt.clone());
 
-        // Model-specific prompt hints (detect once, use everywhere)
-        let model_hints = model_id.and_then(|mid| {
+        // Model-specific prompt profile (workspace override > builtin > generic fallback)
+        let model_profile = if let Some(mid) = model_id {
             let family = super::model_harness::ModelFamily::detect(mid);
-            tracing::debug!("Model harness: family={}", family.name());
-            family.hints().map(|h| h.to_string())
-        });
+            let profile_key = family.profile_key();
+            tracing::debug!(
+                "Model harness: model_id={}, family={}, profile={}",
+                mid,
+                family.name(),
+                profile_key
+            );
+
+            match prompt_builder.get_model_profile_prompt(profile_key).await {
+                Some(profile) => Some(profile),
+                None if profile_key != "generic" => {
+                    tracing::warn!(
+                        "Missing model profile '{}' for model '{}', fallback to generic",
+                        profile_key,
+                        mid
+                    );
+                    prompt_builder.get_model_profile_prompt("generic").await
+                }
+                None => None,
+            }
+        } else {
+            tracing::debug!("Model harness: no model_id, using generic profile");
+            prompt_builder.get_model_profile_prompt("generic").await
+        };
 
         let system_prompt = prompt_builder
             .build_system_prompt(SystemPromptParts {
@@ -245,7 +266,7 @@ impl PromptOrchestrator {
                 env_info: Some(env_info),
                 reminder,
                 custom_instructions,
-                model_hints,
+                model_profile,
             })
             .await;
 
