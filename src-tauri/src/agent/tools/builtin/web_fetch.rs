@@ -159,16 +159,15 @@ Best Practices:
         let content_type = headers.get("content-type").cloned();
 
         debug!("Reading response body...");
-        let raw_text = match tokio::time::timeout(
-            Duration::from_secs(30),
-            resp.text()
-        ).await {
+        let raw_text = match tokio::time::timeout(Duration::from_secs(30), resp.text()).await {
             Ok(Ok(t)) => t,
             Ok(Err(e)) => format!("<read-error>{e}"),
             Err(_) => {
                 warn!("Response body read timeout");
                 return Ok(ToolResult {
-                    content: vec![ToolResultContent::Error("Response body read timeout".to_string())],
+                    content: vec![ToolResultContent::Error(
+                        "Response body read timeout".to_string(),
+                    )],
                     status: ToolResultStatus::Error,
                     cancel_reason: None,
                     execution_time_ms: Some(started.elapsed().as_millis() as u64),
@@ -319,21 +318,16 @@ async fn validate_fetch_url(url: &Url) -> ToolExecutorResult<()> {
             }
 
             debug!("Resolving host: {}", host);
-            let addrs = tokio::time::timeout(
-                Duration::from_secs(5),
-                lookup_host((host, port))
-            )
-            .await
-            .map_err(|_| ToolExecutorError::ExecutionFailed {
-                tool_name: "web_fetch".to_string(),
-                error: format!("DNS lookup timeout for host '{host}'"),
-            })?
-            .map_err(|e| {
-                ToolExecutorError::ExecutionFailed {
+            let addrs = tokio::time::timeout(Duration::from_secs(5), lookup_host((host, port)))
+                .await
+                .map_err(|_| ToolExecutorError::ExecutionFailed {
+                    tool_name: "web_fetch".to_string(),
+                    error: format!("DNS lookup timeout for host '{host}'"),
+                })?
+                .map_err(|e| ToolExecutorError::ExecutionFailed {
                     tool_name: "web_fetch".to_string(),
                     error: format!("Failed to resolve host '{host}': {e}"),
-                }
-            })?;
+                })?;
             for addr in addrs {
                 if is_private_ip(&addr.ip()) {
                     return Err(ToolExecutorError::InvalidArguments {

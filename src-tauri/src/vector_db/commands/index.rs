@@ -41,7 +41,9 @@ pub async fn delete_workspace_index(
     let root = PathBuf::from(&path);
     let index_dir = root.join(".opencodex").join("index");
 
-    state.current_search_engine().invalidate_workspace_index(&root);
+    state
+        .current_search_engine()
+        .invalidate_workspace_index(&root);
 
     if index_dir.exists() {
         let dir = index_dir.clone();

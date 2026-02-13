@@ -259,19 +259,20 @@ pub async fn vector_build_index_start(
     state: State<'_, VectorDbState>,
     database: State<'_, Arc<crate::storage::DatabaseManager>>,
 ) -> TauriApiResult<EmptyData> {
-    let search_engine = match crate::vector_db::build_search_engine_from_database(database.inner().clone()).await {
-        Ok(engine) => {
-            state.replace_search_engine(Arc::clone(&engine));
-            engine
-        }
-        Err(e) => {
-            warn!(
-                error = %e,
-                "Failed to refresh embedding config before build; using existing vector engine"
-            );
-            state.current_search_engine()
-        }
-    };
+    let search_engine =
+        match crate::vector_db::build_search_engine_from_database(database.inner().clone()).await {
+            Ok(engine) => {
+                state.replace_search_engine(Arc::clone(&engine));
+                engine
+            }
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "Failed to refresh embedding config before build; using existing vector engine"
+                );
+                state.current_search_engine()
+            }
+        };
 
     let mut store = build_tasks().lock();
     start_build_locked(&mut store, path, search_engine);

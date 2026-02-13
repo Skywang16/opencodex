@@ -112,7 +112,10 @@ mod tests {
         assert_eq!(ModelFamily::OpenAICodex.profile_key(), "openai-codex");
         assert_eq!(ModelFamily::OpenAIOSeries.profile_key(), "openai-o-series");
         assert_eq!(ModelFamily::OpenAIGPT.profile_key(), "openai-gpt");
-        assert_eq!(ModelFamily::AnthropicClaude.profile_key(), "anthropic-claude");
+        assert_eq!(
+            ModelFamily::AnthropicClaude.profile_key(),
+            "anthropic-claude"
+        );
         assert_eq!(ModelFamily::GoogleGemini.profile_key(), "google-gemini");
         assert_eq!(ModelFamily::DeepSeek.profile_key(), "deepseek");
         assert_eq!(ModelFamily::Generic.profile_key(), "generic");
