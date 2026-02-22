@@ -48,17 +48,17 @@
       "text_300": "#b2ccd6",
       "text_400": "#8796a5",
       "text_500": "#546e7a",
-      "primary": "#80cbc4",
-      "primary_hover": "#4db6ac",
-      "primary_alpha": "rgba(128, 203, 196, 0.15)",
+      "primary": "#82b1ff",
+      "primary_hover": "#6c9fe0",
+      "primary_alpha": "rgba(130, 177, 255, 0.15)",
       "success": "#c3e88d",
       "warning": "#ffcb6b",
       "error": "#f07178",
       "info": "#89ddff",
       "hover": "#263238",
       "active": "#37474f",
-      "focus": "#80cbc4",
-      "selection": "rgba(128, 203, 196, 0.25)"
+      "focus": "#82b1ff",
+      "selection": "rgba(130, 177, 255, 0.25)"
     }
   }
 }
