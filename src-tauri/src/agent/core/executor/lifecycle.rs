@@ -100,7 +100,7 @@ impl TaskExecutor {
 
         // Create UI message (user + assistant placeholder)
         let display_user_prompt = if let Some(cmd_id) = params.command_id.as_deref() {
-            format!("/{cmd_id}\n{}", params.user_prompt)
+            format!("<!-- command:{cmd_id} -->\n{}", params.user_prompt)
         } else {
             params.user_prompt.clone()
         };
@@ -604,11 +604,7 @@ impl TaskExecutor {
         }
 
         let service = WorkspaceService::new(self.database());
-        let title_source = if let Some(cmd_id) = params.command_id.as_deref() {
-            format!("/{cmd_id}\n{}", params.user_prompt)
-        } else {
-            params.user_prompt.clone()
-        };
+        let title_source = params.user_prompt.clone();
         let title = truncate_chars(&title_source, 100);
 
         // Ensure workspace exists in database

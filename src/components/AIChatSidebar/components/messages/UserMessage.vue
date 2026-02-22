@@ -1,7 +1,9 @@
 <script setup lang="ts">
   import { useImageLightboxStore } from '@/stores/imageLightbox'
+  import { SLASH_COMMANDS, SLASH_COMMAND_ICONS } from '@/types/slashCommand'
   import type { CheckpointSummary, Message } from '@/types'
   import { computed } from 'vue'
+  import { useI18n } from 'vue-i18n'
   import CheckpointIndicator from './CheckpointIndicator.vue'
 
   interface Props {
@@ -11,12 +13,47 @@
   }
 
   const props = defineProps<Props>()
+  const { t } = useI18n()
 
   const lightboxStore = useImageLightboxStore()
 
-  const userText = computed(() => {
+  const COMMAND_MARKER_RE = /^<!--\s*command:(\S+)\s*-->\n?/
+  const LEGACY_PREFIX_RE = /^\/(code-review|skill-creator|skill-installer|plan-mode)\n/
+
+  const parsedContent = computed(() => {
     const block = props.message.blocks.find(b => b.type === 'user_text')
-    return block?.content || ''
+    const raw = block?.content || ''
+
+    let commandId: string | null = null
+    let text = raw
+
+    const markerMatch = raw.match(COMMAND_MARKER_RE)
+    if (markerMatch) {
+      commandId = markerMatch[1]
+      text = raw.slice(markerMatch[0].length)
+    } else {
+      const legacyMatch = raw.match(LEGACY_PREFIX_RE)
+      if (legacyMatch) {
+        commandId = legacyMatch[1]
+        text = raw.slice(legacyMatch[0].length)
+      }
+    }
+
+    return { commandId, text }
+  })
+
+  const userText = computed(() => parsedContent.value.text)
+
+  const commandInfo = computed(() => {
+    const id = parsedContent.value.commandId
+    if (!id) return null
+    const cmd = SLASH_COMMANDS.find(c => c.id === id)
+    if (!cmd) return { id, label: `/${id}`, icon: '' }
+    return {
+      id,
+      label: t(cmd.labelKey),
+      icon: SLASH_COMMAND_ICONS[cmd.icon] || '',
+    }
   })
 
   const userImages = computed(() => {
@@ -38,6 +75,10 @@
   <div class="user-message">
     <div class="user-message-content">
       <div class="user-message-bubble">
+        <div v-if="commandInfo" class="command-indicator">
+          <span class="command-indicator-icon" v-html="commandInfo.icon" />
+          <span class="command-indicator-label">{{ commandInfo.label }}</span>
+        </div>
         <div v-if="userImages.length > 0" class="user-message-images">
           <div
             v-for="(image, index) in userImages"
@@ -93,6 +134,40 @@
   .user-message-text {
     font-size: var(--font-size-md);
     line-height: 1.6;
+  }
+
+  .command-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px 2px 5px;
+    margin-bottom: 6px;
+    background: color-mix(in srgb, var(--text-100) 8%, transparent);
+    border-radius: var(--border-radius-md);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-200);
+    line-height: 1;
+  }
+
+  .command-indicator-icon {
+    width: 13px;
+    height: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .command-indicator-icon :deep(svg) {
+    width: 13px;
+    height: 13px;
+    stroke: currentColor;
+    stroke-width: 2;
+  }
+
+  .command-indicator-label {
+    line-height: 1;
   }
 
   .user-message-images {
