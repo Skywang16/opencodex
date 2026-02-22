@@ -20,23 +20,18 @@ impl Default for RetryConfig {
     fn default() -> Self {
         Self {
             max_retries: 10,
-            initial_delay_ms: 1000,
-            max_delay_ms: 60000,
-            backoff_multiplier: 2.0,
-            jitter: true,
+            initial_delay_ms: 20000,
+            max_delay_ms: 20000,
+            backoff_multiplier: 1.0,
+            jitter: false,
         }
     }
 }
 
 impl RetryConfig {
-    /// Config for stream requests (fewer retries since stream must restart)
+    /// Config for stream requests (same policy as default)
     pub fn for_stream() -> Self {
-        Self {
-            max_retries: 5,
-            initial_delay_ms: 500,
-            max_delay_ms: 30000,
-            ..Default::default()
-        }
+        Self::default()
     }
 
     pub fn delay_for_attempt(&self, attempt: u32) -> Duration {
@@ -105,7 +100,7 @@ fn is_reqwest_retryable(e: &reqwest::Error) -> bool {
 }
 
 fn is_status_retryable(status: reqwest::StatusCode) -> bool {
-    status.is_server_error() || matches!(status.as_u16(), 408 | 425 | 429 | 499)
+    status.is_server_error() || matches!(status.as_u16(), 401 | 403 | 408 | 425 | 429 | 499)
 }
 
 /// Get retry reason for logging
@@ -127,6 +122,8 @@ pub fn error_retry_reason(e: &LlmProviderError) -> &'static str {
         | LlmProviderError::Gemini(GeminiError::Api { status, .. }) => {
             if status.as_u16() == 429 {
                 "rate_limit"
+            } else if matches!(status.as_u16(), 401 | 403) {
+                "auth"
             } else if status.is_server_error() {
                 "server"
             } else {
@@ -194,13 +191,11 @@ mod tests {
 
     #[test]
     fn test_delay_calculation() {
-        let config = RetryConfig {
-            jitter: false,
-            ..Default::default()
-        };
-        assert_eq!(config.delay_for_attempt(0), Duration::from_millis(1000));
-        assert_eq!(config.delay_for_attempt(1), Duration::from_millis(2000));
-        assert_eq!(config.delay_for_attempt(2), Duration::from_millis(4000));
+        let config = RetryConfig::default();
+        // Fixed 20s interval for all attempts
+        assert_eq!(config.delay_for_attempt(0), Duration::from_millis(20000));
+        assert_eq!(config.delay_for_attempt(1), Duration::from_millis(20000));
+        assert_eq!(config.delay_for_attempt(2), Duration::from_millis(20000));
     }
 
     #[test]
@@ -209,6 +204,7 @@ mod tests {
         assert!(is_status_retryable(StatusCode::INTERNAL_SERVER_ERROR));
         assert!(is_status_retryable(StatusCode::TOO_MANY_REQUESTS));
         assert!(!is_status_retryable(StatusCode::BAD_REQUEST));
-        assert!(!is_status_retryable(StatusCode::UNAUTHORIZED));
+        assert!(is_status_retryable(StatusCode::UNAUTHORIZED));
+        assert!(is_status_retryable(StatusCode::FORBIDDEN));
     }
 }
