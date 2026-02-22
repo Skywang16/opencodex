@@ -56,7 +56,7 @@
     "new_session": "New Session",
     "new_session_placeholder": "New Session",
     "session_select": "Select Session",
-    "input_placeholder": "Ask OpenCodex anything, {'@'} to add files, / for commands",
+    "input_placeholder": "Ask OpenCodex anything, / for commands",
     "upload_image": "Upload image",
     "max_images_reached": "Maximum 5 images allowed",
     "model_not_support_images": "Current model does not support image input"

@@ -264,12 +264,12 @@
 
   .clone-btn--primary {
     color: var(--bg-100);
-    background: var(--color-primary);
+    background: var(--text-100);
     border: none;
   }
 
   .clone-btn--primary:hover {
-    background: var(--color-primary-hover);
+    background: var(--text-200);
   }
 
   .input-error {

@@ -1,5 +1,5 @@
 import { fileWatcherApi } from '@/api'
-import { useTerminalStore } from '@/stores/Terminal'
+import { useWorkspaceStore } from '@/stores/workspace'
 import type { FileWatcherEventBatch, FileWatcherStatus } from '@/types/domain/fileWatcher'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import { debounce } from 'lodash-es'
@@ -9,16 +9,11 @@ import { computed, ref, watch } from 'vue'
 type Subscriber = (batch: FileWatcherEventBatch) => void
 
 export const useFileWatcherStore = defineStore('fileWatcher', () => {
-  const terminalStore = useTerminalStore()
-
   const status = ref<FileWatcherStatus | null>(null)
   const running = computed(() => status.value?.running ?? false)
 
   const currentPath = computed(() => {
-    const active = terminalStore.activeTerminal
-    if (!active) return null
-    const cwd = active.cwd
-    return cwd && cwd !== '~' ? cwd : null
+    return useWorkspaceStore().currentWorkspacePath ?? null
   })
 
   const subscribers = new Set<Subscriber>()

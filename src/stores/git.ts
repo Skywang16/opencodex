@@ -1,6 +1,5 @@
 import { gitApi } from '@/api'
 import type { BranchInfo, CommitInfo, FileChange, RepositoryStatus } from '@/api/git/types'
-import { useTerminalStore } from '@/stores/Terminal'
 import { useFileWatcherStore } from '@/stores/fileWatcher'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { debounce } from 'lodash-es'
@@ -8,7 +7,6 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 
 export const useGitStore = defineStore('git', () => {
-  const terminalStore = useTerminalStore()
   const fileWatcherStore = useFileWatcherStore()
 
   const status = ref<RepositoryStatus | null>(null)
@@ -39,16 +37,7 @@ export const useGitStore = defineStore('git', () => {
   })
 
   const currentPath = computed(() => {
-    // Prefer getting current path from terminal
-    const active = terminalStore.activeTerminal
-    if (active) {
-      const cwd = active.cwd
-      if (cwd && cwd !== '~') return cwd
-    }
-    // If no active terminal, try getting from workspace store
-    const workspacePath = useWorkspaceStore().currentWorkspacePath
-    if (workspacePath) return workspacePath
-    return null
+    return useWorkspaceStore().currentWorkspacePath ?? null
   })
 
   let pendingRefresh = false
