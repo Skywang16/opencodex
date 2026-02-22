@@ -123,7 +123,7 @@
     align-items: center;
     gap: 8px;
     padding: 12px 16px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-200);
   }
 
   .back-btn {
@@ -135,13 +135,12 @@
     padding: 0;
     background: none;
     border: none;
-    color: var(--text-secondary);
+    color: var(--text-400);
     cursor: pointer;
-    transition: color 0.15s;
   }
 
   .back-btn:hover {
-    color: var(--text-primary);
+    color: var(--text-100);
   }
 
   .back-btn svg {
@@ -152,7 +151,7 @@
   .header-title {
     font-size: 14px;
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--text-100);
   }
 
   .empty-state,
@@ -161,30 +160,25 @@
     align-items: center;
     justify-content: center;
     min-height: 120px;
-    color: var(--text-secondary);
+    color: var(--text-400);
     font-size: 13px;
   }
 
   .servers-list {
     overflow-y: auto;
-    padding: 0;
+    padding: 8px;
     display: flex;
     flex-direction: column;
+    gap: 4px;
   }
 
   .server-item {
-    padding: 12px 16px;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border-color);
-    transition: background 0.15s;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-100);
   }
 
-  .server-item:hover {
-    background: var(--bg-tertiary);
-  }
-
-  .server-item:first-child {
-    border-top: 1px solid var(--border-color);
+  .server-item:last-child {
+    border-bottom: none;
   }
 
   .server-header {
@@ -205,15 +199,15 @@
   .server-name {
     font-weight: 600;
     font-size: 13px;
-    color: var(--text-primary);
+    color: var(--text-100);
   }
 
   .server-source {
     padding: 2px 6px;
-    background: var(--bg-tertiary);
+    background: var(--bg-200);
     border-radius: 3px;
-    font-size: 11px;
-    color: var(--text-secondary);
+    font-size: 10px;
+    color: var(--text-400);
     flex-shrink: 0;
   }
 
@@ -233,16 +227,8 @@
 
   .server-tools-count {
     font-size: 11px;
-    color: var(--text-secondary);
+    color: var(--text-400);
     margin-top: 4px;
-  }
-
-  .server-meta {
-    display: flex;
-    gap: 8px;
-    font-size: 11px;
-    color: var(--text-secondary);
-    margin-bottom: 6px;
   }
 
   .server-error {
@@ -256,32 +242,35 @@
 
   .tools-list {
     margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
   }
 
   .tool-item {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 6px;
-    background: var(--bg-primary);
-    border-radius: 3px;
+    padding: 6px 8px;
+    background: var(--bg-100);
+    border-radius: 4px;
+    overflow: hidden;
   }
 
   .tool-name {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
-    color: var(--text-primary);
-    font-family: var(--font-mono);
+    color: var(--text-200);
+    font-family: var(--font-family-mono);
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .tool-description {
-    font-size: 10px;
-    color: var(--text-secondary);
-    line-height: 1.4;
+    display: block;
+    font-size: 11px;
+    color: var(--text-400);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

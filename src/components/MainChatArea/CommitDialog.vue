@@ -1,6 +1,6 @@
 <script setup lang="ts">
   import { useGitStore } from '@/stores/git'
-  import { XModal, XSwitch } from '@/ui'
+  import { XButton, XModal, XSwitch } from '@/ui'
   import { computed, ref, watch } from 'vue'
   import { useI18n } from 'vue-i18n'
 
@@ -225,15 +225,9 @@
       </div>
 
       <!-- Action Button -->
-      <button
-        class="continue-btn"
-        :class="{ disabled: !canCommit }"
-        :disabled="!canCommit || isLoading"
-        @click="handleContinue"
-      >
-        <span v-if="isLoading" class="loading-spinner" />
-        <span v-else>{{ t('common.continue') }}</span>
-      </button>
+      <XButton variant="primary" block :disabled="!canCommit" :loading="isLoading" @click="handleContinue">
+        {{ t('common.continue') }}
+      </XButton>
     </div>
   </XModal>
 </template>
@@ -428,41 +422,7 @@
     flex-shrink: 0;
   }
 
-  .continue-btn {
-    width: 100%;
-    padding: 12px;
+  .commit-dialog :deep(.x-button--block) {
     margin-top: 20px;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--bg-100);
-    background: var(--text-100);
-    border: none;
-    border-radius: var(--border-radius-lg);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .continue-btn:hover:not(.disabled) {
-    opacity: 0.9;
-  }
-
-  .continue-btn.disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .loading-spinner {
-    width: 16px;
-    height: 16px;
-    border: 2px solid transparent;
-    border-top-color: var(--bg-100);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 </style>

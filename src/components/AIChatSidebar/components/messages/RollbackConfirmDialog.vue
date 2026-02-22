@@ -4,7 +4,7 @@
   import { useRollbackDialogStore } from '@/stores/rollbackDialog'
   import { useWorkspaceStore } from '@/stores/workspace'
   import type { FileChangeType } from '@/types/domain/checkpoint'
-  import { XModal } from '@/ui'
+  import { XButton, XModal } from '@/ui'
   import { ref } from 'vue'
   import { useI18n } from 'vue-i18n'
 
@@ -150,15 +150,12 @@
     <div class="dialog-footer">
       <div class="dialog-footer-left"></div>
       <div class="dialog-footer-right">
-        <button class="dialog-btn dialog-btn--secondary" @click="handleClose" :disabled="isConfirming">
+        <XButton variant="secondary" :disabled="isConfirming" @click="handleClose">
           {{ t('dialog.cancel') }}
-        </button>
-        <button class="dialog-btn dialog-btn--primary" @click="handleConfirm" :disabled="isConfirming || store.loading">
-          <svg v-if="isConfirming" class="spinner" viewBox="0 0 16 16">
-            <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="30 10" />
-          </svg>
+        </XButton>
+        <XButton variant="primary" :disabled="store.loading" :loading="isConfirming" @click="handleConfirm">
           {{ t('dialog.confirm') }}
-        </button>
+        </XButton>
       </div>
     </div>
   </XModal>
@@ -333,60 +330,6 @@
     display: flex;
     align-items: center;
     gap: 8px;
-  }
-
-  .dialog-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 7px 16px;
-    font-size: 13px;
-    font-weight: 500;
-    border-radius: var(--border-radius-lg);
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition: all 0.12s ease;
-  }
-
-  .dialog-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .dialog-btn--primary {
-    background: var(--text-100);
-    color: var(--bg-100);
-    border-color: var(--text-100);
-  }
-
-  .dialog-btn--primary:hover:not(:disabled) {
-    opacity: 0.85;
-  }
-
-  .dialog-btn--secondary {
-    background: var(--bg-200);
-    color: var(--text-200);
-    border-color: var(--border-200);
-  }
-
-  .dialog-btn--secondary:hover:not(:disabled) {
-    background: var(--bg-300);
-    border-color: var(--border-300);
-  }
-
-  .spinner {
-    width: 14px;
-    height: 14px;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
   }
 </style>
 

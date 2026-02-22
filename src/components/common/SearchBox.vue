@@ -234,9 +234,9 @@
   }
 
   .toggle-btn.active {
-    background: var(--color-primary);
+    background: var(--text-100);
     color: var(--bg-100);
-    border-color: var(--color-primary);
+    border-color: var(--text-100);
   }
 
   .close-btn {

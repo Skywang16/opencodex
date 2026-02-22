@@ -614,8 +614,15 @@
   }
 
   .toolbar-icon-btn--active {
-    background: var(--bg-200);
-    color: var(--text-200);
+    background: var(--text-100);
+    border-color: var(--text-100);
+    color: var(--bg-100);
+  }
+
+  .toolbar-icon-btn--active:hover {
+    background: var(--text-200);
+    border-color: var(--text-200);
+    color: var(--bg-100);
   }
 
   .toolbar-icon-btn--active svg {

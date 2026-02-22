@@ -8,6 +8,7 @@
   import { useProjectRules } from '@/composables/useProjectRules'
   import { useTerminalSelection } from '@/composables/useTerminalSelection'
   import { useTerminalStore } from '@/stores/Terminal'
+  import { useWorkspaceStore } from '@/stores/workspace'
   import { SLASH_COMMANDS, SLASH_COMMAND_ICONS, type SlashCommand } from '@/types/slashCommand'
   import { createMessage } from '@/ui/composables/message-api'
   import { getImageFromClipboard, processImageFile, validateImageFile } from '@/utils/imageUtils'
@@ -80,7 +81,8 @@
   const aiChatStore = useAIChatStore()
 
   const terminalStore = useTerminalStore()
-  const activeTerminalCwd = computed(() => terminalStore.activeTerminal?.cwd || null)
+  const workspaceStore = useWorkspaceStore()
+  const workspacePath = computed(() => workspaceStore.currentWorkspacePath ?? null)
 
   const homePath = ref<string>('')
 
@@ -315,9 +317,9 @@
   })
 
   const syncResolvedPath = () => {
-    const cwd = activeTerminalCwd.value
-    if (cwd) {
-      resolvedPath.value = cwd
+    const wp = workspacePath.value
+    if (wp) {
+      resolvedPath.value = wp
       return
     }
 
@@ -340,7 +342,7 @@
   )
 
   watch(
-    [activeTerminalCwd, () => indexStatus.value.path],
+    [workspacePath, () => indexStatus.value.path],
     () => {
       syncResolvedPath()
     },
@@ -380,17 +382,17 @@
   }
 
   const checkVectorIndexStatus = async () => {
-    const activeTerminal = terminalStore.terminals.find(t => t.id === terminalStore.activeTerminalId)
-    if (!activeTerminal || !activeTerminal.cwd) {
+    const wp = workspacePath.value
+    if (!wp) {
       indexStatus.value = { isReady: false, path: '' }
       return
     }
-    const status = await vdbApi.getIndexStatus({ path: activeTerminal.cwd })
+    const status = await vdbApi.getIndexStatus({ path: wp })
     indexStatus.value = { isReady: status.isReady, path: status.path, size: status.size }
   }
 
-  watch(activeTerminalCwd, cwd => {
-    if (!cwd) {
+  watch(workspacePath, wp => {
+    if (!wp) {
       indexStatus.value = { isReady: false, path: '' }
       return
     }
@@ -411,9 +413,8 @@
   }
 
   const rebuildVectorIndex = async () => {
-    const activeTerminal = terminalStore.terminals.find(t => t.id === terminalStore.activeTerminalId)
-    if (!activeTerminal || !activeTerminal.cwd) return
-    const targetPath = activeTerminal.cwd
+    const targetPath = workspacePath.value
+    if (!targetPath) return
 
     isBuilding.value = true
     buildProgress.value = 0
@@ -460,10 +461,10 @@
   }
 
   const cancelVectorIndex = async () => {
-    const activeTerminal = terminalStore.terminals.find(t => t.id === terminalStore.activeTerminalId)
-    if (!activeTerminal || !activeTerminal.cwd) return
+    const targetPath = workspacePath.value
+    if (!targetPath) return
 
-    await vdbApi.cancelBuild({ root: activeTerminal.cwd })
+    await vdbApi.cancelBuild({ root: targetPath })
     await buildSubscription?.unsubscribe().catch(() => {})
     buildSubscription = null
 
@@ -472,10 +473,10 @@
   }
 
   const deleteVectorIndex = async () => {
-    const activeTerminal = terminalStore.terminals.find(t => t.id === terminalStore.activeTerminalId)
-    if (!activeTerminal || !activeTerminal.cwd) return
+    const targetPath = workspacePath.value
+    if (!targetPath) return
 
-    await vdbApi.deleteWorkspaceIndex(activeTerminal.cwd)
+    await vdbApi.deleteWorkspaceIndex(targetPath)
     await checkVectorIndexStatus()
   }
 
@@ -502,7 +503,7 @@
 
     nodeVersion.setupListener(() => terminalSelection.currentTerminalTab.value?.terminalId ?? 0)
 
-    const targetPath = indexStatus.value.path || activeTerminalCwd.value
+    const targetPath = indexStatus.value.path || workspacePath.value
     if (targetPath) {
       const progress = await vdbApi.getBuildStatus({ root: targetPath })
       if (progress && !progress.isDone) {

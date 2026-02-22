@@ -202,9 +202,9 @@
   }
 
   .btn-primary {
-    background: var(--color-primary-alpha);
-    border-color: var(--color-primary);
-    color: var(--text-100);
+    background: var(--text-100);
+    border-color: var(--text-100);
+    color: var(--bg-100);
   }
 
   .drawer-enter-active,

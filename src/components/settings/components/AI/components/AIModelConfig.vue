@@ -392,7 +392,11 @@
           <!-- API Key Form -->
           <div v-if="formData.authType === 'apikey'" class="form-body">
             <XFormGroup :label="t('ai_model.provider')" required>
-              <select v-model="formData.provider" class="form-select" @change="handleProviderChange(($event.target as HTMLSelectElement).value)">
+              <select
+                v-model="formData.provider"
+                class="form-select"
+                @change="handleProviderChange(($event.target as HTMLSelectElement).value)"
+              >
                 <option value="" disabled>{{ t('ai_model.select_provider') }}</option>
                 <option v-for="p in providerOptions" :key="p.value" :value="p.value">{{ p.label }}</option>
               </select>
@@ -434,7 +438,11 @@
               />
             </div>
 
-            <XFormGroup v-if="formData.provider && hasPresetModels && !formData.useCustomModel" :label="t('ai_model.model')" required>
+            <XFormGroup
+              v-if="formData.provider && hasPresetModels && !formData.useCustomModel"
+              :label="t('ai_model.model')"
+              required
+            >
               <select v-model="formData.model" class="form-select">
                 <option value="" disabled>{{ t('ai_model.select_model') }}</option>
                 <option v-for="m in availableModels" :key="m.value" :value="m.value">{{ m.label }}</option>
@@ -458,7 +466,11 @@
               />
             </div>
 
-            <XFormGroup v-if="formData.provider && (formData.useCustomBaseUrl || !hasPresetModels)" :label="t('ai_model.api_url')" required>
+            <XFormGroup
+              v-if="formData.provider && (formData.useCustomBaseUrl || !hasPresetModels)"
+              :label="t('ai_model.api_url')"
+              required
+            >
               <XInput v-model="formData.apiUrl" type="url" :placeholder="t('ai_model.api_url_placeholder')" />
             </XFormGroup>
 
@@ -679,18 +691,16 @@
     padding: 10px 20px;
     font-size: 13px;
     font-weight: 600;
-    color: white;
-    background: var(--color-primary);
+    color: var(--bg-100);
+    background: var(--text-100);
     border: none;
     border-radius: var(--border-radius-xl);
     cursor: pointer;
     transition: all 0.2s ease;
-    box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--color-primary) 40%, transparent);
   }
 
   .add-first-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px -2px color-mix(in srgb, var(--color-primary) 50%, transparent);
+    background: var(--text-200);
   }
 
   .add-first-btn:active {
@@ -1182,7 +1192,7 @@
     font-size: 13px;
     font-weight: 600;
     color: var(--bg-100);
-    background: var(--color-primary);
+    background: var(--text-100);
     border: none;
     border-radius: var(--border-radius-lg);
     cursor: pointer;
@@ -1190,12 +1200,11 @@
   }
 
   .auth-btn:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px -2px color-mix(in srgb, var(--color-primary) 40%, transparent);
+    background: var(--text-200);
   }
 
   .auth-btn:active:not(:disabled) {
-    transform: translateY(0);
+    background: var(--text-100);
   }
 
   .auth-btn:disabled {
@@ -1267,7 +1276,7 @@
     font-size: 13px;
     font-weight: 600;
     color: var(--bg-100);
-    background: var(--color-primary);
+    background: var(--text-100);
     border: none;
     border-radius: var(--border-radius-lg);
     cursor: pointer;
@@ -1275,12 +1284,11 @@
   }
 
   .primary-btn:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px -2px color-mix(in srgb, var(--color-primary) 40%, transparent);
+    background: var(--text-200);
   }
 
   .primary-btn:active:not(:disabled) {
-    transform: translateY(0);
+    background: var(--text-100);
   }
 
   .primary-btn:disabled {

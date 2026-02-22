@@ -1,8 +1,8 @@
 <script setup lang="ts">
   import { computed, ref, watch, onMounted, reactive } from 'vue'
-  import { terminalContextApi, aiApi, vectorDbApi as vdbApi } from '@/api'
+  import { aiApi, vectorDbApi as vdbApi } from '@/api'
   import { useI18n } from 'vue-i18n'
-  import { useTerminalStore } from '@/stores/Terminal'
+  import { useWorkspaceStore } from '@/stores/workspace'
   import { homeDir } from '@tauri-apps/api/path'
   import { getPathBasename } from '@/utils/path'
   import { useAISettingsStore } from '@/components/settings/components/AI/store'
@@ -59,7 +59,8 @@
     return t('ck.index_not_ready')
   })
 
-  const terminalStore = useTerminalStore()
+  const workspaceStore = useWorkspaceStore()
+  const workspacePath = computed(() => workspaceStore.currentWorkspacePath ?? null)
 
   const displayPath = ref(props.indexStatus.path)
   const resolvedPath = ref<string>(props.indexStatus.path || '.')
@@ -68,25 +69,12 @@
 
   const normalize = (p: string) => p.replace(/\\/g, '/').replace(/\/$/, '')
 
-  const refreshDisplayPath = async () => {
+  const refreshDisplayPath = () => {
     let p = props.indexStatus.path
     if (!p || p === '.') {
-      // Get current working directory from active terminal
-      const activeTerminal = terminalStore.activeTerminal
-      if (activeTerminal?.cwd) {
-        p = activeTerminal.cwd
-      }
-      if (!p || p === '.') {
-        try {
-          const ctx = await terminalContextApi.getActiveTerminalContext()
-          const cwd = ctx?.currentWorkingDirectory
-          if (cwd) p = cwd
-        } catch (e) {
-          console.error('Failed to get active terminal context', e)
-        }
-      }
+      p = workspacePath.value || '.'
     }
-    resolvedPath.value = p || '.'
+    resolvedPath.value = p
     displayPath.value = p && p !== '.' ? getPathBasename(p) : '.'
   }
 
@@ -296,7 +284,12 @@
           </XFormGroup>
 
           <!-- Dimension -->
-          <XFormGroup :label="t('embedding_model.dimension')" required :error="errors.dimension" :hint="t('embedding_model.dimension_hint')">
+          <XFormGroup
+            :label="t('embedding_model.dimension')"
+            required
+            :error="errors.dimension"
+            :hint="t('embedding_model.dimension_hint')"
+          >
             <XInput v-model="formData.dimension" type="number" placeholder="1536" />
           </XFormGroup>
 

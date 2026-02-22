@@ -84,14 +84,14 @@
   }
 
   input:checked + .slider {
-    background-color: var(--color-primary);
-    border-color: var(--color-primary);
+    background-color: var(--text-100);
+    border-color: var(--text-100);
   }
 
   input:checked + .slider:before {
     transform: translateX(22px);
     background-color: var(--bg-100);
-    border-color: var(--color-primary);
+    border-color: var(--text-100);
   }
 
   .base-switch:hover:not(.is-disabled) .slider {
@@ -99,8 +99,8 @@
   }
 
   .base-switch:hover:not(.is-disabled) input:checked + .slider {
-    background-color: var(--color-primary);
-    opacity: 0.8;
+    background-color: var(--text-200);
+    opacity: 1;
   }
 
   .base-switch input:focus + .slider {
