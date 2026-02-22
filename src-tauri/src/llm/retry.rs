@@ -147,7 +147,7 @@ where
 {
     let mut last_err: Option<E> = None;
 
-    for attempt in 0..=config.max_retries {
+    for attempt in 0..config.max_retries {
         match op().await {
             Ok(v) => {
                 if attempt > 0 {
@@ -156,13 +156,13 @@ where
                 return Ok(v);
             }
             Err(e) => {
-                let is_last = attempt == config.max_retries;
+                let is_last = attempt == config.max_retries - 1;
                 if !is_last && is_retryable(&e) {
                     let delay = config.delay_for_attempt(attempt);
                     tracing::warn!(
                         "LLM failed (attempt {}/{}): {}. Retry in {:?}",
                         attempt + 1,
-                        config.max_retries + 1,
+                        config.max_retries,
                         e,
                         delay
                     );
@@ -170,11 +170,7 @@ where
                     last_err = Some(e);
                 } else {
                     if is_last && is_retryable(&e) {
-                        tracing::error!(
-                            "LLM failed after {} retries: {}",
-                            config.max_retries + 1,
-                            e
-                        );
+                        tracing::error!("LLM failed after {} retries: {}", config.max_retries, e);
                     }
                     return Err(e);
                 }

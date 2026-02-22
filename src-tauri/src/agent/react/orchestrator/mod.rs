@@ -159,7 +159,7 @@ impl ReactOrchestrator {
             // Orchestrator owns the stream retry loop so it can emit TaskRetrying
             // events to the frontend between attempts.
             let retry_cfg = crate::llm::retry::RetryConfig::for_stream();
-            let max_attempts = retry_cfg.max_retries + 1;
+            let max_attempts = retry_cfg.max_retries;
             let mut attempt = 0u32;
 
             let mut stream = loop {
