@@ -6,7 +6,7 @@
   import { aiApi } from '@/api'
   import { useLLMRegistry, type ModelOption } from '@/composables/useLLMRegistry'
   import { useOAuth } from '@/composables/useOAuth'
-  import { confirmDanger } from '@/ui'
+  import { confirmDanger, XFormGroup, XInput } from '@/ui'
   import { computed, onMounted, reactive, ref } from 'vue'
   import { useI18n } from 'vue-i18n'
   import { useAISettingsStore } from '../store'
@@ -391,39 +391,35 @@
 
           <!-- API Key Form -->
           <div v-if="formData.authType === 'apikey'" class="form-body">
-            <div class="form-group">
-              <label class="form-label">{{ t('ai_model.provider') }}</label>
-              <x-select
-                v-model="formData.provider"
-                :options="providerOptions.map(p => ({ value: p.value, label: p.label }))"
-                :placeholder="t('ai_model.select_provider')"
-                @update:modelValue="handleProviderChange"
-              />
-            </div>
+            <XFormGroup :label="t('ai_model.provider')" required>
+              <select v-model="formData.provider" class="form-select" @change="handleProviderChange(($event.target as HTMLSelectElement).value)">
+                <option value="" disabled>{{ t('ai_model.select_provider') }}</option>
+                <option v-for="p in providerOptions" :key="p.value" :value="p.value">{{ p.label }}</option>
+              </select>
+            </XFormGroup>
 
-            <div v-if="formData.provider" class="form-group">
-              <label class="form-label">{{ t('ai_model.api_key') }}</label>
-              <div class="input-with-toggle">
-                <input
-                  v-model="formData.apiKey"
-                  :type="showApiKey ? 'text' : 'password'"
-                  class="form-input mono"
-                  :placeholder="t('ai_model.api_key_placeholder')"
-                />
-                <button type="button" class="toggle-visibility-btn" @click="showApiKey = !showApiKey" tabindex="-1">
-                  <svg v-if="showApiKey" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                    <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
-                    <line x1="1" y1="1" x2="23" y2="23" />
-                  </svg>
-                  <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                </button>
-              </div>
-            </div>
+            <XFormGroup v-if="formData.provider" :label="t('ai_model.api_key')" required>
+              <XInput
+                v-model="formData.apiKey"
+                :type="showApiKey ? 'text' : 'password'"
+                :placeholder="t('ai_model.api_key_placeholder')"
+              >
+                <template #suffix>
+                  <button type="button" class="toggle-visibility-btn" @click="showApiKey = !showApiKey" tabindex="-1">
+                    <svg v-if="showApiKey" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                      <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+                      <line x1="1" y1="1" x2="23" y2="23" />
+                    </svg>
+                    <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  </button>
+                </template>
+              </XInput>
+            </XFormGroup>
 
             <div v-if="formData.provider && hasPresetModels" class="form-group inline">
               <label class="form-label">{{ t('ai_model.use_custom_model') || 'Custom Model ID' }}</label>
@@ -438,20 +434,16 @@
               />
             </div>
 
-            <div v-if="formData.provider && hasPresetModels && !formData.useCustomModel" class="form-group">
-              <label class="form-label">{{ t('ai_model.model') }}</label>
-              <x-select v-model="formData.model" :options="availableModels" :placeholder="t('ai_model.select_model')" />
-            </div>
+            <XFormGroup v-if="formData.provider && hasPresetModels && !formData.useCustomModel" :label="t('ai_model.model')" required>
+              <select v-model="formData.model" class="form-select">
+                <option value="" disabled>{{ t('ai_model.select_model') }}</option>
+                <option v-for="m in availableModels" :key="m.value" :value="m.value">{{ m.label }}</option>
+              </select>
+            </XFormGroup>
 
-            <div v-else-if="formData.provider" class="form-group">
-              <label class="form-label">{{ t('ai_model.model_name') }}</label>
-              <input
-                v-model="formData.model"
-                type="text"
-                class="form-input"
-                :placeholder="t('ai_model.model_name_placeholder')"
-              />
-            </div>
+            <XFormGroup v-else-if="formData.provider" :label="t('ai_model.model_name')" required>
+              <XInput v-model="formData.model" :placeholder="t('ai_model.model_name_placeholder')" />
+            </XFormGroup>
 
             <div v-if="formData.provider && hasPresetModels" class="form-group inline">
               <label class="form-label">{{ t('ai_model.use_custom_base_url') }}</label>
@@ -466,15 +458,9 @@
               />
             </div>
 
-            <div v-if="formData.provider && (formData.useCustomBaseUrl || !hasPresetModels)" class="form-group">
-              <label class="form-label">{{ t('ai_model.api_url') }}</label>
-              <input
-                v-model="formData.apiUrl"
-                type="url"
-                class="form-input mono"
-                :placeholder="t('ai_model.api_url_placeholder')"
-              />
-            </div>
+            <XFormGroup v-if="formData.provider && (formData.useCustomBaseUrl || !hasPresetModels)" :label="t('ai_model.api_url')" required>
+              <XInput v-model="formData.apiUrl" type="url" :placeholder="t('ai_model.api_url_placeholder')" />
+            </XFormGroup>
 
             <!-- Responses API / Deep Thinking toggle -->
             <div v-if="formData.model && supportsDeepThinking" class="form-group inline">
@@ -557,10 +543,12 @@
               </div>
             </div>
 
-            <div v-if="formData.oauthConfig" class="form-group">
-              <label class="form-label">{{ t('ai_model.model') }}</label>
-              <x-select v-model="formData.model" :options="availableModels" :placeholder="t('ai_model.select_model')" />
-            </div>
+            <XFormGroup v-if="formData.oauthConfig" :label="t('ai_model.model')" required>
+              <select v-model="formData.model" class="form-select">
+                <option value="" disabled>{{ t('ai_model.select_model') }}</option>
+                <option v-for="m in availableModels" :key="m.value" :value="m.value">{{ m.label }}</option>
+              </select>
+            </XFormGroup>
           </div>
 
           <!-- Form Actions -->
@@ -1015,6 +1003,40 @@
 
   .form-input::placeholder {
     color: var(--text-500);
+  }
+
+  .form-select {
+    width: 100%;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    padding: 11px 36px 11px 14px;
+    background: var(--bg-200);
+    border: 1px solid var(--border-200);
+    border-radius: var(--border-radius-lg);
+    font-size: 14px;
+    color: var(--text-100);
+    outline: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+  }
+
+  .form-select:hover {
+    border-color: var(--border-300);
+  }
+
+  .form-select:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 15%, transparent);
+  }
+
+  .form-select option {
+    background: var(--bg-100);
+    color: var(--text-100);
+    padding: 8px;
   }
 
   .input-with-toggle {

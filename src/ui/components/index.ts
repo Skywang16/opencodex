@@ -10,3 +10,6 @@ export { default as XModal } from './Modal.vue'
 export { default as XSearchInput } from './SearchInput.vue'
 export { default as XSelect } from './Select.vue'
 export { default as XSwitch } from './Switch.vue'
+
+// Form components
+export { XFormGroup, XInput, XTextarea } from './form'

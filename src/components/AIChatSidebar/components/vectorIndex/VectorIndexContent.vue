@@ -8,6 +8,7 @@
   import { useAISettingsStore } from '@/components/settings/components/AI/store'
   import type { AIModelTestConnectionInput } from '@/api/ai/types'
   import { AuthType } from '@/types/oauth'
+  import { XFormGroup, XInput } from '@/ui'
 
   const { t } = useI18n()
   const aiSettingsStore = useAISettingsStore()
@@ -280,67 +281,24 @@
         <!-- Not configured or edit mode: show form -->
         <div v-if="!hasEmbeddingModel || showForm" class="embedding-form">
           <!-- API URL -->
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">{{ t('embedding_model.api_url') }} *</label>
-              <input
-                v-model="formData.apiUrl"
-                type="url"
-                class="form-input"
-                :class="{ error: errors.apiUrl }"
-                placeholder="https://api.openai.com/v1"
-              />
-              <div v-if="errors.apiUrl" class="error-message">{{ errors.apiUrl }}</div>
-            </div>
-          </div>
+          <XFormGroup :label="t('embedding_model.api_url')" required :error="errors.apiUrl">
+            <XInput v-model="formData.apiUrl" type="url" placeholder="https://api.openai.com/v1" />
+          </XFormGroup>
 
           <!-- API Key -->
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">{{ t('embedding_model.api_key') }} *</label>
-              <input
-                v-model="formData.apiKey"
-                type="password"
-                class="form-input"
-                :class="{ error: errors.apiKey }"
-                :placeholder="t('embedding_model.api_key_placeholder')"
-              />
-              <div v-if="errors.apiKey" class="error-message">{{ errors.apiKey }}</div>
-            </div>
-          </div>
+          <XFormGroup :label="t('embedding_model.api_key')" required :error="errors.apiKey">
+            <XInput v-model="formData.apiKey" type="password" :placeholder="t('embedding_model.api_key_placeholder')" />
+          </XFormGroup>
 
           <!-- Model Name -->
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">{{ t('embedding_model.model_name') }} *</label>
-              <input
-                v-model="formData.modelName"
-                type="text"
-                class="form-input"
-                :class="{ error: errors.modelName }"
-                placeholder="text-embedding-3-small"
-              />
-              <div v-if="errors.modelName" class="error-message">{{ errors.modelName }}</div>
-            </div>
-          </div>
+          <XFormGroup :label="t('embedding_model.model_name')" required :error="errors.modelName">
+            <XInput v-model="formData.modelName" placeholder="text-embedding-3-small" />
+          </XFormGroup>
 
           <!-- Dimension -->
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">{{ t('embedding_model.dimension') }} *</label>
-              <input
-                v-model.number="formData.dimension"
-                type="number"
-                class="form-input"
-                :class="{ error: errors.dimension }"
-                placeholder="1536"
-                min="64"
-                max="8192"
-              />
-              <div class="form-description">{{ t('embedding_model.dimension_hint') }}</div>
-              <div v-if="errors.dimension" class="error-message">{{ errors.dimension }}</div>
-            </div>
-          </div>
+          <XFormGroup :label="t('embedding_model.dimension')" required :error="errors.dimension" :hint="t('embedding_model.dimension_hint')">
+            <XInput v-model="formData.dimension" type="number" placeholder="1536" />
+          </XFormGroup>
 
           <!-- Form buttons -->
           <div class="form-actions">

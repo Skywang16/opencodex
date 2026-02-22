@@ -5,6 +5,9 @@ export type Size = 'small' | 'medium' | 'large'
 export type Theme = 'light' | 'dark'
 export type Placement = 'top' | 'top-start' | 'top-end' | 'bottom' | 'bottom-start' | 'bottom-end' | 'left' | 'right'
 
+// Re-export form types
+export type { FormStatus, FormGroupProps, InputEmits, InputProps, TextareaEmits, TextareaProps } from '../components/form/types'
+
 // Button component property types
 export interface ButtonProps {
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'link'

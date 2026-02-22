@@ -2,7 +2,7 @@
   import { mcpApi, settingsApi } from '@/api'
   import type { McpServerConfig } from '@/api/settings/types'
   import { useWorkspaceStore } from '@/stores/workspace'
-  import { XModal, XSwitch, createMessage } from '@/ui'
+  import { XFormGroup, XInput, XModal, XSwitch, XTextarea, createMessage } from '@/ui'
   import { debounce } from 'lodash-es'
   import { computed, onMounted, ref, watch } from 'vue'
   import { useI18n } from 'vue-i18n'
@@ -55,6 +55,82 @@
   const newServerArgs = ref('')
   const newServerUrl = ref('')
   const newServerEnv = ref('')
+
+  // Form validation errors
+  const formErrors = ref({
+    name: '',
+    command: '',
+    url: '',
+    env: '',
+  })
+
+  const clearErrors = () => {
+    formErrors.value = { name: '', command: '', url: '', env: '' }
+  }
+
+  const validateAddForm = (): boolean => {
+    clearErrors()
+    let isValid = true
+
+    if (!newServerName.value.trim()) {
+      formErrors.value.name = t('mcp_settings.name_required')
+      isValid = false
+    }
+
+    if (newServerType.value === 'stdio') {
+      if (!newServerCommand.value.trim()) {
+        formErrors.value.command = t('mcp_settings.command_required')
+        isValid = false
+      }
+      if (newServerEnv.value.trim()) {
+        try {
+          JSON.parse(newServerEnv.value)
+        } catch {
+          formErrors.value.env = t('mcp_settings.invalid_json')
+          isValid = false
+        }
+      }
+    } else {
+      if (!newServerUrl.value.trim()) {
+        formErrors.value.url = t('mcp_settings.url_required')
+        isValid = false
+      }
+    }
+
+    return isValid
+  }
+
+  const validateEditForm = (): boolean => {
+    clearErrors()
+    let isValid = true
+
+    if (!newServerName.value.trim()) {
+      formErrors.value.name = t('mcp_settings.name_required')
+      isValid = false
+    }
+
+    if (newServerType.value === 'stdio') {
+      if (!newServerCommand.value.trim()) {
+        formErrors.value.command = t('mcp_settings.command_required')
+        isValid = false
+      }
+      if (newServerEnv.value.trim()) {
+        try {
+          JSON.parse(newServerEnv.value)
+        } catch {
+          formErrors.value.env = t('mcp_settings.invalid_json')
+          isValid = false
+        }
+      }
+    } else {
+      if (!newServerUrl.value.trim()) {
+        formErrors.value.url = t('mcp_settings.url_required')
+        isValid = false
+      }
+    }
+
+    return isValid
+  }
 
   const isJsonMode = ref(false)
   const jsonContent = ref('')
@@ -167,6 +243,7 @@
     newServerArgs.value = ''
     newServerUrl.value = ''
     newServerEnv.value = ''
+    clearErrors()
   }
 
   const openAddModal = () => {
@@ -175,6 +252,7 @@
   }
 
   const openEditModal = (name: string) => {
+    clearErrors()
     const config = mcpServers.value[name]
     if (config) {
       editingServerName.value = name
@@ -182,7 +260,7 @@
       newServerType.value = config.type
       if (config.type === 'stdio') {
         newServerCommand.value = config.command
-        newServerArgs.value = config.args?.join(' ') || ''
+        newServerArgs.value = config.args?.join('\n') || ''
         newServerEnv.value = config.env ? JSON.stringify(config.env, null, 2) : ''
       } else {
         newServerUrl.value = config.url
@@ -192,28 +270,17 @@
   }
 
   const saveNewServer = async () => {
-    if (!newServerName.value.trim()) {
-      createMessage.error(t('mcp_settings.name_required'))
-      return
-    }
+    if (!validateAddForm()) return
 
     let config: McpServerConfig
     if (newServerType.value === 'stdio') {
-      if (!newServerCommand.value.trim()) {
-        createMessage.error(t('mcp_settings.command_required'))
-        return
-      }
       config = {
         type: 'stdio',
         command: newServerCommand.value.trim(),
-        args: newServerArgs.value.trim() ? newServerArgs.value.trim().split(/\s+/) : undefined,
+        args: newServerArgs.value.trim() ? newServerArgs.value.trim().split('\n').filter(Boolean) : undefined,
         env: newServerEnv.value.trim() ? JSON.parse(newServerEnv.value) : undefined,
       }
     } else {
-      if (!newServerUrl.value.trim()) {
-        createMessage.error(t('mcp_settings.url_required'))
-        return
-      }
       config = {
         type: newServerType.value,
         url: newServerUrl.value.trim(),
@@ -232,16 +299,15 @@
   }
 
   const updateServer = async () => {
-    if (!editingServerName.value || !newServerName.value.trim()) {
-      return
-    }
+    if (!validateEditForm()) return
+    if (!editingServerName.value) return
 
     let config: McpServerConfig
     if (newServerType.value === 'stdio') {
       config = {
         type: 'stdio',
         command: newServerCommand.value.trim(),
-        args: newServerArgs.value.trim() ? newServerArgs.value.trim().split(/\s+/) : undefined,
+        args: newServerArgs.value.trim() ? newServerArgs.value.trim().split('\n').filter(Boolean) : undefined,
         env: newServerEnv.value.trim() ? JSON.parse(newServerEnv.value) : undefined,
       }
     } else {
@@ -446,62 +512,36 @@
     </div>
 
     <!-- Add Server Modal -->
-    <XModal v-model:visible="showAddModal" :title="t('mcp_settings.add_server')" width="480px">
+    <XModal v-model:visible="showAddModal" :title="t('mcp_settings.add_server')" size="small" :show-footer="true">
       <div class="modal-form">
-        <div class="form-group">
-          <label class="form-label">{{ t('mcp_settings.server_name') }}</label>
-          <input
-            v-model="newServerName"
-            type="text"
-            class="form-input"
-            :placeholder="t('mcp_settings.server_name_placeholder')"
-          />
-        </div>
+        <XFormGroup :label="t('mcp_settings.server_name')" required :error="formErrors.name">
+          <XInput v-model="newServerName" :placeholder="t('mcp_settings.server_name_placeholder')" />
+        </XFormGroup>
 
-        <div class="form-group">
-          <label class="form-label">{{ t('mcp_settings.server_type') }}</label>
+        <XFormGroup :label="t('mcp_settings.server_type')">
           <select v-model="newServerType" class="form-select">
             <option value="stdio">Stdio</option>
             <option value="sse">SSE</option>
             <option value="streamable_http">Streamable HTTP</option>
           </select>
-        </div>
+        </XFormGroup>
 
         <template v-if="newServerType === 'stdio'">
-          <div class="form-group">
-            <label class="form-label">{{ t('mcp_settings.command') }}</label>
-            <input
-              v-model="newServerCommand"
-              type="text"
-              class="form-input"
-              placeholder="npx -y @modelcontextprotocol/server"
-            />
-          </div>
-          <div class="form-group">
-            <label class="form-label">{{ t('mcp_settings.args') }}</label>
-            <input
-              v-model="newServerArgs"
-              type="text"
-              class="form-input"
-              :placeholder="t('mcp_settings.args_placeholder')"
-            />
-          </div>
-          <div class="form-group">
-            <label class="form-label">{{ t('mcp_settings.env') }}</label>
-            <textarea
-              v-model="newServerEnv"
-              class="form-textarea"
-              rows="3"
-              :placeholder="t('mcp_settings.env_placeholder')"
-            />
-          </div>
+          <XFormGroup :label="t('mcp_settings.command')" required :error="formErrors.command">
+            <XInput v-model="newServerCommand" placeholder="npx -y @modelcontextprotocol/server" />
+          </XFormGroup>
+          <XFormGroup :label="t('mcp_settings.args')" :hint="t('mcp_settings.args_hint')">
+            <XTextarea v-model="newServerArgs" :rows="3" :placeholder="t('mcp_settings.args_placeholder')" />
+          </XFormGroup>
+          <XFormGroup :label="t('mcp_settings.env')" :error="formErrors.env">
+            <XTextarea v-model="newServerEnv" :rows="3" :placeholder="t('mcp_settings.env_placeholder')" />
+          </XFormGroup>
         </template>
 
         <template v-else>
-          <div class="form-group">
-            <label class="form-label">URL</label>
-            <input v-model="newServerUrl" type="text" class="form-input" placeholder="https://example.com/mcp" />
-          </div>
+          <XFormGroup label="URL" required :error="formErrors.url">
+            <XInput v-model="newServerUrl" placeholder="https://example.com/mcp" />
+          </XFormGroup>
         </template>
       </div>
 
@@ -514,42 +554,36 @@
     </XModal>
 
     <!-- Edit Server Modal -->
-    <XModal v-model:visible="showEditModal" :title="t('mcp_settings.edit_server')" width="480px">
+    <XModal v-model:visible="showEditModal" :title="t('mcp_settings.edit_server')" size="small" :show-footer="true">
       <div class="modal-form">
-        <div class="form-group">
-          <label class="form-label">{{ t('mcp_settings.server_name') }}</label>
-          <input v-model="newServerName" type="text" class="form-input" />
-        </div>
+        <XFormGroup :label="t('mcp_settings.server_name')" required :error="formErrors.name">
+          <XInput v-model="newServerName" />
+        </XFormGroup>
 
-        <div class="form-group">
-          <label class="form-label">{{ t('mcp_settings.server_type') }}</label>
+        <XFormGroup :label="t('mcp_settings.server_type')">
           <select v-model="newServerType" class="form-select">
             <option value="stdio">Stdio</option>
             <option value="sse">SSE</option>
             <option value="streamable_http">Streamable HTTP</option>
           </select>
-        </div>
+        </XFormGroup>
 
         <template v-if="newServerType === 'stdio'">
-          <div class="form-group">
-            <label class="form-label">{{ t('mcp_settings.command') }}</label>
-            <input v-model="newServerCommand" type="text" class="form-input" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">{{ t('mcp_settings.args') }}</label>
-            <input v-model="newServerArgs" type="text" class="form-input" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">{{ t('mcp_settings.env') }}</label>
-            <textarea v-model="newServerEnv" class="form-textarea" rows="3" />
-          </div>
+          <XFormGroup :label="t('mcp_settings.command')" required :error="formErrors.command">
+            <XInput v-model="newServerCommand" />
+          </XFormGroup>
+          <XFormGroup :label="t('mcp_settings.args')">
+            <XTextarea v-model="newServerArgs" :rows="3" />
+          </XFormGroup>
+          <XFormGroup :label="t('mcp_settings.env')" :error="formErrors.env">
+            <XTextarea v-model="newServerEnv" :rows="3" />
+          </XFormGroup>
         </template>
 
         <template v-else>
-          <div class="form-group">
-            <label class="form-label">URL</label>
-            <input v-model="newServerUrl" type="text" class="form-input" />
-          </div>
+          <XFormGroup label="URL" required :error="formErrors.url">
+            <XInput v-model="newServerUrl" />
+          </XFormGroup>
         </template>
       </div>
 
@@ -994,6 +1028,7 @@
   }
 
   .form-select {
+    width: 100%;
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
@@ -1013,6 +1048,11 @@
 
   .form-select:hover {
     border-color: var(--border-300);
+  }
+
+  .form-select:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
   }
 
   .form-select option {

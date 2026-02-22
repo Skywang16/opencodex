@@ -2,7 +2,7 @@ import type { App, Plugin } from 'vue'
 
 import './styles/index.css'
 
-import { XButton, XMessage, XModal, XSearchInput, XSelect, XSwitch } from './components'
+import { XButton, XFormGroup, XInput, XMessage, XModal, XSearchInput, XSelect, XSwitch, XTextarea } from './components'
 
 import {
   confirm,
@@ -18,7 +18,7 @@ import {
 import { createPopover, showContextMenu, showPopoverAt } from './composables/popover-api'
 
 // Main component exports (recommended usage)
-export { XButton, XMessage, XModal, XSearchInput, XSelect, XSwitch }
+export { XButton, XFormGroup, XInput, XMessage, XModal, XSearchInput, XSelect, XSwitch, XTextarea }
 
 // System-level menu API
 export { createPopover, showContextMenu, showPopoverAt }
@@ -103,6 +103,16 @@ const install = (app: App, options: Partial<XUIGlobalConfig> = {}): void => {
   app.component('XSwitch', XSwitch)
   app.component('x-switch', XSwitch)
 
+  // Form components
+  app.component('XFormGroup', XFormGroup)
+  app.component('x-form-group', XFormGroup)
+
+  app.component('XInput', XInput)
+  app.component('x-input', XInput)
+
+  app.component('XTextarea', XTextarea)
+  app.component('x-textarea', XTextarea)
+
   // Mount global methods
   app.config.globalProperties.$message = createMessage
   app.provide('xui-config', globalConfig)
@@ -131,6 +141,10 @@ export * from './types/index'
 export type {
   ButtonEmits,
   ButtonProps,
+  FormStatus,
+  FormGroupProps,
+  InputEmits,
+  InputProps,
   MessageEmits,
   MessageProps,
   ModalEmits,
@@ -144,5 +158,7 @@ export type {
   Size,
   SwitchEmits,
   SwitchProps,
+  TextareaEmits,
+  TextareaProps,
   Theme,
 } from './types/index'
