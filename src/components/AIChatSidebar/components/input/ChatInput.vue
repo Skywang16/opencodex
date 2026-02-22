@@ -736,66 +736,52 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 10px 5px 8px;
+    padding: 4px 10px 4px 8px;
     margin-bottom: 8px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-radius: 8px;
+    background: var(--bg-200);
+    border-radius: var(--border-radius-md);
     font-size: 12px;
-    font-weight: 600;
-    color: white;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.25);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .command-tag:hover {
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.35);
-    transform: translateY(-1px);
+    font-weight: 500;
+    color: var(--text-300);
   }
 
   .command-tag .command-icon {
-    width: 15px;
-    height: 15px;
+    width: 14px;
+    height: 14px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    opacity: 0.95;
   }
 
   .command-tag .command-icon :deep(svg) {
-    width: 15px;
-    height: 15px;
-    stroke: white;
+    width: 14px;
+    height: 14px;
+    stroke: var(--text-400);
     stroke-width: 2;
   }
 
   .command-tag .command-label {
     line-height: 1;
-    letter-spacing: 0.01em;
   }
 
   .command-tag .command-remove {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
     padding: 0;
-    margin-left: 4px;
-    background: rgba(255, 255, 255, 0.15);
+    margin-left: 2px;
+    background: transparent;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--border-radius-sm);
     cursor: pointer;
-    color: white;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    color: var(--text-400);
   }
 
   .command-tag .command-remove:hover {
-    background: rgba(255, 255, 255, 0.25);
-    transform: scale(1.05);
-  }
-
-  .command-tag .command-remove:active {
-    transform: scale(0.95);
+    background: var(--bg-300);
+    color: var(--text-200);
   }
 
   .input-main {

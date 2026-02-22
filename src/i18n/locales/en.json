@@ -76,7 +76,8 @@
     "skill_creator": "Skill Creator",
     "skill_creator_description": "Create or update a skill",
     "skill_installer": "Skill Installer",
-    "skill_installer_description": "Install curated skills from openai/skills or other repos"
+    "skill_installer_description": "Install curated skills from openai/skills or other repos",
+    "badge_system": "System"
   },
   "search": {
     "placeholder": "Search",

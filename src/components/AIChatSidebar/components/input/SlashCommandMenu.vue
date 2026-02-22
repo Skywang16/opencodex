@@ -149,7 +149,7 @@
               <span class="command-label">{{ t(command.labelKey) }}</span>
               <span v-if="command.descriptionKey" class="command-description">{{ t(command.descriptionKey) }}</span>
             </span>
-            <span v-if="command.badge" class="command-badge">{{ command.badge }}</span>
+            <span v-if="command.badgeKey" class="command-badge">{{ t(command.badgeKey) }}</span>
           </button>
         </template>
 

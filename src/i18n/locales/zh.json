@@ -72,13 +72,10 @@
     "plan_mode": "计划模式",
     "plan_mode_description": "切换计划模式",
     "skill_creator": "技能创建器",
-    "skill_creator_description": "创建新的 AI 技能",
-    "skill_installer": "技能安装器",
-    "skill_installer_description": "安装和管理技能",
-    "skill_creator": "技能创建器",
     "skill_creator_description": "创建或更新技能",
     "skill_installer": "技能安装器",
-    "skill_installer_description": "从 openai/skills 或其他仓库安装技能"
+    "skill_installer_description": "从 openai/skills 或其他仓库安装技能",
+    "badge_system": "系统"
   },
   "search": {
     "placeholder": "搜索",
