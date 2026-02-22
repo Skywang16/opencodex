@@ -12,19 +12,6 @@ use tokio::fs;
 pub struct BuiltinPrompts;
 
 impl BuiltinPrompts {
-    // === Base prompts ===
-    pub fn role() -> &'static str {
-        include_str!("../../../prompts/base/role.md")
-    }
-
-    pub fn rules() -> &'static str {
-        include_str!("../../../prompts/base/rules.md")
-    }
-
-    pub fn methodology() -> &'static str {
-        include_str!("../../../prompts/base/methodology.md")
-    }
-
     // === Agent prompts ===
     pub fn agent_coder() -> &'static str {
         include_str!("../../../prompts/agents/coder.md")
@@ -165,9 +152,6 @@ impl PromptLoader {
 
         // Fallback to builtin
         let builtin = match (category, name) {
-            ("base", "role") => Some(BuiltinPrompts::role()),
-            ("base", "rules") => Some(BuiltinPrompts::rules()),
-            ("base", "methodology") => Some(BuiltinPrompts::methodology()),
             ("agents", "coder") => Some(BuiltinPrompts::agent_coder()),
             ("agents", "plan") => Some(BuiltinPrompts::agent_plan()),
             ("agents", "explore") => Some(BuiltinPrompts::agent_explore()),
@@ -247,9 +231,6 @@ mod tests {
 
     #[test]
     fn test_builtin_prompts_exist() {
-        assert!(!BuiltinPrompts::role().is_empty());
-        assert!(!BuiltinPrompts::rules().is_empty());
-        assert!(!BuiltinPrompts::methodology().is_empty());
         assert!(!BuiltinPrompts::agent_coder().is_empty());
         assert!(!BuiltinPrompts::model_generic().is_empty());
         assert!(!BuiltinPrompts::model_openai_codex().is_empty());

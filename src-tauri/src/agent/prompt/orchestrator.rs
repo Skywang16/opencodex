@@ -164,10 +164,6 @@ impl PromptOrchestrator {
         }
     }
 
-    // format_skills_for_prompt removed:
-    // Skill system changed to Tool mechanism, LLM automatically activates skills through tool calling
-    // skill content no longer pre-injected into system prompt
-
     pub async fn build_task_prompts(
         &self,
         session_id: i64,
@@ -204,9 +200,6 @@ impl PromptOrchestrator {
         if let Some(rules) = global_rules {
             custom_parts.push(rules);
         }
-
-        // Skill system changed to Tool mechanism, no longer need to pre-inject here
-        // LLM will automatically activate required skills through tool calling
 
         let custom_instructions = if custom_parts.is_empty() {
             None
@@ -261,12 +254,11 @@ impl PromptOrchestrator {
         let system_prompt = prompt_builder
             .build_system_prompt(SystemPromptParts {
                 agent_prompt,
-                rules: Some(BuiltinPrompts::rules().to_string()),
-                methodology: Some(BuiltinPrompts::methodology().to_string()),
+                model_profile,
                 env_info: Some(env_info),
                 reminder,
                 custom_instructions,
-                model_profile,
+                user_system: None,
             })
             .await;
 

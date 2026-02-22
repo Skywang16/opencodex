@@ -6,22 +6,30 @@ use std::collections::HashMap;
 use super::loader::{BuiltinPrompts, PromptLoader};
 
 /// Parts of the system prompt
+///
+/// `agent_prompt` and `model_profile` are
+/// **mutually exclusive** — if the agent defines a custom prompt it takes
+/// precedence; otherwise the model-family profile is used as the primary
+/// system prompt.  Environment, project instructions, and reminders are
+/// appended after the primary prompt.
 #[derive(Debug, Clone, Default)]
 pub struct SystemPromptParts {
-    /// Agent-specific prompts (loaded from agents/*.md, frontmatter removed)
+    /// Agent-specific prompt — if set, **replaces** model_profile as the
+    /// primary system prompt (loaded from agents/*.md, frontmatter removed).
     pub agent_prompt: Option<String>,
-    /// Basic rules
-    pub rules: Option<String>,
-    /// Work methodology
-    pub methodology: Option<String>,
-    /// Environment information
-    pub env_info: Option<String>,
-    /// Runtime reminder
-    pub reminder: Option<String>,
-    /// User custom instructions (CLAUDE.md / project rules)
-    pub custom_instructions: Option<String>,
-    /// Model-family prompt profile (loaded from prompts/models/*.md)
+    /// Model-family system prompt (loaded from prompts/models/*.md).
+    /// Complete behavioral instructions: rules, methodology, tool usage,
+    /// tone, conventions — everything the model needs to operate.
+    /// Used as the primary prompt when agent_prompt is None.
     pub model_profile: Option<String>,
+    /// Environment information (cwd, platform, date, file listing)
+    pub env_info: Option<String>,
+    /// Runtime reminder (plan mode, max steps, loop warnings)
+    pub reminder: Option<String>,
+    /// User custom instructions (AGENTS.md / CLAUDE.md / project rules)
+    pub custom_instructions: Option<String>,
+    /// Optional per-user system message (passed through from the user)
+    pub user_system: Option<String>,
 }
 
 /// Prompt builder
@@ -38,66 +46,61 @@ impl PromptBuilder {
 
     /// Build complete system prompt
     ///
-    /// Assembly order (each section builds on the previous):
-    /// 1. Role — identity, personality, output format, progress updates
-    /// 2. Agent-specific prompt — mode-specific behavior (coder, plan, explore, etc.)
-    /// 3. Model profile — model-family-specific execution guidance
-    /// 4. Rules — autonomous execution, tone, tool usage, proactiveness
-    /// 5. Methodology — conventions, code style, task workflow, git safety, validation
-    /// 6. Environment — working directory, platform, date, project structure
-    /// 7. Project instructions — AGENTS.md, CLAUDE.md, user custom rules
-    /// 8. Reminder — runtime context (plan mode, max steps, loop warnings)
+    /// ```text
+    /// primary = agent_prompt || model_profile
+    /// system  = [primary, env_info, custom_instructions, user_system, reminder]
+    /// ```
+    ///
+    /// `agent_prompt` and `model_profile` are **mutually exclusive**.
+    /// If the agent defines a custom prompt it is used as the sole primary
+    /// system prompt; otherwise the model-family profile takes that role.
     pub async fn build_system_prompt(&mut self, parts: SystemPromptParts) -> String {
-        let mut sections = Vec::new();
+        let mut sections: Vec<String> = Vec::new();
 
-        // 1. Role — identity and core behavior (always included)
-        sections.push(BuiltinPrompts::role().to_string());
-
-        // 2. Agent-specific prompts (coder, plan, explore, etc.)
-        if let Some(agent_prompt) = parts.agent_prompt {
+        // Primary system prompt: agent_prompt wins over model_profile
+        let primary = if let Some(agent_prompt) = parts.agent_prompt {
             let body = strip_frontmatter(&agent_prompt);
-            if !body.trim().is_empty() {
-                sections.push(body);
+            if body.trim().is_empty() {
+                None
+            } else {
+                Some(body)
             }
-        }
-
-        // 3. Model profile — family-specific behavior tuning
-        if let Some(model_profile) = parts.model_profile {
-            let trimmed = model_profile.trim();
-            if !trimmed.is_empty() {
-                sections.push(format!("# Model Instructions\n\n{trimmed}"));
-            }
-        }
-
-        // 4. Rules — autonomous execution, tone, proactiveness
-        if let Some(rules) = parts.rules {
-            sections.push(rules);
         } else {
-            sections.push(BuiltinPrompts::rules().to_string());
+            None
+        };
+
+        let primary = primary.or_else(|| {
+            parts
+                .model_profile
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+        });
+
+        if let Some(p) = primary {
+            sections.push(p);
         }
 
-        // 5. Methodology — conventions, workflow, git safety, validation
-        if let Some(methodology) = parts.methodology {
-            sections.push(methodology);
-        } else {
-            sections.push(BuiltinPrompts::methodology().to_string());
-        }
-
-        // 6. Environment information
+        // Environment information
         if let Some(env_info) = parts.env_info {
             sections.push(env_info);
         }
 
-        // 7. Project instructions (AGENTS.md / CLAUDE.md / user custom rules)
+        // Project instructions (AGENTS.md / CLAUDE.md / user custom rules)
         if let Some(custom) = parts.custom_instructions {
             if !custom.trim().is_empty() {
                 sections.push(format!("# Project Instructions\n\n{}", custom.trim()));
             }
         }
 
-        // 8. Runtime reminder (placed last, highest priority override)
+        // Per-user system message
+        if let Some(user_sys) = parts.user_system {
+            if !user_sys.trim().is_empty() {
+                sections.push(user_sys.trim().to_string());
+            }
+        }
+
+        // Runtime reminder (placed last, highest priority override)
         if let Some(reminder) = parts.reminder {
-            // Check if reminder already contains system-reminder tags
             let trimmed = reminder.trim();
             if trimmed.starts_with("<system-reminder>") {
                 sections.push(trimmed.to_string());
