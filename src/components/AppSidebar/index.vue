@@ -105,12 +105,16 @@
   const currentSessionId = computed(() => selectedSession.value?.id ?? null)
 
   // Auto-expand workspace folder when a session is selected (e.g. on restore)
-  watch(selectedSession, session => {
-    if (session && !expandedPaths.value.has(session.workspacePath)) {
-      expandedPaths.value.add(session.workspacePath)
-      expandedPaths.value = new Set(expandedPaths.value)
-    }
-  })
+  watch(
+    selectedSession,
+    session => {
+      if (session && !expandedPaths.value.has(session.workspacePath)) {
+        expandedPaths.value.add(session.workspacePath)
+        expandedPaths.value = new Set(expandedPaths.value)
+      }
+    },
+    { immediate: true }
+  )
 
   const getWorkspaceName = (workspace: WorkspaceRecord) => {
     if (workspace.displayName) return workspace.displayName
@@ -655,7 +659,7 @@
     background: transparent;
     border: none;
     border-radius: var(--border-radius-sm);
-    color: var(--text-400);
+    color: var(--text-500);
     cursor: pointer;
   }
 
