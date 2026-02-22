@@ -1,8 +1,9 @@
 <script setup lang="ts">
   import { mcpApi, settingsApi } from '@/api'
   import type { McpServerConfig } from '@/api/settings/types'
+  import type { McpServerStatus } from '@/api/mcp/types'
   import { useWorkspaceStore } from '@/stores/workspace'
-  import { XFormGroup, XInput, XModal, XSwitch, XTextarea, createMessage } from '@/ui'
+  import { XButton, XFormGroup, XInput, XModal, XSwitch, XTextarea, createMessage } from '@/ui'
   import { debounce } from 'lodash-es'
   import { computed, onMounted, ref, watch } from 'vue'
   import { useI18n } from 'vue-i18n'
@@ -45,6 +46,7 @@
     }
   }
   const mcpServers = ref<Record<string, McpServerConfig>>({})
+  const serverStatuses = ref<McpServerStatus[]>([])
   const showAddModal = ref(false)
   const showEditModal = ref(false)
   const editingServerName = ref<string | null>(null)
@@ -197,7 +199,46 @@
     const settings = await settingsApi.getGlobal()
     mcpServers.value = settings.mcpServers || {}
     jsonContent.value = JSON.stringify(mcpServers.value, null, 2)
+
+    // 获取服务器状态
+    if (currentWorkspace.value) {
+      try {
+        serverStatuses.value = await mcpApi.listServers(currentWorkspace.value)
+      } catch (e) {
+        console.error('Failed to load server statuses:', e)
+        serverStatuses.value = []
+      }
+    }
     isLoading.value = false
+  }
+
+  // 获取服务器原始状态
+  const getServerRawStatus = (name: string) => {
+    return serverStatuses.value.find(s => s.name === name)?.status || 'disconnected'
+  }
+
+  // 获取服务器状态文本（翻译后）
+  const getServerStatusText = (name: string) => {
+    const status = getServerRawStatus(name)
+    switch (status) {
+      case 'connected':
+        return t('mcp_dialog.status_connected')
+      case 'error':
+        return t('mcp_dialog.status_error')
+      default:
+        return t('mcp_dialog.status_disconnected')
+    }
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'connected':
+        return 'var(--color-success)'
+      case 'error':
+        return 'var(--color-error)'
+      default:
+        return 'var(--text-400)'
+    }
   }
 
   const toggleJsonMode = () => {
@@ -338,6 +379,8 @@
     const settings = await settingsApi.getGlobal()
     settings.mcpServers = mcpServers.value
     await settingsApi.updateGlobal(settings)
+    showEditModal.value = false
+    editingServerName.value = null
     createMessage.success(t('mcp_settings.server_deleted'))
     await loadServers()
     await reloadMcpRegistry()
@@ -424,6 +467,9 @@
         <div v-for="(config, name) in mcpServers" :key="name" class="server-row custom">
           <div class="server-info">
             <span class="server-name">{{ name }}</span>
+            <span class="server-status" :style="{ color: getStatusColor(getServerRawStatus(name as string)) }">
+              {{ getServerStatusText(name as string) }}
+            </span>
           </div>
           <div class="server-actions">
             <button class="icon-btn" :title="t('common.edit')" @click="openEditModal(name as string)">
@@ -547,8 +593,8 @@
 
       <template #footer>
         <div class="modal-actions">
-          <button class="btn-secondary" @click="showAddModal = false">{{ t('common.cancel') }}</button>
-          <button class="btn-primary" @click="saveNewServer">{{ t('common.save') }}</button>
+          <XButton variant="secondary" @click="showAddModal = false">{{ t('common.cancel') }}</XButton>
+          <XButton variant="primary" @click="saveNewServer">{{ t('common.save') }}</XButton>
         </div>
       </template>
     </XModal>
@@ -589,10 +635,10 @@
 
       <template #footer>
         <div class="modal-actions">
-          <button class="btn-danger" @click="deleteServer(editingServerName!)">{{ t('common.delete') }}</button>
+          <XButton variant="danger" @click="deleteServer(editingServerName!)">{{ t('common.delete') }}</XButton>
           <div class="modal-actions-right">
-            <button class="btn-secondary" @click="showEditModal = false">{{ t('common.cancel') }}</button>
-            <button class="btn-primary" @click="updateServer">{{ t('common.save') }}</button>
+            <XButton variant="secondary" @click="showEditModal = false">{{ t('common.cancel') }}</XButton>
+            <XButton variant="primary" @click="updateServer">{{ t('common.save') }}</XButton>
           </div>
         </div>
       </template>
@@ -736,7 +782,7 @@
   .save-json-btn {
     align-self: flex-end;
     padding: 8px 20px;
-    background: var(--color-primary);
+    background: var(--text-100);
     border: none;
     border-radius: var(--border-radius-lg);
     font-size: 13px;
@@ -780,6 +826,11 @@
     font-size: 14px;
     font-weight: 500;
     color: var(--text-100);
+  }
+
+  .server-row.custom .server-status {
+    font-size: 12px;
+    margin-left: 8px;
   }
 
   .server-row.custom .server-actions {
@@ -1083,46 +1134,5 @@
   .modal-actions-right {
     display: flex;
     gap: 12px;
-  }
-
-  .btn-primary,
-  .btn-secondary,
-  .btn-danger {
-    padding: 10px 20px;
-    border-radius: var(--border-radius-lg);
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    border: none;
-  }
-
-  .btn-primary {
-    background: var(--color-primary);
-    color: var(--bg-100);
-  }
-
-  .btn-primary:hover {
-    opacity: 0.9;
-  }
-
-  .btn-secondary {
-    background: var(--bg-200);
-    color: var(--text-200);
-    border: 1px solid var(--border-200);
-  }
-
-  .btn-secondary:hover {
-    background: var(--bg-300);
-  }
-
-  .btn-danger {
-    background: transparent;
-    color: var(--color-error);
-    border: 1px solid var(--color-error);
-  }
-
-  .btn-danger:hover {
-    background: color-mix(in srgb, var(--color-error) 10%, transparent);
   }
 </style>
