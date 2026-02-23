@@ -113,10 +113,16 @@ pub async fn workspace_list_sessions(
 #[tauri::command]
 pub async fn workspace_get_messages(
     session_id: i64,
+    limit: Option<i64>,
+    before_id: Option<i64>,
     database: State<'_, Arc<DatabaseManager>>,
 ) -> TauriApiResult<Vec<Message>> {
     let service = WorkspaceService::new(Arc::clone(&database));
-    match service.get_session_messages(session_id).await {
+    let limit = limit.map(|l| l.clamp(1, 200)).unwrap_or(i64::MAX);
+    match service
+        .get_session_messages(session_id, limit, before_id)
+        .await
+    {
         Ok(records) => Ok(api_success!(records)),
         Err(err) => {
             tracing::error!("workspace_get_messages failed: {}", err);

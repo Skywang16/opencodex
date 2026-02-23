@@ -319,10 +319,15 @@ impl WorkspaceService {
         Ok(())
     }
 
-    pub async fn get_session_messages(&self, session_id: i64) -> WorkspaceResult<Vec<Message>> {
+    pub async fn get_session_messages(
+        &self,
+        session_id: i64,
+        limit: i64,
+        before_id: Option<i64>,
+    ) -> WorkspaceResult<Vec<Message>> {
         self.agent_persistence
             .messages()
-            .list_by_session(session_id)
+            .list_by_session_paginated(session_id, limit, before_id)
             .await
             .map_err(|e| WorkspaceError::internal(format!("Load session messages failed: {}", e)))
     }

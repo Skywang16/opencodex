@@ -85,6 +85,7 @@
   }
 
   const messageListRef = ref<HTMLElement | null>(null)
+  const isLoadingMore = ref(false)
 
   const scrollToBottom = async () => {
     await nextTick()
@@ -92,19 +93,38 @@
       messageListRef.value.scrollTop = messageListRef.value.scrollHeight
     }
   }
+
+  // Load older messages when scrolled near top, preserve scroll position
+  const onScroll = async () => {
+    const el = messageListRef.value
+    if (!el || isLoadingMore.value || !workspaceStore.messagesHasMore) return
+    if (el.scrollTop > 100) return
+
+    isLoadingMore.value = true
+    const prevHeight = el.scrollHeight
+    try {
+      await workspaceStore.loadMoreMessages()
+      await nextTick()
+      // Restore scroll position: new content pushed old content down
+      el.scrollTop = el.scrollHeight - prevHeight
+    } finally {
+      isLoadingMore.value = false
+    }
+  }
+
   // Get checkpoint for the message (using message.id to find)
   const getCheckpoint = (message: Message) => {
     if (!props.sessionId || !props.workspacePath || message.role !== 'user') return null
     return getCheckpointByMessageId(props.sessionId, props.workspacePath, message.id)
   }
 
+  // New messages appended at bottom → scroll to bottom
   watch(
     () => props.messages.length,
     async (newLength, oldLength) => {
       if (newLength <= oldLength) return
       await scrollToBottom()
 
-      // Only refresh checkpoints when a new user message is appended
       const last = props.messages[newLength - 1]
       if (last?.role === 'user' && props.sessionId && props.sessionId > 0 && props.workspacePath) {
         await loadCheckpoints(props.sessionId, props.workspacePath)
@@ -112,13 +132,14 @@
     }
   )
 
-  // Load checkpoints when session ID changes
+  // Session switch → reload checkpoints + scroll to bottom
   watch(
     () => [props.sessionId, props.workspacePath] as const,
     async ([newId, workspacePath]) => {
       if (newId && newId > 0 && workspacePath) {
         await loadCheckpoints(newId, workspacePath)
       }
+      await scrollToBottom()
     },
     { immediate: true }
   )
@@ -127,11 +148,12 @@
     if (!aiSettingsStore.isInitialized) {
       await aiSettingsStore.loadSettings()
     }
+    await scrollToBottom()
   })
 </script>
 
 <template>
-  <div ref="messageListRef" class="message-list">
+  <div ref="messageListRef" class="message-list" @scroll="onScroll">
     <div v-if="messages.length === 0" class="empty-state">
       <!-- No model configured -->
       <div v-if="!aiSettingsStore.hasModels && aiSettingsStore.isInitialized" class="no-model-state">
@@ -194,6 +216,9 @@
     </div>
 
     <div v-else class="message-container">
+      <div v-if="isLoadingMore" class="loading-more">
+        <span class="loading-more-spinner" />
+      </div>
       <template v-for="message in messages" :key="message.id">
         <UserMessage
           v-if="message.role === 'user'"
@@ -389,5 +414,26 @@
 
   .message-container > :deep(*) {
     border-bottom: none;
+  }
+
+  .loading-more {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0;
+  }
+
+  .loading-more-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border-300);
+    border-top-color: var(--text-300);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

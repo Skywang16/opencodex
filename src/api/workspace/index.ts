@@ -86,8 +86,8 @@ export class WorkspaceApi {
 
   // ===== Message operations =====
 
-  getMessages = async (sessionId: number): Promise<Message[]> => {
-    return invoke<Message[]>('workspace_get_messages', { sessionId })
+  getMessages = async (sessionId: number, limit?: number, beforeId?: number): Promise<Message[]> => {
+    return invoke<Message[]>('workspace_get_messages', { sessionId, limit, beforeId })
   }
 
   // ===== Recent workspace management =====

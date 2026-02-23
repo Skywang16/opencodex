@@ -203,6 +203,60 @@ impl MessageRepository {
             .collect::<AgentResult<Vec<_>>>()
     }
 
+    /// Paginated: load the latest `limit` messages, optionally before a cursor.
+    /// Returns messages in chronological order (ASC).
+    pub async fn list_by_session_paginated(
+        &self,
+        session_id: i64,
+        limit: i64,
+        before_id: Option<i64>,
+    ) -> AgentResult<Vec<Message>> {
+        let rows = if let Some(cursor) = before_id {
+            sqlx::query(
+                "SELECT
+                    id, session_id, role, agent_type, parent_message_id,
+                    status, blocks, is_summary, is_internal,
+                    model_id, provider_id,
+                    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                    created_at, finished_at, duration_ms
+                 FROM messages
+                 WHERE session_id = ? AND id < ?
+                 ORDER BY id DESC
+                 LIMIT ?",
+            )
+            .bind(session_id)
+            .bind(cursor)
+            .bind(limit)
+            .fetch_all(self.pool())
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT
+                    id, session_id, role, agent_type, parent_message_id,
+                    status, blocks, is_summary, is_internal,
+                    model_id, provider_id,
+                    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                    created_at, finished_at, duration_ms
+                 FROM messages
+                 WHERE session_id = ?
+                 ORDER BY id DESC
+                 LIMIT ?",
+            )
+            .bind(session_id)
+            .bind(limit)
+            .fetch_all(self.pool())
+            .await?
+        };
+
+        // Reverse to chronological order
+        let mut messages: Vec<Message> = rows
+            .into_iter()
+            .map(|row| build_message(&row))
+            .collect::<AgentResult<Vec<_>>>()?;
+        messages.reverse();
+        Ok(messages)
+    }
+
     pub async fn create(
         &self,
         session_id: i64,

@@ -39,8 +39,15 @@ export const useAIChatStore = defineStore('ai-chat', () => {
   const messageQueueMap = ref<Map<number, QueuedMessage[]>>(new Map())
   const userCancelled = ref(false)
 
-  // 获取当前会话的消息队列，无会话返回 null
-  const getCurrentQueue = (): QueuedMessage[] | null => {
+  // Pure read: returns current session queue or empty array (no side effects)
+  const currentSessionQueue = computed<QueuedMessage[]>(() => {
+    const sid = currentSession.value?.id
+    if (sid == null) return []
+    return messageQueueMap.value.get(sid) ?? []
+  })
+
+  // Write path: ensures queue array exists for current session
+  const getOrCreateQueue = (): QueuedMessage[] | null => {
     const sid = currentSession.value?.id
     if (sid == null) return null
     let q = messageQueueMap.value.get(sid)
@@ -51,42 +58,43 @@ export const useAIChatStore = defineStore('ai-chat', () => {
     return q
   }
 
-  const currentSessionQueue = computed(() => getCurrentQueue() ?? [])
-
   const enqueueMessage = (content: string, images?: ImageAttachment[]) => {
-    getCurrentQueue()?.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, content, images })
+    getOrCreateQueue()?.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, content, images })
   }
 
   const removeQueuedMessage = (messageId: string) => {
-    const q = getCurrentQueue()
+    const q = getOrCreateQueue()
     if (!q) return
     const i = q.findIndex(m => m.id === messageId)
     if (i >= 0) q.splice(i, 1)
   }
 
   const updateQueuedMessage = (messageId: string, content: string) => {
-    const msg = getCurrentQueue()?.find(m => m.id === messageId)
+    const msg = getOrCreateQueue()?.find(m => m.id === messageId)
     if (msg) msg.content = content
   }
 
   const reorderQueuedMessage = (from: number, to: number) => {
-    const q = getCurrentQueue()
+    const q = getOrCreateQueue()
     if (!q || from < 0 || from >= q.length || to < 0 || to >= q.length) return
     const [item] = q.splice(from, 1)
     q.splice(to, 0, item)
   }
 
   const sendQueuedMessageNow = async (messageId: string) => {
-    const q = getCurrentQueue()
+    const q = getOrCreateQueue()
     if (!q) return
     const i = q.findIndex(m => m.id === messageId)
     if (i < 0) return
     const [msg] = q.splice(i, 1)
+    if (isSending.value) {
+      stopCurrentTask()
+    }
     await sendMessage(msg.content, msg.images)
   }
 
   const processQueue = async () => {
-    const q = getCurrentQueue()
+    const q = getOrCreateQueue()
     if (!q?.length) return
     const [next] = q.splice(0, 1)
     await sendMessage(next.content, next.images)

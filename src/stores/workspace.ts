@@ -4,6 +4,8 @@ import { defineStore } from 'pinia'
 import { computed, reactive, ref, shallowRef } from 'vue'
 
 const MAX_CACHED_SESSIONS = 10
+const INITIAL_PAGE_SIZE = 100
+const LOAD_MORE_PAGE_SIZE = 50
 
 export interface WorkspaceNode {
   workspace: WorkspaceRecord
@@ -16,6 +18,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const tree = shallowRef<Map<string, WorkspaceNode>>(new Map())
   const selectedSession = ref<SessionRecord | null>(null)
   const messagesBySessionId = reactive<Map<number, Message[]>>(new Map())
+  const messagesHasMoreMap = reactive<Map<number, boolean>>(new Map())
   const messageIdToSessionId = new Map<number, number>()
   const activeWorkspacePath = ref<string | null>(null)
   const sessionAccessOrder: number[] = [] // LRU tracking: oldest first
@@ -25,6 +28,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const sessionId = selectedSession.value?.id
     if (!sessionId) return []
     return messagesBySessionId.get(sessionId) ?? []
+  })
+
+  const messagesHasMore = computed(() => {
+    const sessionId = selectedSession.value?.id
+    if (!sessionId) return false
+    return messagesHasMoreMap.get(sessionId) ?? false
   })
 
   const workspaces = computed(() => {
@@ -149,14 +158,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   // Session operations
+  const loadInitialMessages = async (sessionId: number) => {
+    setSessionMessages(sessionId, [])
+    const loaded = await workspaceApi.getMessages(sessionId, INITIAL_PAGE_SIZE)
+    setSessionMessages(sessionId, loaded)
+    messagesHasMoreMap.set(sessionId, loaded.length >= INITIAL_PAGE_SIZE)
+  }
+
   const selectSession = async (session: SessionRecord) => {
     if (selectedSession.value?.id === session.id) return
     selectedSession.value = session
     activeWorkspacePath.value = session.workspacePath
     workspaceApi.setActiveSession(session.workspacePath, session.id)
-    setSessionMessages(session.id, [])
-    const loaded = await workspaceApi.getMessages(session.id)
-    setSessionMessages(session.id, loaded)
+    await loadInitialMessages(session.id)
   }
 
   const selectSessionById = async (sessionId: number, workspacePath: string) => {
@@ -179,10 +193,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (session) {
       selectedSession.value = session
       activeWorkspacePath.value = workspacePath
-      setSessionMessages(sessionId, [])
-      const loaded = await workspaceApi.getMessages(sessionId)
-      setSessionMessages(sessionId, loaded)
+      await loadInitialMessages(sessionId)
     }
+  }
+
+  const loadMoreMessages = async () => {
+    const sessionId = selectedSession.value?.id
+    if (!sessionId) return
+    const list = messagesBySessionId.get(sessionId)
+    if (!list || list.length === 0) return
+    const oldestId = list[0].id
+    const older = await workspaceApi.getMessages(sessionId, LOAD_MORE_PAGE_SIZE, oldestId)
+    if (older.length === 0) {
+      messagesHasMoreMap.set(sessionId, false)
+      return
+    }
+    list.unshift(...older)
+    indexMessageList(older)
+    messagesHasMoreMap.set(sessionId, older.length >= LOAD_MORE_PAGE_SIZE)
   }
 
   const clearSelection = () => {
@@ -331,8 +359,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const fetchMessages = async (sessionId: number) => {
-    const loaded = await workspaceApi.getMessages(sessionId)
-    setSessionMessages(sessionId, loaded)
+    await loadInitialMessages(sessionId)
   }
 
   const getCachedMessages = (sessionId: number) => messagesBySessionId.get(sessionId) ?? []
@@ -342,6 +369,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     tree,
     selectedSession,
     messages,
+    messagesHasMore,
     activeWorkspacePath,
     workspaces,
     currentWorkspacePath,
@@ -364,6 +392,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     updateBlock,
     finishMessage,
     fetchMessages,
+    loadMoreMessages,
     getCachedMessages,
   }
 })

@@ -219,17 +219,17 @@
     textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden'
   }
 
-  const showStopButton = computed(() => props.loading && !props.canSend && imageAttachments.value.length === 0)
+  const hasInput = computed(() => props.canSend || imageAttachments.value.length > 0)
+  const showStopButton = computed(() => props.loading && !hasInput.value)
 
   const handleButtonClick = () => {
-    if (props.loading && !props.canSend && imageAttachments.value.length === 0) {
-      emit('stop')
-    } else if (props.canSend || imageAttachments.value.length > 0) {
-      // Write commandId directly to store before emitting send
+    if (hasInput.value) {
       aiChatStore.pendingCommandId = selectedCommand.value?.id ?? null
       emit('send', imageAttachments.value.length > 0 ? imageAttachments.value : undefined)
       imageAttachments.value = []
       selectedCommand.value = null
+    } else if (props.loading) {
+      emit('stop')
     }
   }
 
