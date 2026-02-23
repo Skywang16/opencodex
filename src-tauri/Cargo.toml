@@ -95,7 +95,7 @@ async-openai = "0.29"
 
 # HTML 解析和内容提取
 scraper = "0.20"
-html2text = "0.12"
+htmd = "0.3"
 
 xmltree = "0.10"
 

@@ -27,7 +27,7 @@ For software engineering tasks (bugs, features, refactoring, explaining code):
 - Call multiple tools in a single response. If there are no dependencies between them, make all independent calls in parallel.
 - Prefer specialized tools over shell: `read_file` over `cat`, `grep` over shell `rg`, `glob` over `find`, `edit_file` over `sed`.
 - Use `task` to delegate exploration, research, or independent subtasks to subagents. This is critical for reducing context usage on large codebases.
-- Use `web_search` and `web_fetch` when you need up-to-date information, documentation, or API references.
+- Use `web_search` to find relevant URLs, then `web_fetch` with a specific `prompt` to extract answers from pages. Always provide both `url` and `prompt` to web_fetch.
 - Use `todowrite` for complex multi-step tasks (3+ steps) to track progress.
 
 # Following conventions

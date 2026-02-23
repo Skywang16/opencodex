@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
@@ -9,6 +10,14 @@ use crate::agent::tools::{
     BackoffStrategy, RateLimitConfig, RunnableTool, ToolCategory, ToolMetadata, ToolPriority,
     ToolResult, ToolResultContent, ToolResultStatus,
 };
+
+static EXA_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(25))
+        .pool_max_idle_per_host(2)
+        .build()
+        .expect("failed to build Exa HTTP client")
+});
 
 #[derive(Debug, Deserialize)]
 struct WebSearchArgs {
@@ -46,8 +55,8 @@ impl RunnableTool for WebSearchTool {
 Usage:
 - Provide `query` keywords. Optional: `numResults` (1–10, default 5), `type` ("auto", "fast", "deep").
 - Returns a markdown list of results with title, URL, and content snippet.
-- To read full page content, call `web_fetch` with the chosen URL.
-- IMPORTANT: Do not rely on snippets alone. Always use web_fetch to read full pages for important information.
+- To read a page, call `web_fetch` with the URL and a specific `prompt` (question) about what you need.
+- Do not rely on snippets alone. Always use web_fetch to extract detailed information from relevant pages.
 
 Search Tips:
 - Include version numbers: "React 18 useEffect cleanup"
@@ -191,10 +200,6 @@ async fn exa_mcp_search(
     num_results: u8,
     search_type: &str,
 ) -> ToolExecutorResult<String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(25))
-        .build()?;
-
     let request = McpRequest {
         jsonrpc: "2.0",
         id: 1,
@@ -210,7 +215,7 @@ async fn exa_mcp_search(
         },
     };
 
-    let response = client
+    let response = EXA_CLIENT
         .post(EXA_MCP_URL)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream")

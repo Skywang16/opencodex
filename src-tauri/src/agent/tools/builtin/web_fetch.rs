@@ -1,29 +1,116 @@
 /*!
  * Web Fetch Tool
  *
- * Provides headless HTTP requests as an Agent tool so LLM can call it via tool-calls.
+ * Claude Code-style web fetcher: accepts a URL and a prompt (question),
+ * fetches the page, converts HTML→Markdown (htmd / Turndown-style),
+ * then uses the main LLM to produce a concise answer grounded in the
+ * page content. Results are cached for 15 minutes.
  */
 
 use async_trait::async_trait;
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
 use serde::Deserialize;
 use serde_json::json;
-use std::collections::HashMap;
 use std::net::IpAddr;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::net::lookup_host;
 use tracing::warn;
 use url::Url;
 
+use crate::agent::common::llm_text::extract_text_from_llm_message;
 use crate::agent::core::context::TaskContext;
 use crate::agent::error::{ToolExecutorError, ToolExecutorResult};
 use crate::agent::tools::{
     BackoffStrategy, RateLimitConfig, RunnableTool, ToolCategory, ToolMetadata, ToolPriority,
     ToolResult, ToolResultContent, ToolResultStatus,
 };
+use crate::llm::anthropic_types::{
+    CreateMessageRequest, MessageContent, MessageParam, MessageRole,
+};
+use crate::llm::service::LLMService;
 
+// ---------------------------------------------------------------------------
+// Shared HTTP client (connection-pooled, reused across all fetches)
+// ---------------------------------------------------------------------------
+static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent("OpenCodex-Agent/1.0")
+        .pool_max_idle_per_host(4)
+        .build()
+        .expect("failed to build shared HTTP client")
+});
+
+// ---------------------------------------------------------------------------
+// URL content cache — 15-minute TTL, keyed by normalized URL string
+// ---------------------------------------------------------------------------
+const CACHE_TTL: Duration = Duration::from_secs(15 * 60);
+const MAX_CACHE_ENTRIES: usize = 64;
+const MAX_CONTENT_BYTES: usize = 100 * 1024; // 100 KB (same as Claude Code)
+
+struct CachedPage {
+    markdown: String,
+    fetched_at: Instant,
+}
+
+static PAGE_CACHE: Lazy<DashMap<String, CachedPage>> = Lazy::new(DashMap::new);
+
+fn cache_get(url: &str) -> Option<String> {
+    if let Some(entry) = PAGE_CACHE.get(url) {
+        if entry.fetched_at.elapsed() < CACHE_TTL {
+            return Some(entry.markdown.clone());
+        }
+        drop(entry);
+        PAGE_CACHE.remove(url);
+    }
+    None
+}
+
+fn cache_put(url: String, markdown: String) {
+    // Evict expired entries when cache is getting full
+    if PAGE_CACHE.len() >= MAX_CACHE_ENTRIES {
+        cache_evict_expired();
+    }
+    // If still at capacity after eviction, remove oldest entry
+    if PAGE_CACHE.len() >= MAX_CACHE_ENTRIES {
+        if let Some(oldest_key) = PAGE_CACHE
+            .iter()
+            .min_by_key(|entry| entry.value().fetched_at)
+            .map(|entry| entry.key().clone())
+        {
+            PAGE_CACHE.remove(&oldest_key);
+        }
+    }
+    PAGE_CACHE.insert(
+        url,
+        CachedPage {
+            markdown,
+            fetched_at: Instant::now(),
+        },
+    );
+}
+
+fn cache_evict_expired() {
+    let expired: Vec<String> = PAGE_CACHE
+        .iter()
+        .filter(|entry| entry.value().fetched_at.elapsed() >= CACHE_TTL)
+        .map(|entry| entry.key().clone())
+        .collect();
+    for key in expired {
+        PAGE_CACHE.remove(&key);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tool definition
+// ---------------------------------------------------------------------------
 #[derive(Debug, Deserialize)]
 struct WebFetchArgs {
     url: String,
+    prompt: Option<String>,
 }
 
 pub struct WebFetchTool;
@@ -46,23 +133,23 @@ impl RunnableTool for WebFetchTool {
     }
 
     fn description(&self) -> &str {
-        r#"Fetches content from a URL and returns it as readable text.
+        r#"Fetch a web page and answer a question about its content.
 
 Usage:
-- Takes a URL as input and performs an HTTP GET request
-- HTML content is automatically converted to readable plain text
-- JSON responses are returned as-is
-- Returns at most 2000 characters; large responses are truncated
-- The URL must be a fully-formed valid URL starting with http:// or https://
-- Blocked: localhost, private IPs, and internal network addresses
-- This tool is read-only and does not modify any files
+- Provide `url` (required) and `prompt` (recommended) — the question you want answered from the page.
+- HTML pages are converted to Markdown; the LLM then extracts a concise answer based on your prompt.
+- If `prompt` is omitted, the raw Markdown content is returned (truncated to 100 KB).
+- Results are cached for 15 minutes; repeated fetches of the same URL are instant.
+- The URL must start with http:// or https://. Localhost and private IPs are blocked.
 
 Best Practices:
-- When web_search returns results, use web_fetch to read the full page content of relevant results
-- Do NOT rely solely on search result snippets - always fetch and read the actual pages
-- After fetching, if you find additional relevant URLs in the content, fetch those too
-- Recursively gather all relevant information until you have a complete picture
-- When a redirect occurs, make a new request with the redirect URL"#
+- Always provide a specific `prompt` to get focused, relevant answers instead of raw page dumps.
+- When web_search returns results, use web_fetch with a targeted prompt to read the most relevant pages.
+- After fetching, if you discover additional relevant URLs, fetch those too.
+
+Examples:
+- {"url": "https://docs.rs/tokio/latest", "prompt": "What async runtime features does tokio provide?"}
+- {"url": "https://react.dev/reference/react/useState", "prompt": "What are the rules for calling useState?"}"#
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -71,7 +158,12 @@ Best Practices:
             "properties": {
                 "url": {
                     "type": "string",
-                    "description": "URL to fetch (must start with http:// or https://)"
+                    "description": "URL to fetch (must start with http:// or https://)",
+                    "maxLength": 2000
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "The question to answer from the fetched page content"
                 }
             },
             "required": ["url"]
@@ -88,181 +180,209 @@ Best Practices:
                     max_ms: 30_000,
                 },
             })
-            .with_timeout(Duration::from_secs(60))
+            .with_timeout(Duration::from_secs(90))
             .with_tags(vec!["network".into(), "http".into()])
     }
 
     async fn run(
         &self,
-        _context: &TaskContext,
+        context: &TaskContext,
         args: serde_json::Value,
     ) -> ToolExecutorResult<ToolResult> {
         use tracing::{debug, info};
 
         let args: WebFetchArgs = serde_json::from_value(args)?;
-        info!("WebFetch starting for URL: {}", args.url);
+        let url_str = args.url.trim().to_string();
+        let user_query = args.prompt.unwrap_or_default();
 
-        let parsed_url = match Url::parse(&args.url) {
-            Ok(url) => url,
-            Err(_) => {
-                return Ok(validation_error(format!(
-                    "Invalid URL format: {}",
-                    args.url
-                )));
-            }
+        info!("WebFetch: url={} prompt_len={}", url_str, user_query.len());
+
+        // --- URL validation ---
+        let parsed_url = match Url::parse(&url_str) {
+            Ok(u) => u,
+            Err(_) => return Ok(validation_error(format!("Invalid URL: {url_str}"))),
         };
-
         if !matches!(parsed_url.scheme(), "http" | "https") {
-            return Ok(validation_error(
-                "Only HTTP and HTTPS protocols are supported",
-            ));
+            return Ok(validation_error("Only HTTP/HTTPS supported"));
+        }
+        if let Err(e) = validate_fetch_url(&parsed_url).await {
+            return Ok(validation_error(e.to_string()));
         }
 
-        debug!("Validating URL: {}", parsed_url);
-        if let Err(err) = validate_fetch_url(&parsed_url).await {
-            return Ok(validation_error(err.to_string()));
-        }
+        let started = Instant::now();
 
-        let timeout_ms = 30_000; // Fixed 30 second timeout
-        let max_len = 2000; // Fixed 2000 character limit
+        // --- Fetch (with cache) ---
+        let markdown = if let Some(cached) = cache_get(&url_str) {
+            debug!("Cache hit for {}", url_str);
+            cached
+        } else {
+            debug!("Cache miss, fetching {}", url_str);
+            let resp = match fetch_follow_redirects(&HTTP_CLIENT, parsed_url.clone(), 10).await {
+                Ok(r) => r,
+                Err(e) => {
+                    return Ok(ToolResult {
+                        content: vec![ToolResultContent::Error(e.to_string())],
+                        status: ToolResultStatus::Error,
+                        cancel_reason: None,
+                        execution_time_ms: Some(started.elapsed().as_millis() as u64),
+                        ext_info: None,
+                    });
+                }
+            };
 
-        let client_builder = reqwest::Client::builder()
-            .timeout(Duration::from_millis(timeout_ms))
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent("OpenCodex-Agent/1.0");
-
-        let client = client_builder.build()?;
-
-        let started = std::time::Instant::now();
-        debug!("Starting direct HTTP request to: {}", parsed_url);
-        let resp = match fetch_follow_redirects(&client, parsed_url.clone(), 10).await {
-            Ok(r) => r,
-            Err(err) => {
+            let status = resp.status().as_u16();
+            if !(200..300).contains(&status) {
                 return Ok(ToolResult {
-                    content: vec![ToolResultContent::Error(err.to_string())],
+                    content: vec![ToolResultContent::Error(format!("HTTP {status}"))],
                     status: ToolResultStatus::Error,
                     cancel_reason: None,
                     execution_time_ms: Some(started.elapsed().as_millis() as u64),
                     ext_info: None,
                 });
             }
+
+            let content_type = resp
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+
+            let raw = match tokio::time::timeout(Duration::from_secs(30), resp.text()).await {
+                Ok(Ok(t)) => t,
+                Ok(Err(e)) => return Ok(validation_error(format!("Body read error: {e}"))),
+                Err(_) => return Ok(validation_error("Body read timeout")),
+            };
+
+            let md = if content_type.contains("text/html") {
+                html_to_markdown(&raw)
+            } else {
+                raw
+            };
+
+            let md = truncate_content(&md, MAX_CONTENT_BYTES);
+            cache_put(url_str.clone(), md.clone());
+            md
         };
 
-        let status = resp.status().as_u16();
-        let final_url = resp.url().to_string();
-        let mut headers = HashMap::new();
-        for (k, v) in resp.headers() {
-            if let Ok(s) = v.to_str() {
-                headers.insert(k.to_string(), s.to_string());
-            }
+        // --- If no prompt, return raw markdown ---
+        if user_query.trim().is_empty() {
+            return Ok(ToolResult {
+                content: vec![ToolResultContent::Success(markdown)],
+                status: ToolResultStatus::Success,
+                cancel_reason: None,
+                execution_time_ms: Some(started.elapsed().as_millis() as u64),
+                ext_info: Some(json!({ "source": url_str, "summarized": false })),
+            });
         }
-        let content_type = headers.get("content-type").cloned();
 
-        debug!("Reading response body...");
-        let raw_text = match tokio::time::timeout(Duration::from_secs(30), resp.text()).await {
-            Ok(Ok(t)) => t,
-            Ok(Err(e)) => format!("<read-error>{e}"),
-            Err(_) => {
-                warn!("Response body read timeout");
-                return Ok(ToolResult {
-                    content: vec![ToolResultContent::Error(
-                        "Response body read timeout".to_string(),
-                    )],
-                    status: ToolResultStatus::Error,
-                    cancel_reason: None,
-                    execution_time_ms: Some(started.elapsed().as_millis() as u64),
-                    ext_info: None,
-                });
+        // --- LLM summarization (Claude Code style) ---
+        let summary = match summarize_with_llm(context, &markdown, &user_query).await {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("LLM summarization failed, returning raw content: {e}");
+                truncate_content(&markdown, 8000)
             }
-        };
-
-        let (data_text, extracted_text) = if content_type
-            .as_deref()
-            .is_some_and(|ct| ct.contains("text/html"))
-        {
-            let (text, _title) = extract_content_from_html(&raw_text, max_len);
-            (summarize_text(&text, max_len), Some(text))
-        } else {
-            (truncate_text(&raw_text, max_len), None)
-        };
-
-        let meta = json!({
-            "status": status,
-            "final_url": final_url,
-            "headers": headers,
-            "content_type": content_type,
-            "extracted": extracted_text.is_some(),
-            "elapsed_ms": started.elapsed().as_millis() as u64,
-            "source": "local",
-        });
-
-        let status_flag = if (200..400).contains(&status) {
-            ToolResultStatus::Success
-        } else {
-            ToolResultStatus::Error
         };
 
         Ok(ToolResult {
-            content: vec![ToolResultContent::Success(data_text)],
-            status: status_flag,
+            content: vec![ToolResultContent::Success(summary)],
+            status: ToolResultStatus::Success,
             cancel_reason: None,
             execution_time_ms: Some(started.elapsed().as_millis() as u64),
-            ext_info: Some(meta),
+            ext_info: Some(json!({ "source": url_str, "summarized": true })),
         })
     }
 }
 
-fn truncate_text(s: &str, max_len: usize) -> String {
+// ---------------------------------------------------------------------------
+// HTML → Markdown conversion (htmd, Turndown-style)
+// ---------------------------------------------------------------------------
+static TAG_STRIP_RE: Lazy<regex::Regex> =
+    Lazy::new(|| regex::Regex::new(r"<[^>]+>").expect("invalid tag-strip regex"));
+
+fn html_to_markdown(html: &str) -> String {
+    htmd::convert(html).unwrap_or_else(|_| TAG_STRIP_RE.replace_all(html, "").to_string())
+}
+
+// ---------------------------------------------------------------------------
+// LLM summarization — mirrors Claude Code's WebFetch prompt design
+// ---------------------------------------------------------------------------
+async fn summarize_with_llm(
+    context: &TaskContext,
+    content: &str,
+    user_query: &str,
+) -> Result<String, String> {
+    let db = context.repositories();
+
+    // Resolve model_id from the current session
+    let model_id = {
+        let session = context
+            .agent_persistence()
+            .sessions()
+            .get(context.session_id)
+            .await
+            .map_err(|e| format!("session lookup: {e}"))?
+            .ok_or("session not found")?;
+        session.model_id.ok_or("no model_id on session")?
+    };
+
+    // Trim content to avoid blowing up the context window.
+    // 80K chars ≈ ~20-25K tokens — leaves room for the answer.
+    let trimmed = truncate_content(content, 80_000);
+
+    let prompt = format!(
+        "Web page content:\n---\n{trimmed}\n---\n\n{user_query}\n\n\
+         Provide a concise response based only on the content above. In your response:\n\
+         - Use quotation marks for exact language from the page; paraphrase everything else.\n\
+         - Focus on technical details, code examples, and API signatures.\n\
+         - If the page does not contain relevant information, say so clearly."
+    );
+
+    let request = CreateMessageRequest {
+        model: model_id,
+        max_tokens: 2048,
+        system: None,
+        messages: vec![MessageParam {
+            role: MessageRole::User,
+            content: MessageContent::Text(prompt),
+        }],
+        tools: None,
+        stream: false,
+        temperature: Some(0.1),
+        top_p: None,
+        top_k: None,
+        metadata: None,
+        stop_sequences: None,
+        thinking: None,
+    };
+
+    let llm = LLMService::new(Arc::clone(&db));
+    let resp = llm
+        .call(request)
+        .await
+        .map_err(|e| format!("LLM call failed: {e}"))?;
+
+    Ok(extract_text_from_llm_message(&resp))
+}
+
+// ---------------------------------------------------------------------------
+// Content truncation (char-boundary safe)
+// ---------------------------------------------------------------------------
+fn truncate_content(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         return s.to_string();
     }
     let truncated = crate::agent::utils::truncate_at_char_boundary(s, max_len);
-    format!("{}...\n[truncated, original {} chars]", truncated, s.len())
+    format!(
+        "{truncated}\n\n[Content truncated at {max_len} chars; original {} chars]",
+        s.len()
+    )
 }
 
-fn summarize_text(content: &str, max_len: usize) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    if lines.len() <= 50 {
-        return truncate_text(content, max_len);
-    }
-    let mut out = String::new();
-    for l in lines.iter().take(20) {
-        out.push_str(l);
-        out.push('\n');
-    }
-    out.push_str(&format!(
-        "\n... [omitted {} lines] ...\n\n",
-        lines.len().saturating_sub(30)
-    ));
-    for l in lines.iter().skip(lines.len().saturating_sub(10)) {
-        out.push_str(l);
-        out.push('\n');
-    }
-    truncate_text(&out, max_len)
-}
-
-fn extract_content_from_html(html: &str, max_length: usize) -> (String, Option<String>) {
-    use html2text::from_read;
-    let text = from_read(html.as_bytes(), max_length.max(4096));
-    let cleaned = text
-        .lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let final_text = if cleaned.len() > max_length {
-        let truncated = crate::agent::utils::truncate_at_char_boundary(&cleaned, max_length);
-        format!(
-            "{}...\n\n[Content truncated, original length: {} characters]",
-            truncated,
-            cleaned.len()
-        )
-    } else {
-        cleaned
-    };
-    (final_text, None)
-}
-
+// ---------------------------------------------------------------------------
+// URL / network validation (unchanged from original — SSRF protection)
+// ---------------------------------------------------------------------------
 fn is_private_ip(addr: &IpAddr) -> bool {
     match addr {
         IpAddr::V4(v4) => v4.is_loopback() || v4.is_private(),
