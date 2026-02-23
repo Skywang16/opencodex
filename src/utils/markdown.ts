@@ -44,18 +44,14 @@ renderer.code = ({ text, lang }: { text: string; lang?: string }) => {
 }
 
 // Custom table rendering with wrapper container for scrolling and styling
+// In marked v16+, token.header/rows are object arrays, not HTML strings.
+// We delegate to the prototype method with correct `this` so internal
+// tablerow/tablecell calls resolve properly.
+const origTable = marked.Renderer.prototype.table
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-renderer.table = (token: any) => {
-  const header = token.header || ''
-  const body = token.body || ''
-  return `
-    <div class="table-wrapper">
-      <table>
-        <thead>${header}</thead>
-        <tbody>${body}</tbody>
-      </table>
-    </div>
-  `
+renderer.table = function (this: any, token: any) {
+  const inner = origTable.call(this, token)
+  return `<div class="table-wrapper">${inner}</div>`
 }
 
 marked.use({

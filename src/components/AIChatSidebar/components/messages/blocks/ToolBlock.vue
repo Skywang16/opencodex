@@ -38,13 +38,14 @@
         </span>
       </div>
     </div>
-    <!-- Show terminal container when there is a terminal or when running -->
-    <div v-if="shellPaneId !== null || isRunning" class="shell-terminal">
-      <Terminal v-if="shellPaneId !== null" :terminal-id="shellPaneId" :is-active="false" />
+    <div v-if="isRunning && shellPaneId !== null" class="shell-terminal">
+      <Terminal :terminal-id="shellPaneId" :is-active="false" />
     </div>
-    <!-- Other states (error/cancelled/completed but no terminal) display text -->
+    <div v-else-if="!isRunning" class="shell-content">
+      <pre class="shell-output">{{ shellOutputSnapshot }}</pre>
+    </div>
     <div v-else class="shell-content">
-      <pre class="shell-output">{{ toolResult || 'No output' }}</pre>
+      <pre class="shell-output">Waiting for terminal…</pre>
     </div>
   </div>
 
@@ -82,20 +83,8 @@
       </svg>
     </div>
 
-    <!-- Shell tool content area -->
-    <template v-if="isShellTool">
-      <!-- Display when there is a terminal -->
-      <div v-if="shellPaneId !== null" class="shell-terminal">
-        <Terminal :terminal-id="shellPaneId" :is-active="false" />
-      </div>
-      <!-- Show loading when running (and no terminal) -->
-      <div v-else-if="isRunning" class="shell-loading">
-        <div class="shell-loading-spinner"></div>
-      </div>
-    </template>
-
     <!-- Other tools: expandable result area -->
-    <transition v-else name="expand">
+    <transition name="expand">
       <div v-if="isExpanded && hasResult" class="tool-result" :class="{ 'has-scroll': hasScroll }" @click.stop>
         <div ref="resultWrapperRef" class="result-wrapper" @scroll="checkScroll">
           <pre v-if="shouldHighlight" ref="resultTextRef" class="result-text"><code>{{ cleanToolResult }}</code></pre>
@@ -182,22 +171,24 @@
 
   const toolMetadata = computed(() => (props.block.output?.metadata as Record<string, unknown>) || null)
 
-  // Shell tool related
   const isShellTool = computed(() => toolName.value === 'shell')
   const shellPaneId = computed(() => {
     if (!isShellTool.value) return null
     const paneId = toolMetadata.value?.paneId
     return typeof paneId === 'number' ? paneId : null
   })
-  // Get command from input when loading, from metadata when completed
   const shellCommandDisplay = computed(() => {
     if (!isShellTool.value) return ''
-    // Prefer metadata (after execution completes)
     const metaCommand = toolMetadata.value?.command
     if (typeof metaCommand === 'string' && metaCommand) return metaCommand
-    // Otherwise get from input (when loading)
     const inputCommand = toolParams.value?.command
     return typeof inputCommand === 'string' ? inputCommand : ''
+  })
+  const shellOutputSnapshot = computed(() => {
+    if (!isShellTool.value) return ''
+    const result = toolResult.value
+    if (typeof result === 'string' && result) return stripAnsi(result)
+    return 'No output'
   })
 
   const isError = computed(() => {
@@ -842,7 +833,7 @@
   }
 
   .shell-command {
-    font-family: var(--font-family-mono);
+    font-family: var(--font-family-mono), 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', emoji;
     font-size: 13px;
     color: var(--text-300);
     white-space: nowrap;
@@ -882,17 +873,15 @@
   }
 
   .shell-content {
-    min-height: 180px;
+    max-height: 300px;
+    overflow-y: auto;
     background: var(--bg-100);
-    display: flex;
-    align-items: center;
-    justify-content: center;
   }
 
   .shell-output {
     margin: 0;
     padding: 12px;
-    font-family: var(--font-family-mono);
+    font-family: var(--font-family-mono), 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', emoji;
     font-size: 13px;
     line-height: 1.5;
     color: var(--text-400);

@@ -84,22 +84,15 @@ impl AgentTerminalManager {
                 .unwrap_or_else(|| Uuid::new_v4().to_string())
         };
 
-        let (existing_pane_id, notify) = {
+        let existing_pane_id = {
             let terminals = self
                 .terminals
                 .read()
                 .map_err(|_| "terminal map poisoned".to_string())?;
-            if let Some(entry) = terminals.get(&terminal_id) {
-                (
-                    Some(entry.terminal.pane_id),
-                    Some(Arc::clone(&entry.notify)),
-                )
-            } else {
-                (None, None)
-            }
+            terminals.get(&terminal_id).map(|e| e.terminal.pane_id)
         };
 
-        let notify = notify.unwrap_or_else(|| Arc::new(Notify::new()));
+        let notify = Arc::new(Notify::new());
 
         let pane_id = if let Some(pane_id) = existing_pane_id.map(PaneId::new) {
             if self.mux.pane_exists(pane_id) {
@@ -163,6 +156,7 @@ impl AgentTerminalManager {
             entry.terminal.created_at_ms = now_ms_value;
             entry.terminal.completed_at_ms = None;
             entry.terminal.label = label.clone();
+            entry.notify = Arc::clone(&notify);
 
             (is_new_terminal, previous_pane_id, entry.terminal.clone())
         };
@@ -259,7 +253,7 @@ impl AgentTerminalManager {
         terminal_id: &str,
         timeout: Duration,
     ) -> Result<TerminalStatus, String> {
-        let notify = {
+        let notify_arc = {
             let terminals = self
                 .terminals
                 .read()
@@ -267,16 +261,22 @@ impl AgentTerminalManager {
             let entry = terminals
                 .get(terminal_id)
                 .ok_or_else(|| "terminal not found".to_string())?;
+
+            if entry.terminal.status.is_terminal() {
+                return Ok(entry.terminal.status.clone());
+            }
+
             Arc::clone(&entry.notify)
         };
 
+        let notified = notify_arc.notified();
         if let Some(status) = self.get_terminal_status(terminal_id) {
             if status.is_terminal() {
                 return Ok(status);
             }
         }
 
-        tokio::time::timeout(timeout, notify.notified())
+        tokio::time::timeout(timeout, notified)
             .await
             .map_err(|_| "timeout waiting for terminal completion".to_string())?;
 

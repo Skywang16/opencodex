@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::agent::common::{ExecOutputFormatter, TruncationPolicy};
+use crate::agent::common::TruncationPolicy;
 use crate::agent::core::context::TaskContext;
 use crate::agent::error::ToolExecutorResult;
 use crate::agent::terminal::{AgentTerminalManager, TerminalExecutionMode, TerminalStatus};
@@ -259,17 +259,15 @@ Git safety: Never commit/push/amend without explicit user request."#
         };
         let is_success = matches!(status, TerminalStatus::Completed { exit_code: Some(0) });
 
-        // Apply intelligent truncation: keep head (50 lines) + tail (200 lines)
-        let formatter = ExecOutputFormatter::new(&raw_output, exit_code, Some(duration_secs))
-            .with_truncation(TruncationPolicy::shell_output());
-
-        let formatted_output = formatter.format_for_model();
+        let truncation = TruncationPolicy::shell_output();
+        let truncated = crate::agent::common::truncate_middle(&raw_output, truncation);
+        let output = truncated.text;
 
         Ok(ToolResult {
             content: vec![if is_success {
-                ToolResultContent::Success(formatted_output.clone())
+                ToolResultContent::Success(output.clone())
             } else {
-                ToolResultContent::Error(formatted_output.clone())
+                ToolResultContent::Error(output.clone())
             }],
             status: if is_success {
                 ToolResultStatus::Success
@@ -286,8 +284,8 @@ Git safety: Never commit/push/amend without explicit user request."#
                 "exitCode": exit_code,
                 "isBackground": false,
                 "status": status,
-                "truncated": formatter.was_truncated,
-                "originalLines": formatter.original_lines,
+                "truncated": truncated.was_truncated,
+                "originalLines": truncated.info.as_ref().map(|i| i.lines),
             })),
         })
     }

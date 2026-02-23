@@ -8,6 +8,4 @@ pub mod text;
 pub mod truncation;
 
 pub use text::{truncate_chars, truncate_chars_no_ellipsis};
-pub use truncation::{
-    truncate_middle, ExecOutputFormatter, TruncatedResult, TruncationInfo, TruncationPolicy,
-};
+pub use truncation::{truncate_middle, TruncatedResult, TruncationInfo, TruncationPolicy};

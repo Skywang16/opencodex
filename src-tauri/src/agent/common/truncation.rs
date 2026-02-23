@@ -222,68 +222,6 @@ fn truncate_middle_lines(s: &str, head_lines: usize, tail_lines: usize) -> Trunc
     )
 }
 
-/// Format shell/command execution output with metadata
-#[derive(Debug, Clone)]
-pub struct ExecOutputFormatter {
-    pub exit_code: Option<i32>,
-    pub duration_secs: Option<f32>,
-    pub output: String,
-    pub was_truncated: bool,
-    pub original_lines: Option<usize>,
-}
-
-impl ExecOutputFormatter {
-    /// Create from raw output with optional truncation
-    pub fn new(output: &str, exit_code: Option<i32>, duration_secs: Option<f32>) -> Self {
-        Self {
-            exit_code,
-            duration_secs,
-            output: output.to_string(),
-            was_truncated: false,
-            original_lines: None,
-        }
-    }
-
-    /// Apply truncation policy
-    pub fn with_truncation(mut self, policy: TruncationPolicy) -> Self {
-        let result = truncate_middle(&self.output, policy);
-        self.was_truncated = result.was_truncated;
-        if let Some(info) = &result.info {
-            self.original_lines = Some(info.lines);
-        }
-        self.output = result.text;
-        self
-    }
-
-    /// Format for model consumption (human-readable)
-    pub fn format_for_model(&self) -> String {
-        let mut sections = Vec::new();
-
-        if let Some(code) = self.exit_code {
-            sections.push(format!("Exit code: {code}"));
-        }
-
-        if let Some(secs) = self.duration_secs {
-            sections.push(format!("Wall time: {secs:.1} seconds"));
-        }
-
-        if self.was_truncated {
-            if let Some(lines) = self.original_lines {
-                sections.push(format!("Total output lines: {lines}"));
-            }
-        }
-
-        if !self.output.is_empty() {
-            sections.push("Output:".to_string());
-            sections.push(self.output.clone());
-        } else {
-            sections.push("Output: (empty)".to_string());
-        }
-
-        sections.join("\n")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,31 +272,6 @@ mod tests {
         assert!(result.was_truncated);
         // Should not panic on UTF-8 boundaries
         assert!(result.text.chars().count() < text.chars().count());
-    }
-
-    #[test]
-    fn test_exec_formatter() {
-        let output = "Building...\nCompiling...\nDone!";
-        let formatter = ExecOutputFormatter::new(output, Some(0), Some(1.5));
-        let formatted = formatter.format_for_model();
-
-        assert!(formatted.contains("Exit code: 0"));
-        assert!(formatted.contains("Wall time: 1.5 seconds"));
-        assert!(formatted.contains("Done!"));
-    }
-
-    #[test]
-    fn test_exec_formatter_with_truncation() {
-        let lines: Vec<String> = (1..=1000).map(|i| format!("log line {i}")).collect();
-        let output = lines.join("\n");
-
-        let formatter = ExecOutputFormatter::new(&output, Some(0), Some(5.0))
-            .with_truncation(TruncationPolicy::Lines { head: 10, tail: 20 });
-
-        let formatted = formatter.format_for_model();
-        assert!(formatted.contains("Total output lines: 1000"));
-        assert!(formatted.contains("log line 1")); // head preserved
-        assert!(formatted.contains("log line 1000")); // tail preserved
     }
 
     #[test]
