@@ -128,16 +128,6 @@ impl SystemCommandsProvider {
 
         Ok(matches)
     }
-
-    /// Check if command exists
-    pub async fn has_command(&self, command: &str) -> CompletionProviderResult<bool> {
-        Ok(self.get_commands().await?.contains(command))
-    }
-
-    /// Get count of all commands
-    pub async fn command_count(&self) -> CompletionProviderResult<usize> {
-        Ok(self.get_commands().await?.len())
-    }
 }
 
 #[async_trait]

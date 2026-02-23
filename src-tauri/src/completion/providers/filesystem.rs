@@ -29,18 +29,6 @@ impl FilesystemProvider {
         }
     }
 
-    /// Set maximum search depth
-    pub fn with_max_depth(mut self, depth: usize) -> Self {
-        self.max_depth = depth;
-        self
-    }
-
-    /// Set whether to show hidden files
-    pub fn with_show_hidden(mut self, show: bool) -> Self {
-        self.show_hidden = show;
-        self
-    }
-
     /// Resolve path, handling relative and absolute paths
     fn resolve_path(&self, input: &str, working_dir: &Path) -> PathBuf {
         let path = Path::new(input);

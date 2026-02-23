@@ -350,40 +350,6 @@ impl MessageRepository {
         Ok(())
     }
 
-    pub async fn list_messages_after(
-        &self,
-        session_id: i64,
-        message_id: i64,
-    ) -> AgentResult<Vec<Message>> {
-        let created_at: i64 = sqlx::query_scalar("SELECT created_at FROM messages WHERE id = ?")
-            .bind(message_id)
-            .fetch_one(self.pool())
-            .await?;
-
-        let rows = sqlx::query(
-            "SELECT
-                id, session_id, role, agent_type, parent_message_id,
-                status, blocks, is_summary, is_internal,
-                model_id, provider_id,
-                input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-                created_at, finished_at, duration_ms
-             FROM messages
-             WHERE session_id = ?
-               AND (created_at > ? OR (created_at = ? AND id > ?))
-             ORDER BY created_at ASC, id ASC",
-        )
-        .bind(session_id)
-        .bind(created_at)
-        .bind(created_at)
-        .bind(message_id)
-        .fetch_all(self.pool())
-        .await?;
-
-        rows.into_iter()
-            .map(|row| build_message(&row))
-            .collect::<AgentResult<Vec<_>>>()
-    }
-
     pub async fn list_messages_from(
         &self,
         session_id: i64,
@@ -416,27 +382,6 @@ impl MessageRepository {
         rows.into_iter()
             .map(|row| build_message(&row))
             .collect::<AgentResult<Vec<_>>>()
-    }
-
-    pub async fn delete_messages_after(&self, session_id: i64, message_id: i64) -> AgentResult<()> {
-        let created_at: i64 = sqlx::query_scalar("SELECT created_at FROM messages WHERE id = ?")
-            .bind(message_id)
-            .fetch_one(self.pool())
-            .await?;
-
-        sqlx::query(
-            "DELETE FROM messages
-             WHERE session_id = ?
-               AND (created_at > ? OR (created_at = ? AND id > ?))",
-        )
-        .bind(session_id)
-        .bind(created_at)
-        .bind(created_at)
-        .bind(message_id)
-        .execute(self.pool())
-        .await?;
-
-        Ok(())
     }
 
     pub async fn delete_messages_from(&self, session_id: i64, message_id: i64) -> AgentResult<()> {

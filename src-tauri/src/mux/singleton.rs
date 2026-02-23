@@ -47,14 +47,6 @@ fn init_mux_internal(
     }
 }
 
-/// Initialize global TerminalMux instance
-///
-/// This function can be explicitly called at application startup to ensure
-/// Mux is initialized when needed. Has no effect if already initialized.
-pub fn init_mux() -> Arc<TerminalMux> {
-    get_mux()
-}
-
 /// Shutdown global TerminalMux instance
 ///
 /// Note: This function should only be called once when the application is closing.
@@ -65,34 +57,4 @@ pub fn shutdown_mux() -> MuxResult<()> {
     } else {
         Ok(())
     }
-}
-
-/// Check if global Mux has been initialized
-pub fn is_mux_initialized() -> bool {
-    GLOBAL_MUX.get().is_some()
-}
-
-/// Get global Mux statistics (for debugging)
-pub fn get_mux_stats() -> Option<MuxStats> {
-    GLOBAL_MUX.get().map(|mux| MuxStats {
-        pane_count: mux.pane_count(),
-        is_initialized: true,
-    })
-}
-
-/// Send notification to global Mux from any thread
-///
-/// This function can be safely called from any thread, notifications will be
-/// sent to the main thread for processing
-pub fn notify_global(notification: crate::mux::MuxNotification) {
-    if let Some(mux) = GLOBAL_MUX.get() {
-        mux.notify(notification);
-    }
-}
-
-/// Mux statistics
-#[derive(Debug, Clone)]
-pub struct MuxStats {
-    pub pane_count: usize,
-    pub is_initialized: bool,
 }

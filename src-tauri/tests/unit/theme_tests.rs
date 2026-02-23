@@ -4,32 +4,10 @@
  * 测试主题管理器的核心功能，包括主题创建、验证、加载等。
  */
 
-use tempfile::TempDir;
-use tokio;
-
-// 导入被测试的模块
-use tauri_app::config::{
-    paths::ConfigPaths,
-    theme::{ThemeManager, ThemeManagerOptions, ThemeValidator},
-    theme_service::ThemeService,
-    types::{Theme, ThemeConfig, ThemeType},
-};
-use tauri_app::storage::cache::UnifiedCache;
-
-/// 创建测试用的主题管理器
-async fn create_test_theme_manager() -> (ThemeManager, TempDir) {
-    let temp_dir = TempDir::new().unwrap();
-    let paths = ConfigPaths::new_for_test(temp_dir.path().to_path_buf());
-    let options = ThemeManagerOptions::default();
-    let cache = std::sync::Arc::new(UnifiedCache::new());
-    let manager = ThemeManager::new(paths, options, cache).await.unwrap();
-    (manager, temp_dir)
-}
+use terminal_lib::config::theme::types::ThemeConfig;
 
 #[tokio::test]
 async fn test_theme_service_logic() {
-    use std::sync::Arc;
-
     // 创建测试主题配置
     let theme_config = ThemeConfig {
         terminal_theme: "test-theme".to_string(),

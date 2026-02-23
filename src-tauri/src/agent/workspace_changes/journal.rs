@@ -97,16 +97,6 @@ impl WorkspaceChangeJournal {
             .await;
         rx.await.unwrap_or_default()
     }
-
-    pub async fn take_pending(&self, workspace_root: &Path) -> Vec<PendingChange> {
-        let workspace_key: Arc<str> = Arc::from(
-            std::fs::canonicalize(workspace_root)
-                .unwrap_or_else(|_| workspace_root.to_path_buf())
-                .to_string_lossy()
-                .to_string(),
-        );
-        self.take_pending_by_key(workspace_key).await
-    }
 }
 
 impl Default for WorkspaceChangeJournal {

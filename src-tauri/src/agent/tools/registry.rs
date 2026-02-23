@@ -395,26 +395,6 @@ impl ToolRegistry {
         Ok(())
     }
 
-    pub async fn unregister(&self, name: &str) -> ToolExecutorResult<()> {
-        if self.entries.remove(name).is_none() {
-            return Err(ToolExecutorError::ToolNotFound(name.to_string()));
-        }
-
-        self.aliases.retain(|_, v| v != name);
-
-        Ok(())
-    }
-
-    pub async fn add_alias(&self, alias: &str, tool_name: &str) -> ToolExecutorResult<()> {
-        if self.resolve_name(tool_name).await.is_none() {
-            return Err(ToolExecutorError::ToolNotFound(tool_name.to_string()));
-        }
-
-        self.aliases
-            .insert(alias.to_string(), tool_name.to_string());
-        Ok(())
-    }
-
     async fn resolve_name(&self, name: &str) -> Option<String> {
         if self.entries.contains_key(name) {
             return Some(name.to_string());
@@ -1003,13 +983,6 @@ impl ToolRegistry {
         }
     }
 
-    pub async fn get_tool_schemas(&self) -> Vec<ToolSchema> {
-        self.entries
-            .iter()
-            .map(|entry| entry.value().tool.schema())
-            .collect()
-    }
-
     /// Get tool schemas with context-aware descriptions
     pub fn get_tool_schemas_with_context(
         &self,
@@ -1053,32 +1026,6 @@ impl ToolRegistry {
                 }
             })
             .collect()
-    }
-
-    pub async fn list_tools(&self) -> Vec<String> {
-        let mut names: Vec<String> = self
-            .entries
-            .iter()
-            .map(|entry| entry.key().clone())
-            .collect();
-        names.sort();
-        names
-    }
-
-    pub async fn list_tools_by_category(&self, category: ToolCategory) -> Vec<String> {
-        let mut out: Vec<String> = self
-            .entries
-            .iter()
-            .filter_map(|entry| {
-                if entry.value().metadata.category == category {
-                    Some(entry.key().clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        out.sort();
-        out
     }
 }
 

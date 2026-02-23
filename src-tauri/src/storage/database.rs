@@ -2,7 +2,6 @@ use crate::storage::error::{DatabaseError, DatabaseResult};
 use crate::storage::paths::StoragePaths;
 use crate::storage::sql_scripts::{SqlScript, SqlScriptCatalog};
 use crate::storage::DATABASE_FILE_NAME;
-use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use chacha20poly1305::aead::{Aead, KeyInit};
@@ -181,14 +180,6 @@ impl DatabaseManager {
 
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
-    }
-
-    pub async fn set_master_password(&self, password: &str) -> DatabaseResult<()> {
-        if !self.options.encryption {
-            return Err(DatabaseError::EncryptionNotEnabled);
-        }
-        self.key_vault.set_from_password(password).await?;
-        Ok(())
     }
 
     pub async fn encrypt_data(&self, data: &str) -> DatabaseResult<Vec<u8>> {
@@ -380,27 +371,6 @@ impl KeyVault {
         Ok(key)
     }
 
-    async fn set_from_password(&self, password: &str) -> DatabaseResult<[u8; 32]> {
-        let argon2 = Argon2::default();
-        let salt = SaltString::generate(&mut OsRng);
-        let password_hash = argon2
-            .hash_password(password.as_bytes(), &salt)
-            .map_err(DatabaseError::from)?;
-
-        let hash = password_hash
-            .hash
-            .ok_or_else(|| DatabaseError::internal("Key derivation produced an empty hash"))?;
-        let hash_bytes = hash.as_bytes();
-        if hash_bytes.len() < 32 {
-            return Err(DatabaseError::InsufficientKeyLength);
-        }
-        let mut bytes = [0u8; 32];
-        bytes.copy_from_slice(&hash_bytes[..32]);
-        self.persist(bytes).await?;
-        let _ = self.key.set(bytes);
-        Ok(bytes)
-    }
-
     async fn load_from_disk(&self) -> DatabaseResult<Option<[u8; 32]>> {
         if !self.path.exists() {
             return Ok(None);
@@ -538,15 +508,6 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let vault = KeyVault::new(temp_dir.path().join(KEY_FILE_NAME));
         let key1 = vault.master_key().await.unwrap();
-        let key2 = vault.master_key().await.unwrap();
-        assert_eq!(key1, key2);
-    }
-
-    #[tokio::test]
-    async fn key_vault_accepts_password() {
-        let temp_dir = TempDir::new().unwrap();
-        let vault = KeyVault::new(temp_dir.path().join(KEY_FILE_NAME));
-        let key1 = vault.set_from_password("secret").await.unwrap();
         let key2 = vault.master_key().await.unwrap();
         assert_eq!(key1, key2);
     }

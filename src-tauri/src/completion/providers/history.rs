@@ -111,12 +111,6 @@ impl HistoryProvider {
         self
     }
 
-    /// Set maximum history entries
-    pub fn with_max_entries(mut self, max: usize) -> Self {
-        self.max_entries = max;
-        self
-    }
-
     /// Read history from file
     async fn read_history(&self) -> CompletionProviderResult<Vec<HistoryEntry>> {
         let cache_key = "completion:history:commands";

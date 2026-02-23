@@ -111,8 +111,10 @@ impl AnthropicProvider {
             return Err(self.parse_error_response(status, &body));
         }
 
-        // Debug: Print full response for third-party API compatibility
-        tracing::info!("=== Anthropic API Response (full) ===\n{}", &body);
+        tracing::debug!(
+            "Anthropic API response (truncated): {}",
+            &body[..body.len().min(500)]
+        );
 
         serde_json::from_str(&body).map_err(|e| {
             tracing::error!(

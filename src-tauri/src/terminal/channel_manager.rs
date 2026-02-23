@@ -66,14 +66,6 @@ impl TerminalChannelManager {
         }
     }
 
-    pub fn send_error(&self, pane_id: u32, error: String) {
-        if let Ok(map) = self.channels.read() {
-            if let Some(ch) = map.get(&pane_id) {
-                let _ = ch.send(TerminalChannelMessage::Error { pane_id, error });
-            }
-        }
-    }
-
     pub fn close(&self, pane_id: u32) {
         if let Ok(map) = self.channels.read() {
             if let Some(ch) = map.get(&pane_id) {

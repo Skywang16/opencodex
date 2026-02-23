@@ -149,22 +149,6 @@ impl FileStore {
         Ok(metadata)
     }
 
-    /// Delete file-related data
-    pub fn delete_file_data(&self, file_path: &Path) -> Result<()> {
-        // Delete vector file
-        self.delete_file_vectors(file_path)?;
-
-        // Delete metadata
-        let mut all_metadata = self.load_all_file_metadata()?;
-        all_metadata.remove(file_path);
-
-        let metadata_file = self.metadata_path.join("files.json");
-        let json = serde_json::to_string_pretty(&all_metadata)?;
-        fs::write(metadata_file, json)?;
-
-        Ok(())
-    }
-
     /// Clean up expired data
     pub fn cleanup(&self) -> Result<()> {
         // Implement cleanup logic

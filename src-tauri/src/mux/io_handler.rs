@@ -37,19 +37,6 @@ impl IoHandler {
         }
     }
 
-    pub fn with_buffer_size(
-        notification_sender: Sender<MuxNotification>,
-        shell_integration: Arc<ShellIntegrationManager>,
-        buffer_size: usize,
-    ) -> Self {
-        Self {
-            buffer_size,
-            notification_sender,
-            shell_integration,
-            reader_threads: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
     pub fn buffer_size(&self) -> usize {
         self.buffer_size
     }

@@ -134,14 +134,6 @@ impl<T> OperationResult<T> {
         }
     }
 
-    pub fn success_empty() -> OperationResult<()> {
-        OperationResult {
-            success: true,
-            data: Some(()),
-            error: None,
-        }
-    }
-
     pub fn failure(error: String) -> Self {
         Self {
             success: false,

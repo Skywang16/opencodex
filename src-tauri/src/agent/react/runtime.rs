@@ -5,7 +5,7 @@ use crate::agent::tools::ToolResult;
 
 use super::types::{
     FinishReason, FinishReasonOrTerminal, ReactAction, ReactIteration, ReactObservation,
-    ReactPhase, ReactRuntimeConfig, ReactRuntimeSnapshot, ReactThought,
+    ReactPhase, ReactRuntimeConfig, ReactRuntimeSnapshot,
 };
 
 #[derive(Debug, Clone)]
@@ -46,26 +46,6 @@ impl ReactRuntime {
         };
         self.iterations.push(iteration);
         index
-    }
-
-    pub fn record_thought(
-        &mut self,
-        iteration_index: usize,
-        raw: String,
-        normalized: String,
-    ) -> ReactThought {
-        let thought = ReactThought {
-            id: Uuid::new_v4(),
-            iteration: iteration_index,
-            raw,
-            normalized,
-            created_at: Utc::now().timestamp_millis(),
-        };
-        if let Some(iteration) = self.iterations.get_mut(iteration_index) {
-            iteration.thought = Some(thought.clone());
-            iteration.status = ReactPhase::Reasoning;
-        }
-        thought
     }
 
     pub fn record_action(
@@ -138,14 +118,6 @@ impl ReactRuntime {
 
     pub fn reset_error_counter(&mut self) {
         self.consecutive_errors = 0;
-    }
-
-    pub fn set_stop_reason(&mut self, reason: FinishReasonOrTerminal) {
-        self.stop_reason = Some(reason);
-    }
-
-    pub fn register_final_response(&mut self, response: String) {
-        self.final_response = Some(response);
     }
 
     pub fn mark_abort(&mut self) {

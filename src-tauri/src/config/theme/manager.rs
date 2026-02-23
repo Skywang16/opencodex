@@ -3,7 +3,7 @@ use crate::config::error::{ThemeConfigError, ThemeConfigResult};
 use crate::config::paths::ConfigPaths;
 use crate::storage::cache::UnifiedCache;
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf, sync::Arc, time::SystemTime};
+use std::{fs, sync::Arc, time::SystemTime};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -131,38 +131,6 @@ impl ThemeManager {
         }
 
         Ok(wrapper.theme)
-    }
-
-    pub async fn save_theme(&self, theme: &Theme) -> ThemeConfigResult<PathBuf> {
-        let validation = ThemeValidator::validate_theme(theme);
-        if !validation.is_valid {
-            return Err(ThemeConfigError::Validation {
-                reason: validation
-                    .errors
-                    .into_iter()
-                    .next()
-                    .unwrap_or_else(|| "invalid theme".into()),
-            });
-        }
-
-        let name = theme.name.trim();
-        if name.is_empty() {
-            return Err(ThemeConfigError::Validation {
-                reason: "theme.name cannot be empty".into(),
-            });
-        }
-
-        let path = self.paths.themes_dir().join(format!("{name}.json"));
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let wrapper = ThemeFileWrapper {
-            theme: theme.clone(),
-        };
-        let json = serde_json::to_string_pretty(&wrapper)?;
-        fs::write(&path, format!("{json}\n"))?;
-        Ok(path)
     }
 }
 

@@ -85,16 +85,6 @@ impl Span {
         }
         Ok(())
     }
-
-    /// Get byte length
-    pub fn byte_len(&self) -> usize {
-        self.byte_end.saturating_sub(self.byte_start)
-    }
-
-    /// Get line count
-    pub fn line_count(&self) -> usize {
-        self.line_end.saturating_sub(self.line_start) + 1
-    }
 }
 
 /// File metadata

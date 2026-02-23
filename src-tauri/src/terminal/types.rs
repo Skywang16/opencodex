@@ -72,15 +72,6 @@ impl ShellType {
     pub fn supports_integration(&self) -> bool {
         matches!(self, ShellType::Bash | ShellType::Zsh | ShellType::Fish)
     }
-
-    /// Get shell default prompt
-    pub fn default_prompt(&self) -> &str {
-        match self {
-            ShellType::Bash | ShellType::Zsh => "$ ",
-            ShellType::Fish => "❯ ",
-            ShellType::Other(_) => "$ ",
-        }
-    }
 }
 
 impl std::fmt::Display for ShellType {
@@ -216,23 +207,6 @@ impl TerminalContext {
         Ok(())
     }
 
-    /// Check if context contains complete terminal state information
-    pub fn is_complete(&self) -> bool {
-        self.current_working_directory.is_some() && self.shell_type.is_some()
-    }
-
-    /// Get valid working directory, return default if none
-    pub fn get_cwd_or_default(&self) -> String {
-        self.current_working_directory
-            .clone()
-            .unwrap_or_else(|| "~".to_string())
-    }
-
-    /// Get shell type, return default if none
-    pub fn get_shell_type_or_default(&self) -> ShellType {
-        self.shell_type.clone().unwrap_or(ShellType::Bash)
-    }
-
     /// Update active status
     pub fn set_active(&mut self, active: bool) {
         self.is_active = active;
@@ -257,17 +231,6 @@ impl TerminalContext {
     pub fn set_shell_integration(&mut self, enabled: bool) {
         self.shell_integration_enabled = enabled;
         self.last_activity = SystemTime::now();
-    }
-
-    /// Add command to history
-    pub fn add_command(&mut self, command: CommandInfo) {
-        self.command_history.push(command);
-        self.last_activity = SystemTime::now();
-
-        // Limit history record count
-        if self.command_history.len() > 100 {
-            self.command_history.remove(0);
-        }
     }
 
     /// Set current command

@@ -76,12 +76,6 @@ impl StateManager {
         state.status_change_reason = reason;
     }
 
-    pub async fn set_pause_status(&self, paused: bool, reason: Option<String>) {
-        let mut state = self.state.write().await;
-        state.paused = paused;
-        state.pause_reason = reason;
-    }
-
     pub async fn increment_error_count(&self) {
         let mut state = self.state.write().await;
         state.consecutive_errors = state.consecutive_errors.saturating_add(1);

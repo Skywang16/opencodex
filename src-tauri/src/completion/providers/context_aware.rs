@@ -8,8 +8,6 @@ use crate::completion::types::{CompletionContext, CompletionItem, CompletionType
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::warn;
 
 /// Command output record
 #[derive(Debug, Clone)]
@@ -117,46 +115,6 @@ impl ContextAwareProvider {
         history
             .last()
             .map(|record| (record.command.clone(), record.output.clone()))
-    }
-
-    /// Record command output
-    pub fn record_command_output(
-        &self,
-        command: String,
-        output: String,
-        working_directory: String,
-    ) -> CompletionProviderResult<()> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        // Use smart extractor to extract entities (may fail, failure doesn't affect recording)
-        use crate::completion::smart_extractor::SmartExtractor;
-        let extractor = SmartExtractor::global();
-        let extracted_entities = match extractor.extract_entities(&command, &output) {
-            Ok(results) => {
-                let mut map = HashMap::new();
-                for result in results {
-                    map.entry(result.entity_type)
-                        .or_insert_with(Vec::new)
-                        .push(result.value);
-                }
-                map
-            }
-            Err(error) => {
-                warn!(error = %error, "completion.smart_extractor_failed");
-                HashMap::new()
-            }
-        };
-
-        self.record_command_output_with_entities(
-            command,
-            output,
-            working_directory,
-            extracted_entities,
-            timestamp,
-        )
     }
 
     /// Record command output (caller has already provided extracted entities)

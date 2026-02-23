@@ -120,16 +120,6 @@ impl ModelDef {
     pub fn max_output(&self) -> u32 {
         self.limit.as_ref().map(|l| l.output).unwrap_or(8192)
     }
-
-    /// Check if model supports images
-    pub fn supports_images(&self) -> bool {
-        self.attachment
-            || self
-                .modalities
-                .as_ref()
-                .map(|m| m.input.iter().any(|i| i == "image"))
-                .unwrap_or(false)
-    }
 }
 
 /// Provider definition from models.dev

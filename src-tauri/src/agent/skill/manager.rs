@@ -49,10 +49,6 @@ impl SkillManager {
         }
     }
 
-    pub fn with_registry(registry: SkillRegistryRef) -> Self {
-        Self { registry }
-    }
-
     /// Discovery phase: scan global and workspace and load metadata for all skills
     ///
     /// Directory scan priority (latter overrides former):

@@ -147,21 +147,6 @@ impl AIService {
             })
     }
 
-    pub async fn test_connection(&self, model_id: &str) -> AIServiceResult<String> {
-        let model = AIModels::new(&self.database)
-            .find_by_id(model_id)
-            .await
-            .map_err(|err| AIServiceError::Repository {
-                operation: "ai_models.find_by_id",
-                source: err,
-            })?
-            .ok_or_else(|| AIServiceError::ModelNotFound {
-                model_id: model_id.to_string(),
-            })?;
-
-        self.test_connection_with_config(&model).await
-    }
-
     pub async fn test_connection_with_config(
         &self,
         model: &AIModelConfig,

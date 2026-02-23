@@ -78,19 +78,6 @@ impl ProviderRegistry {
         }
     }
 
-    /// List of supported providers - compile-time constants
-    #[inline]
-    pub fn list_providers(&self) -> &'static [&'static str] {
-        &["anthropic", "openai", "openai_compatible", "gemini"]
-    }
-
-    /// Get Provider metadata
-    pub fn get_provider_metadata(&self, provider_type: &str) -> Option<&ProviderMetadata> {
-        PROVIDER_METADATA
-            .iter()
-            .find(|m| m.provider_type == provider_type)
-    }
-
     /// Get all Provider metadata
     pub fn get_all_providers_metadata(&self) -> &[ProviderMetadata] {
         &PROVIDER_METADATA

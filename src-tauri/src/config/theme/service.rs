@@ -111,53 +111,6 @@ impl ThemeService {
     ///
     /// # Returns
     /// Returns validation result and list of missing themes
-    pub async fn validate_theme_config(
-        &self,
-        theme_config: &ThemeConfig,
-    ) -> ThemeConfigResult<Vec<String>> {
-        let mut missing_themes = Vec::new();
-
-        if self
-            .theme_manager
-            .load_theme(&theme_config.terminal_theme)
-            .await
-            .is_err()
-        {
-            missing_themes.push(theme_config.terminal_theme.clone());
-        }
-
-        if self
-            .theme_manager
-            .load_theme(&theme_config.light_theme)
-            .await
-            .is_err()
-        {
-            missing_themes.push(theme_config.light_theme.clone());
-        }
-
-        if self
-            .theme_manager
-            .load_theme(&theme_config.dark_theme)
-            .await
-            .is_err()
-        {
-            missing_themes.push(theme_config.dark_theme.clone());
-        }
-
-        if !missing_themes.is_empty() {
-            warn!("Found missing themes: {:?}", missing_themes);
-        }
-
-        Ok(missing_themes)
-    }
-
-    /// Get list of all available themes
-    pub async fn list_available_themes(&self) -> ThemeConfigResult<Vec<String>> {
-        let themes = self.theme_manager.list_themes().await?;
-        let theme_names: Vec<String> = themes.into_iter().map(|t| t.name).collect();
-        Ok(theme_names)
-    }
-
     /// Check if specified theme exists
     pub async fn theme_exists(&self, theme_name: &str) -> bool {
         self.theme_manager.load_theme(theme_name).await.is_ok()

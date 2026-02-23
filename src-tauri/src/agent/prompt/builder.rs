@@ -144,11 +144,6 @@ impl PromptBuilder {
         env
     }
 
-    /// Get agent prompt
-    pub async fn get_agent_prompt(&mut self, agent_type: &str) -> Option<String> {
-        self.loader.load("agents", agent_type).await
-    }
-
     /// Get model profile prompt
     pub async fn get_model_profile_prompt(&mut self, profile_key: &str) -> Option<String> {
         self.loader.load("models", profile_key).await

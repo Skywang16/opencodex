@@ -184,29 +184,14 @@ impl ConfigPaths {
         &self.cache_dir
     }
 
-    /// Get theme cache file path
-    pub fn theme_cache_file(&self) -> PathBuf {
-        self.cache_dir.join("themes.cache")
-    }
-
     /// Get logs directory path
     pub fn logs_dir(&self) -> &Path {
         &self.logs_dir
     }
 
-    /// Get error log file path
-    pub fn error_log_file(&self) -> PathBuf {
-        self.logs_dir.join("error.log")
-    }
-
     /// Get shell integration scripts directory path
     pub fn shell_dir(&self) -> &Path {
         &self.shell_dir
-    }
-
-    /// Get integration script file path for specified shell
-    pub fn shell_integration_script_path(&self, shell_name: &str) -> PathBuf {
-        self.shell_dir.join(format!("integration.{shell_name}"))
     }
 
     /// Get global Skills directory path
@@ -241,48 +226,12 @@ impl ConfigPaths {
         Ok(())
     }
 
-    /// Check if file exists
-    pub fn file_exists<P: AsRef<Path>>(&self, path: P) -> bool {
-        path.as_ref().exists() && path.as_ref().is_file()
-    }
-
-    /// Check if directory exists
-    pub fn dir_exists<P: AsRef<Path>>(&self, path: P) -> bool {
-        path.as_ref().exists() && path.as_ref().is_dir()
-    }
-
     /// Get file size
     pub fn file_size<P: AsRef<Path>>(&self, path: P) -> ConfigPathsResult<u64> {
         let metadata = fs::metadata(path.as_ref())
             .map_err(|e| ConfigPathsError::directory_access(path.as_ref().to_path_buf(), e))?;
 
         Ok(metadata.len())
-    }
-
-    /// Get file modification time
-    pub fn file_modified_time<P: AsRef<Path>>(
-        &self,
-        path: P,
-    ) -> ConfigPathsResult<std::time::SystemTime> {
-        let metadata = fs::metadata(path.as_ref())
-            .map_err(|e| ConfigPathsError::directory_access(path.as_ref().to_path_buf(), e))?;
-
-        metadata
-            .modified()
-            .map_err(|e| ConfigPathsError::directory_access(path.as_ref().to_path_buf(), e))
-    }
-
-    /// Create directory
-    pub fn create_dir<P: AsRef<Path>>(&self, path: P) -> ConfigPathsResult<()> {
-        let path = path.as_ref();
-
-        // Validate path security
-        self.validate_path(path)?;
-
-        fs::create_dir_all(path)
-            .map_err(|e| ConfigPathsError::directory_create(path.to_path_buf(), e))?;
-
-        Ok(())
     }
 
     /// Delete file
@@ -295,134 +244,6 @@ impl ConfigPaths {
         if path.exists() {
             fs::remove_file(path)
                 .map_err(|e| ConfigPathsError::directory_access(path.to_path_buf(), e))?;
-        }
-
-        Ok(())
-    }
-
-    /// Delete directory
-    pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> ConfigPathsResult<()> {
-        let path = path.as_ref();
-
-        // Validate path security
-        self.validate_path(path)?;
-
-        if path.exists() {
-            fs::remove_dir_all(path)
-                .map_err(|e| ConfigPathsError::directory_access(path.to_path_buf(), e))?;
-        }
-
-        Ok(())
-    }
-
-    /// Copy file
-    pub fn copy_file<P: AsRef<Path>, Q: AsRef<Path>>(
-        &self,
-        from: P,
-        to: Q,
-    ) -> ConfigPathsResult<()> {
-        let from = from.as_ref();
-        let to = to.as_ref();
-
-        // Validate path security
-        self.validate_path(from)?;
-        self.validate_path(to)?;
-
-        // Ensure target directory exists
-        if let Some(parent) = to.parent() {
-            self.create_dir(parent)?;
-        }
-
-        fs::copy(from, to).map_err(|e| ConfigPathsError::directory_access(to.to_path_buf(), e))?;
-
-        Ok(())
-    }
-
-    /// Move file
-    pub fn move_file<P: AsRef<Path>, Q: AsRef<Path>>(
-        &self,
-        from: P,
-        to: Q,
-    ) -> ConfigPathsResult<()> {
-        let from = from.as_ref();
-        let to = to.as_ref();
-
-        // Validate path security
-        self.validate_path(from)?;
-        self.validate_path(to)?;
-
-        // Ensure target directory exists
-        if let Some(parent) = to.parent() {
-            self.create_dir(parent)?;
-        }
-
-        fs::rename(from, to)
-            .map_err(|e| ConfigPathsError::directory_access(to.to_path_buf(), e))?;
-
-        Ok(())
-    }
-
-    // Convenience methods
-
-    /// List all theme files in themes directory
-    pub fn list_theme_files(&self) -> ConfigPathsResult<Vec<PathBuf>> {
-        let mut theme_files = Vec::new();
-
-        if self.themes_dir.exists() {
-            let entries = fs::read_dir(&self.themes_dir)
-                .map_err(|e| ConfigPathsError::directory_access(self.themes_dir.clone(), e))?;
-
-            for entry in entries {
-                let entry = entry
-                    .map_err(|e| ConfigPathsError::directory_access(self.themes_dir.clone(), e))?;
-
-                let path = entry.path();
-                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
-                    theme_files.push(path);
-                }
-            }
-        }
-
-        Ok(theme_files)
-    }
-
-    /// List all backup files in backups directory
-    pub fn list_backup_files(&self) -> ConfigPathsResult<Vec<PathBuf>> {
-        let mut backup_files = Vec::new();
-
-        if self.backups_dir.exists() {
-            let entries = fs::read_dir(&self.backups_dir)
-                .map_err(|e| ConfigPathsError::directory_access(self.backups_dir.clone(), e))?;
-
-            for entry in entries {
-                let entry = entry
-                    .map_err(|e| ConfigPathsError::directory_access(self.backups_dir.clone(), e))?;
-
-                let path = entry.path();
-                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
-                    backup_files.push(path);
-                }
-            }
-        }
-
-        // Sort by modification time (newest first)
-        backup_files.sort_by(|a, b| {
-            let a_time = self.file_modified_time(a).unwrap_or(std::time::UNIX_EPOCH);
-            let b_time = self.file_modified_time(b).unwrap_or(std::time::UNIX_EPOCH);
-            b_time.cmp(&a_time)
-        });
-
-        Ok(backup_files)
-    }
-
-    /// Clean up old backup files
-    pub fn cleanup_old_backups(&self, keep_count: usize) -> ConfigPathsResult<()> {
-        let backup_files = self.list_backup_files()?;
-
-        if backup_files.len() > keep_count {
-            for file in backup_files.iter().skip(keep_count) {
-                self.remove_file(file)?;
-            }
         }
 
         Ok(())
@@ -451,22 +272,6 @@ impl ConfigPaths {
         }
 
         Ok(total_size)
-    }
-
-    /// Create configuration path manager for testing
-    #[cfg(test)]
-    pub fn new_for_test(base_dir: PathBuf) -> Self {
-        let canonical_app_dir = fs::canonicalize(&base_dir).unwrap_or_else(|_| base_dir.clone());
-        Self {
-            app_data_dir: base_dir.clone(),
-            canonical_app_dir,
-            themes_dir: base_dir.join("themes"),
-            backups_dir: base_dir.join("backups"),
-            cache_dir: base_dir.join("cache"),
-            logs_dir: base_dir.join("logs"),
-            shell_dir: base_dir.join("shell"),
-            skills_dir: base_dir.join("skills"),
-        }
     }
 }
 

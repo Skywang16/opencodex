@@ -2,6 +2,8 @@ import type { Terminal } from '@xterm/xterm'
 import { useI18n } from 'vue-i18n'
 
 export const useTerminalOutput = () => {
+  const { t } = useI18n()
+
   // Batching state for smoother rendering and fewer JS<->renderer hops
   let queuedBytes: Uint8Array[] = []
   let queuedText: string[] = []
@@ -77,7 +79,6 @@ export const useTerminalOutput = () => {
 
   const handleExit = (terminal: Terminal | null, exitCode: number | null) => {
     if (terminal) {
-      const { t } = useI18n()
       const exitCodeText = exitCode ?? t('process.unknown_exit_code')
       const message = `\r\n[${t('process.exited', { code: exitCodeText })}]\r\n`
       queuedText.push(message)

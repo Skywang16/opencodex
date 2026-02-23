@@ -214,14 +214,6 @@ impl McpRegistry {
             .await?;
         Ok(())
     }
-
-    /// Get workspace server count
-    pub fn workspace_server_count(&self, workspace_key: &str) -> usize {
-        self.workspaces
-            .get(workspace_key)
-            .map(|w| w.value().servers.len())
-            .unwrap_or(0)
-    }
 }
 
 fn is_disabled(config: &McpServerConfig) -> bool {

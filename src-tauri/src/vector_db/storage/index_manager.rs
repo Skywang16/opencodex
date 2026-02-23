@@ -2,7 +2,7 @@ use super::{ChunkMetadata, FileStore, IndexManifest};
 use crate::vector_db::chunking::TextChunker;
 use crate::vector_db::core::{Chunk, Result, VectorDbConfig, VectorDbError};
 use crate::vector_db::embedding::Embedder;
-use crate::vector_db::utils::{blake3_hash_bytes, collect_source_files};
+use crate::vector_db::utils::blake3_hash_bytes;
 use parking_lot::RwLock;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -47,13 +47,6 @@ impl IndexManager {
     fn save_manifest(&self) -> Result<()> {
         let manifest = self.manifest.read().clone();
         manifest.save(&self.manifest_path())
-    }
-
-    pub async fn index_file_with(&self, file_path: &Path, embedder: &dyn Embedder) -> Result<()> {
-        let _ = self
-            .index_file_with_progress(file_path, embedder, |_done, _total| {})
-            .await?;
-        Ok(())
     }
 
     pub async fn index_file_with_progress<F>(
@@ -194,44 +187,6 @@ impl IndexManager {
         })
     }
 
-    pub async fn index_files_with(
-        &self,
-        file_paths: &[PathBuf],
-        embedder: &dyn Embedder,
-    ) -> Result<()> {
-        use futures::stream::{self, StreamExt};
-
-        // Collect all files that need indexing
-        let mut files_to_index = Vec::new();
-        for p in file_paths {
-            if p.is_file() {
-                files_to_index.push(p.clone());
-            } else if p.is_dir() {
-                let files = collect_source_files(p, self.config.max_file_size);
-                files_to_index.extend(files);
-            }
-        }
-
-        // Parallel indexing (up to 4 concurrent tasks)
-        let concurrency = 4;
-        let results: Vec<Result<()>> = stream::iter(files_to_index)
-            .map(|file_path| async move { self.index_file_with(&file_path, embedder).await })
-            .buffer_unordered(concurrency)
-            .collect()
-            .await;
-
-        // Check for errors
-        for result in results {
-            result?;
-        }
-
-        Ok(())
-    }
-
-    pub async fn update_index(&self, file_path: &Path, embedder: &dyn Embedder) -> Result<()> {
-        self.index_file_with(file_path, embedder).await
-    }
-
     pub fn remove_file(&self, file_path: &Path) -> Result<()> {
         // Delete vector file for this file
         let _ = self.store.delete_file_vectors(file_path);
@@ -249,21 +204,6 @@ impl IndexManager {
         drop(manifest);
         self.save_manifest()?;
         Ok(())
-    }
-
-    pub async fn rebuild(&self, root: &Path, embedder: &dyn Embedder) -> Result<()> {
-        // Reset manifest
-        {
-            let mut manifest = self.manifest.write();
-            *manifest = IndexManifest::new(
-                self.config.embedding.model_name.clone(),
-                self.config.embedding.dimension,
-            );
-        }
-        self.save_manifest()?;
-
-        let files = collect_source_files(root, self.config.max_file_size);
-        self.index_files_with(&files, embedder).await
     }
 
     pub fn get_status(&self) -> IndexStatus {
@@ -286,12 +226,6 @@ impl IndexManager {
             }
         }
         status
-    }
-
-    /// Get all chunk IDs
-    pub fn get_chunk_ids(&self) -> Vec<crate::vector_db::core::ChunkId> {
-        let manifest = self.manifest.read();
-        manifest.chunks.keys().cloned().collect()
     }
 
     /// Get all chunk metadata

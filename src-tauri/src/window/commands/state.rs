@@ -16,7 +16,7 @@ pub async fn window_state_get(
     }
 
     let always_on_top = match state
-        .with_state_manager(|manager| Ok(manager.get_always_on_top()))
+        .with_state_manager(|manager| Ok(manager.is_always_on_top()))
         .await
     {
         Ok(value) => value,
@@ -56,7 +56,7 @@ pub async fn window_state_get(
     };
 
     let platform_info = match state
-        .with_config_manager(|config| Ok(config.window_get_platform_info().cloned()))
+        .with_config_manager(|config| Ok(config.platform_info().cloned()))
         .await
     {
         Ok(Some(info)) => info,
@@ -98,7 +98,7 @@ pub async fn window_state_update<R: Runtime>(
     let needs_window = update.always_on_top.is_some();
     let window = if needs_window {
         let window_id = match state
-            .with_config_manager(|config| Ok(config.get_default_window_id().to_string()))
+            .with_config_manager(|config| Ok(config.default_window_id().to_string()))
             .await
         {
             Ok(id) => id,

@@ -161,30 +161,6 @@ impl ShellManager {
             .unwrap_or_else(Self::get_default_shell_internal)
     }
 
-    pub fn refresh_cache() {
-        let cache = Self::get_cache();
-        let mut cache_guard = Self::lock_cache(cache);
-        *cache_guard = None;
-        drop(cache_guard);
-    }
-
-    /// Check cache status
-    pub fn cache_status() -> (bool, Option<SystemTime>, u64) {
-        let cache = Self::get_cache();
-        let cache_guard = Self::lock_cache(cache);
-
-        if let Some(entry) = cache_guard.as_ref() {
-            let config = ConfigManager::config_get();
-            (
-                !entry.is_expired(config.shell_cache_ttl()),
-                Some(entry.timestamp),
-                entry.access_count,
-            )
-        } else {
-            (false, None, 0)
-        }
-    }
-
     /// Detect available shells on system (public interface, uses cache)
     pub fn detect_available_shells() -> Vec<ShellInfo> {
         Self::get_cached_shells()
@@ -358,39 +334,6 @@ impl ShellManager {
 
         let shells = Self::get_cached_shells();
         shells.into_iter().find(|shell| shell.name == name)
-    }
-
-    /// Find shell by path (uses cache)
-    pub fn terminal_find_shell_by_path(path: &str) -> Option<ShellInfo> {
-        if path.trim().is_empty() {
-            return None;
-        }
-
-        let shells = Self::get_cached_shells();
-        shells.into_iter().find(|shell| shell.path == path)
-    }
-
-    /// Get detailed statistics for shell manager
-    pub fn get_detailed_stats() -> ShellManagerStats {
-        let cache = Self::get_cache();
-        let cache_guard = Self::lock_cache(cache);
-
-        let mut stats = ShellManagerStats::default();
-
-        if let Some(entry) = cache_guard.as_ref() {
-            stats.available_shells = entry.shells.len();
-            stats.default_shell = Some(entry.default_shell.clone());
-            stats.last_detection_time = Some(
-                entry
-                    .timestamp
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-            );
-            stats.cache_hits = entry.access_count;
-        }
-
-        stats
     }
 }
 

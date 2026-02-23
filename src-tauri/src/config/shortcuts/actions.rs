@@ -170,24 +170,6 @@ impl ActionRegistry {
         handlers.contains_key(action_name)
     }
 
-    pub async fn shortcuts_get_action_metadata(&self, action_name: &str) -> Option<ActionMetadata> {
-        let metadata = self.metadata.read().await;
-        metadata.get(action_name).cloned()
-    }
-
-    pub async fn shortcuts_get_registered_actions(&self) -> Vec<String> {
-        let handlers = self.handlers.read().await;
-        handlers.keys().cloned().collect()
-    }
-
-    pub async fn add_event_listener<F>(&mut self, listener: F)
-    where
-        F: Fn(&ShortcutEvent) + Send + Sync + 'static,
-    {
-        let mut listeners = self.event_listeners.write().await;
-        listeners.push(Arc::new(listener));
-    }
-
     async fn emit_event(&self, event: ShortcutEvent) {
         let listeners = self.event_listeners.read().await.clone();
         for listener in &listeners {

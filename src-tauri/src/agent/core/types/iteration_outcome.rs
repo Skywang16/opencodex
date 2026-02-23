@@ -62,22 +62,9 @@ impl IterationOutcome {
         matches!(self, Self::ContinueWithTools { .. })
     }
 
-    /// Whether it's a normal completion
-    pub fn is_complete(&self) -> bool {
-        matches!(self, Self::Complete { .. })
-    }
-
     /// Whether it's an empty response
     pub fn is_empty(&self) -> bool {
         matches!(self, Self::Empty)
-    }
-
-    /// Get tool call list (if any)
-    pub fn get_tool_calls(&self) -> Option<&[(String, String, serde_json::Value)]> {
-        match self {
-            Self::ContinueWithTools { tool_calls } => Some(tool_calls),
-            _ => None,
-        }
     }
 
     /// Get output content for persistence
@@ -86,14 +73,6 @@ impl IterationOutcome {
     pub fn get_output_for_persistence(&self) -> Option<String> {
         match self {
             Self::Complete { thinking, output } => output.clone().or_else(|| thinking.clone()),
-            _ => None,
-        }
-    }
-
-    /// Get full content (thinking + output)
-    pub fn get_full_content(&self) -> Option<(Option<String>, Option<String>)> {
-        match self {
-            Self::Complete { thinking, output } => Some((thinking.clone(), output.clone())),
             _ => None,
         }
     }

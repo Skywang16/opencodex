@@ -134,37 +134,6 @@ impl I18nManager {
         }
         Self::initialize()
     }
-
-    /// Add or update message
-    ///
-    /// Used for dynamically adding translation content at runtime
-    pub fn add_message(lang_code: &str, key: &str, value: &str) -> Result<(), String> {
-        let mut i18n_messages = I18N_MESSAGES
-            .write()
-            .map_err(|_| "Failed to acquire i18n message store write lock")?;
-
-        let messages = i18n_messages
-            .entry(lang_code.to_string())
-            .or_insert_with(HashMap::new);
-
-        messages.insert(key.to_string(), Value::String(value.to_string()));
-        Ok(())
-    }
-
-    /// Check if key exists
-    pub fn has_key(key: &str) -> bool {
-        let current_lang = LanguageManager::get_language().to_string();
-        Self::get_text_for_language(&current_lang, key).is_some()
-            || Self::get_text_for_language("zh-CN", key).is_some()
-    }
-
-    /// Get all loaded languages
-    pub fn get_loaded_languages() -> Vec<String> {
-        I18N_MESSAGES
-            .read()
-            .map(|messages| messages.keys().cloned().collect())
-            .unwrap_or_default()
-    }
 }
 
 /// Convenient internationalization macro

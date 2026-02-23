@@ -197,6 +197,10 @@ path = "tests/unit/context_service_test.rs"
 name = "window_commands_test"
 path = "tests/unit/window_commands_test.rs"
 
+[[test]]
+name = "theme_tests"
+path = "tests/unit/theme_tests.rs"
+
 
 # 桌面平台特定依赖
 [target."cfg(any(target_os = \"macos\", windows, target_os = \"linux\"))".dependencies]

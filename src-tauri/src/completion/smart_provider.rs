@@ -46,12 +46,6 @@ impl SmartCompletionProvider {
         }
     }
 
-    /// Set context-aware provider (for entity enhancement)
-    pub fn with_context_aware(mut self, provider: Arc<dyn CompletionProvider>) -> Self {
-        self.context_aware_provider = Some(provider);
-        self
-    }
-
     /// Intelligently provide completions based on context
     async fn provide_smart_completions(
         &self,

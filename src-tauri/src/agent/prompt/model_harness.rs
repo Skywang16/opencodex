@@ -168,16 +168,6 @@ impl ModelFamily {
     }
 }
 
-// ── Convenience free functions (thin wrappers) ───────────────────────────
-
-pub fn profile_for_model(model_id: &str) -> &'static str {
-    ModelFamily::detect(model_id).profile_key()
-}
-
-pub fn model_family(model_id: &str) -> &'static str {
-    ModelFamily::detect(model_id).name()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

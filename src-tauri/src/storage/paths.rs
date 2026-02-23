@@ -7,7 +7,7 @@
 
 use crate::storage::error::{StoragePathsError, StoragePathsResult};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Storage path manager
 #[derive(Debug, Clone)]
@@ -53,21 +53,6 @@ impl StoragePaths {
         Ok(paths)
     }
 
-    /// Get database file path
-    pub fn database_file(&self) -> PathBuf {
-        self.data_dir.join(super::DATABASE_FILE_NAME)
-    }
-
-    /// Get backup file path
-    pub fn backup_file(&self, filename: &str) -> PathBuf {
-        self.backups_dir.join(filename)
-    }
-
-    /// Get log file path
-    pub fn log_file(&self, filename: &str) -> PathBuf {
-        self.logs_dir.join(filename)
-    }
-
     /// Ensure all directories exist
     pub fn ensure_directories(&self) -> StoragePathsResult<()> {
         let directories = [
@@ -102,35 +87,6 @@ impl StoragePaths {
         }
 
         Ok(())
-    }
-
-    /// Get directory size (in bytes)
-    pub fn get_directory_size(&self, dir: &Path) -> StoragePathsResult<u64> {
-        if !dir.exists() {
-            return Ok(0);
-        }
-
-        let mut total_size = 0u64;
-
-        fn visit_dir(dir: &Path, total_size: &mut u64) -> std::io::Result<()> {
-            for entry in fs::read_dir(dir)? {
-                let entry = entry?;
-                let path = entry.path();
-
-                if path.is_dir() {
-                    visit_dir(&path, total_size)?;
-                } else {
-                    let metadata = entry.metadata()?;
-                    *total_size += metadata.len();
-                }
-            }
-            Ok(())
-        }
-
-        visit_dir(dir, &mut total_size)
-            .map_err(|e| StoragePathsError::directory_size(dir.to_path_buf(), e))?;
-
-        Ok(total_size)
     }
 }
 

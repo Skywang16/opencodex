@@ -344,20 +344,6 @@ impl TerminalMux {
         }
     }
 
-    /// Create debug subscriber (for testing and debugging)
-    pub fn create_debug_subscriber() -> impl Fn(&MuxNotification) -> bool + Send + Sync + 'static {
-        move |notification: &MuxNotification| {
-            tracing::debug!("MuxNotification: {:?}", notification);
-            true
-        }
-    }
-
-    /// Set up pane's Shell Integration
-    pub fn setup_pane_integration(&self, pane_id: PaneId) -> TerminalMuxResult<()> {
-        self.shell_integration.enable_integration(pane_id);
-        Ok(())
-    }
-
     /// Set up pane's Shell Integration and inject script
     pub fn setup_pane_integration_with_script(
         &self,
@@ -404,11 +390,6 @@ impl TerminalMux {
         Ok(())
     }
 
-    /// Check if pane has Shell Integration enabled
-    pub fn is_pane_integrated(&self, pane_id: PaneId) -> bool {
-        self.shell_integration.get_pane_state(pane_id).is_some()
-    }
-
     /// Get pane's current working directory
     pub fn shell_get_pane_cwd(&self, pane_id: PaneId) -> Option<String> {
         self.shell_integration
@@ -430,46 +411,12 @@ impl TerminalMux {
             .set_pane_shell_type(pane_id, shell_type);
     }
 
-    /// Generate Shell integration script
-    pub fn generate_shell_integration_script(
-        &self,
-        shell_type: &crate::shell::ShellType,
-    ) -> TerminalMuxResult<String> {
-        self.shell_integration
-            .generate_shell_script(shell_type)
-            .map_err(|err| TerminalMuxError::Internal(format!("Shell integration error: {err}")))
-    }
-
     /// Generate Shell environment variables
     pub fn generate_shell_env_vars(
         &self,
         shell_type: &crate::shell::ShellType,
     ) -> std::collections::HashMap<String, String> {
         self.shell_integration.generate_shell_env_vars(shell_type)
-    }
-
-    /// Enable pane Shell Integration
-    pub fn enable_pane_integration(&self, pane_id: PaneId) {
-        self.shell_integration.enable_integration(pane_id);
-    }
-
-    /// Disable pane Shell Integration
-    pub fn disable_pane_integration(&self, pane_id: PaneId) {
-        self.shell_integration.disable_integration(pane_id);
-    }
-
-    pub fn get_pane_current_command(
-        &self,
-        pane_id: PaneId,
-    ) -> Option<std::sync::Arc<crate::shell::CommandInfo>> {
-        self.shell_integration.get_current_command(pane_id)
-    }
-
-    pub fn get_pane_command_history(
-        &self,
-        pane_id: PaneId,
-    ) -> Vec<std::sync::Arc<crate::shell::CommandInfo>> {
-        self.shell_integration.get_command_history(pane_id)
     }
 
     /// Clean up all resources

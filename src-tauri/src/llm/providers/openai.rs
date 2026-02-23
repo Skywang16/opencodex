@@ -42,10 +42,11 @@ fn build_openai_chat_body(
     if let Some(system) = &req.system {
         let sys_text = match system {
             SystemPrompt::Text(t) => t.clone(),
-            SystemPrompt::Blocks(_blocks) => {
-                // Only extract text, blocks not supported yet, return empty string
-                String::new()
-            }
+            SystemPrompt::Blocks(blocks) => blocks
+                .iter()
+                .map(|b| b.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
         };
         if !sys_text.is_empty() {
             chat_messages.push(json!({"role":"system","content":sys_text}));
@@ -116,7 +117,11 @@ fn build_openai_responses_body(
     if let Some(system) = &req.system {
         let sys_text = match system {
             SystemPrompt::Text(t) => t.clone(),
-            SystemPrompt::Blocks(_blocks) => String::new(),
+            SystemPrompt::Blocks(blocks) => blocks
+                .iter()
+                .map(|b| b.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
         };
         if !sys_text.is_empty() {
             body["instructions"] = json!(sys_text);

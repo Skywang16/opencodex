@@ -85,18 +85,6 @@ impl ScoringContext {
         self
     }
 
-    /// Set working directory
-    pub fn with_working_directory(mut self, path: PathBuf) -> Self {
-        self.working_directory = Some(path);
-        self
-    }
-
-    /// Set Git repository status
-    pub fn with_git_repo(mut self, in_repo: bool) -> Self {
-        self.in_git_repo = in_repo;
-        self
-    }
-
     /// Set completion source
     pub fn with_source(mut self, source: impl Into<String>) -> Self {
         self.source = Some(source.into());

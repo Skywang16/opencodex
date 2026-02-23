@@ -65,18 +65,6 @@ pub fn tool_call_result_to_outcome(result: &AgentToolCallResult) -> ToolResult {
     }
 }
 
-/// Get specified number of elements from the end of Vec
-pub fn tail_vec<T: Clone>(items: Vec<T>, limit: usize) -> Vec<T> {
-    if limit == 0 || items.len() <= limit {
-        items
-    } else {
-        // Directly use split_off, zero-copy to get tail
-        let mut items = items;
-        let split_at = items.len() - limit;
-        items.split_off(split_at)
-    }
-}
-
 pub async fn should_render_tool_block(context: &TaskContext, tool_name: &str) -> bool {
     let Some(meta) = context.tool_registry().get_tool_metadata(tool_name).await else {
         return true;

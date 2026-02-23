@@ -10,7 +10,6 @@
 //! - **DeepSeek**: Uses `reasoning_content` field in messages
 
 use crate::agent::types::ReasoningPart;
-use crate::llm::anthropic_types::{ContentBlock, MessageParam};
 use serde_json::{json, Value};
 
 /// Configuration for reasoning transform
@@ -120,44 +119,6 @@ fn transform_for_anthropic(parts: &[ReasoningPart]) -> Vec<Value> {
             thinking
         })
         .collect()
-}
-
-/// Extract reasoning parts from assistant message content blocks.
-pub fn extract_reasoning_from_content(content: &[ContentBlock]) -> Vec<ReasoningPart> {
-    content
-        .iter()
-        .filter_map(|block| {
-            if let ContentBlock::Thinking {
-                thinking,
-                signature,
-                ..
-            } = block
-            {
-                let mut part = ReasoningPart::new(
-                    uuid::Uuid::new_v4().to_string(),
-                    0,             // session_id will be set by caller
-                    String::new(), // message_id will be set by caller
-                );
-                part.text = thinking.clone();
-                if signature.is_some() {
-                    part.set_anthropic_metadata(signature.clone());
-                }
-                Some(part)
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-/// Check if a message contains reasoning content.
-pub fn has_reasoning_content(message: &MessageParam) -> bool {
-    match &message.content {
-        crate::llm::anthropic_types::MessageContent::Text(_) => false,
-        crate::llm::anthropic_types::MessageContent::Blocks(blocks) => blocks
-            .iter()
-            .any(|b| matches!(b, ContentBlock::Thinking { .. })),
-    }
 }
 
 #[cfg(test)]

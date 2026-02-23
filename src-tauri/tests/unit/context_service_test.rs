@@ -102,22 +102,6 @@ async fn test_cache_eviction_count() {
 }
 
 #[tokio::test]
-async fn test_get_active_cwd_error() {
-    let service = create_test_context_service();
-
-    let result = service.get_active_cwd().await;
-    assert!(result.is_err(), "没有活跃面板应该返回错误");
-}
-
-#[tokio::test]
-async fn test_get_active_shell_type_error() {
-    let service = create_test_context_service();
-
-    let result = service.get_active_shell_type().await;
-    assert!(result.is_err(), "没有活跃面板应该返回错误");
-}
-
-#[tokio::test]
 async fn test_concurrent_cache_access() {
     let service = Arc::new(create_test_context_service());
     let mut handles = Vec::new();

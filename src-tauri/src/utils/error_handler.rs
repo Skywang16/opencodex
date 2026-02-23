@@ -6,7 +6,7 @@
  */
 
 use crate::utils::i18n::I18nManager;
-use crate::utils::{ApiResponse, EmptyData, TauriApiResult};
+use crate::utils::{ApiResponse, TauriApiResult};
 use std::collections::HashMap;
 
 /// Unified error response macro - uses i18n key
@@ -176,35 +176,6 @@ macro_rules! validate_range {
     ($value:expr, $min:expr, $max:expr, $error_key:expr, $($param_key:expr => $param_value:expr),+ $(,)?) => {
         $crate::validate_param!($value >= $min && $value <= $max, $error_key, $($param_key => $param_value),+);
     };
-}
-
-/// Error handling utility functions
-pub struct ErrorHandler;
-
-impl ErrorHandler {
-    /// Create error response with parameters
-    pub fn create_error_with_params<T>(
-        error_key: &str,
-        params: HashMap<String, String>,
-    ) -> TauriApiResult<T> {
-        let message = I18nManager::get_text(error_key, Some(&params));
-        Ok(ApiResponse::error(message))
-    }
-
-    /// Create simple error response
-    pub fn create_error<T>(error_key: &str) -> TauriApiResult<T> {
-        Ok(api_error!(error_key))
-    }
-
-    /// Create success response
-    pub fn create_success<T>(data: T) -> TauriApiResult<T> {
-        Ok(api_success!(data))
-    }
-
-    /// Create empty success response
-    pub fn create_empty_success() -> TauriApiResult<EmptyData> {
-        Ok(api_success!())
-    }
 }
 
 #[cfg(test)]

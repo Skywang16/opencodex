@@ -12,23 +12,16 @@ use crate::completion::CompletionRuntime;
 use crate::mux::ConfigManager;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
 
 struct HistoryBufferEntry {
     content: String,
-    created_at: Instant,
 }
 
 impl HistoryBufferEntry {
     fn new() -> Self {
         Self {
             content: String::new(),
-            created_at: Instant::now(),
         }
-    }
-
-    fn is_too_new(&self) -> bool {
-        self.created_at.elapsed() < std::time::Duration::from_secs(2)
     }
 
     fn append(&mut self, data: &str, max_size: usize) {
@@ -221,32 +214,10 @@ impl OutputAnalyzer {
         Ok(inner.last_command_output.get(&pane_id).cloned())
     }
 
-    pub fn is_pane_buffer_too_new(&self, pane_id: u32) -> bool {
-        if let Ok(inner) = self.lock_inner() {
-            if let Some(entry) = inner.history_buffer.get(&pane_id) {
-                return entry.is_too_new();
-            }
-        }
-        false
-    }
-
     pub fn clear_pane_buffer(&self, pane_id: u32) -> OutputAnalyzerResult<()> {
         let mut inner = self.lock_inner()?;
         inner.history_buffer.remove(&pane_id);
         Ok(())
-    }
-
-    pub fn get_buffer_stats(&self) -> OutputAnalyzerResult<HashMap<String, usize>> {
-        let inner = self.lock_inner()?;
-
-        let mut stats = HashMap::new();
-        stats.insert("total_panes".to_string(), inner.history_buffer.len());
-        stats.insert(
-            "history_buffer_size".to_string(),
-            inner.history_buffer.values().map(|e| e.content.len()).sum(),
-        );
-
-        Ok(stats)
     }
 
     fn detect_command_completion(&self, output: &str) -> Option<(String, String)> {
@@ -346,6 +317,7 @@ mod tests {
     use super::*;
     use crate::shell::osc_parser::CommandStatus;
     use crate::shell::CommandInfo;
+    use std::time::Instant;
 
     #[test]
     fn test_shell_command_event_records_last_command() {

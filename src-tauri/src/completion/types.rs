@@ -102,12 +102,6 @@ impl CompletionItem {
         self
     }
 
-    /// Set as exact match
-    pub fn with_exact_match(mut self, exact: bool) -> Self {
-        self.exact_match = exact;
-        self
-    }
-
     /// Add metadata
     pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.insert(key.into(), value.into());
@@ -476,59 +470,9 @@ impl CommandExecutionContext {
         }
     }
 
-    /// Set command output
-    pub fn with_output(mut self, output: CommandOutput) -> Self {
-        self.output = Some(output);
-        self
-    }
-
-    /// Set exit code
-    pub fn with_exit_code(mut self, exit_code: i32) -> Self {
-        self.exit_code = Some(exit_code);
-        self
-    }
-
-    /// Set execution duration
-    pub fn with_duration(mut self, duration: u64) -> Self {
-        self.duration = Some(duration);
-        self
-    }
-
-    /// Add environment variable
-    pub fn with_environment(mut self, key: String, value: String) -> Self {
-        self.environment.insert(key, value);
-        self
-    }
-
-    /// Get full command line
-    pub fn get_full_command(&self) -> String {
-        if self.args.is_empty() {
-            self.command.clone()
-        } else {
-            format!("{} {}", self.command, self.args.join(" "))
-        }
-    }
-
     /// Check if command executed successfully
     pub fn is_successful(&self) -> bool {
         self.exit_code == Some(0)
-    }
-
-    /// Get related entities
-    pub fn get_entities(&self) -> Vec<&OutputEntity> {
-        self.output
-            .as_ref()
-            .and_then(|output| output.parsed_data.as_ref())
-            .map(|data| data.entities.iter().collect())
-            .unwrap_or_default()
-    }
-
-    /// Get entities by type
-    pub fn get_entities_by_type(&self, entity_type: &EntityType) -> Vec<&OutputEntity> {
-        self.get_entities()
-            .into_iter()
-            .filter(|entity| &entity.entity_type == entity_type)
-            .collect()
     }
 }
 
@@ -541,24 +485,6 @@ impl CommandOutput {
             parsed_data: None,
         }
     }
-
-    /// Set parsed data
-    pub fn with_parsed_data(mut self, parsed_data: ParsedOutputData) -> Self {
-        self.parsed_data = Some(parsed_data);
-        self
-    }
-
-    /// Check if there is output
-    pub fn has_output(&self) -> bool {
-        !self.stdout.is_empty() || !self.stderr.is_empty()
-    }
-
-    /// Get all output text
-    pub fn get_all_output(&self) -> String {
-        format!("{}\n{}", self.stdout, self.stderr)
-            .trim()
-            .to_string()
-    }
 }
 
 impl ParsedOutputData {
@@ -569,34 +495,6 @@ impl ParsedOutputData {
             entities: Vec::new(),
             metadata: HashMap::new(),
         }
-    }
-
-    /// Add entity
-    pub fn add_entity(mut self, entity: OutputEntity) -> Self {
-        self.entities.push(entity);
-        self
-    }
-
-    /// Add metadata
-    pub fn add_metadata(mut self, key: String, value: String) -> Self {
-        self.metadata.insert(key, value);
-        self
-    }
-
-    /// Get entities by type
-    pub fn get_entities_by_type(&self, entity_type: &EntityType) -> Vec<&OutputEntity> {
-        self.entities
-            .iter()
-            .filter(|entity| &entity.entity_type == entity_type)
-            .collect()
-    }
-
-    /// Get high confidence entities
-    pub fn get_high_confidence_entities(&self, min_confidence: f64) -> Vec<&OutputEntity> {
-        self.entities
-            .iter()
-            .filter(|entity| entity.confidence >= min_confidence)
-            .collect()
     }
 }
 
@@ -616,17 +514,6 @@ impl OutputEntity {
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
-    }
-
-    /// Add attribute
-    pub fn with_attribute(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.attributes.insert(key.into(), value.into());
-        self
-    }
-
-    /// Check if it's a high confidence entity
-    pub fn is_high_confidence(&self, threshold: f64) -> bool {
-        self.confidence >= threshold
     }
 }
 
@@ -648,69 +535,8 @@ impl ContextSession {
         }
     }
 
-    /// Add command execution context
-    pub fn add_command_context(&mut self, context: CommandExecutionContext) {
-        self.command_history.push(context);
-        self.update_last_activity();
-
-        // Limit history record count
-        if self.command_history.len() > 1000 {
-            self.command_history.remove(0);
-        }
-    }
-
-    /// Update last activity time
-    pub fn update_last_activity(&mut self) {
-        self.last_activity = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-    }
-
-    /// Get recent commands
-    pub fn get_recent_commands(&self, count: usize) -> Vec<&CommandExecutionContext> {
-        self.command_history.iter().rev().take(count).collect()
-    }
-
-    /// Search history by command name
-    pub fn search_by_command(&self, command: &str) -> Vec<&CommandExecutionContext> {
-        self.command_history
-            .iter()
-            .filter(|ctx| ctx.command == command)
-            .collect()
-    }
-
-    /// Get related entities
-    pub fn get_related_entities(
-        &self,
-        entity_type: &EntityType,
-        limit: usize,
-    ) -> Vec<&OutputEntity> {
-        let mut entities = Vec::new();
-
-        for context in self.command_history.iter().rev() {
-            for entity in context.get_entities_by_type(entity_type) {
-                entities.push(entity);
-                if entities.len() >= limit {
-                    break;
-                }
-            }
-            if entities.len() >= limit {
-                break;
-            }
-        }
-
-        entities
-    }
-
     /// Check if session is active
     pub fn is_active(&self) -> bool {
         self.state == SessionState::Active
-    }
-
-    /// End session
-    pub fn end_session(&mut self) {
-        self.state = SessionState::Ended;
-        self.update_last_activity();
     }
 }

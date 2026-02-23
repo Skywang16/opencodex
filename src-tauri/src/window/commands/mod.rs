@@ -7,9 +7,8 @@ pub use state::*;
 use crate::window::WindowStateResult;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, Runtime, State};
 use tokio::sync::Mutex;
 
@@ -48,16 +47,11 @@ pub struct WindowStateUpdate {
 pub struct WindowConfigManager {
     platform_info: Option<PlatformInfo>,
     default_window_id: String,
-    operation_timeout: u64,
 }
 
 #[derive(Debug)]
 pub struct WindowStateManager {
-    cached_cwd: Option<PathBuf>,
-    cached_home: Option<PathBuf>,
     always_on_top: AtomicBool,
-    last_update: Option<Instant>,
-    cache_ttl: std::time::Duration,
 }
 
 impl Default for WindowStateManager {
@@ -75,66 +69,30 @@ struct WindowStateInner {
 impl WindowStateManager {
     pub fn new() -> Self {
         Self {
-            cached_cwd: None,
-            cached_home: None,
             always_on_top: AtomicBool::new(false),
-            last_update: None,
-            cache_ttl: std::time::Duration::from_secs(30),
         }
     }
 
     pub fn set_always_on_top(&mut self, value: bool) {
         self.always_on_top.store(value, Ordering::Release); // Atomic write
-        self.last_update = Some(Instant::now());
     }
 
-    pub fn get_always_on_top(&self) -> bool {
+    pub fn is_always_on_top(&self) -> bool {
         self.always_on_top.load(Ordering::Acquire) // Atomic read
     }
 
     pub fn toggle_always_on_top(&mut self) -> bool {
         let new_value = !self.always_on_top.load(Ordering::Acquire);
         self.always_on_top.store(new_value, Ordering::Release);
-        self.last_update = Some(Instant::now());
         new_value
     }
 
-    pub fn set_cached_cwd(&mut self, path: PathBuf) {
-        self.cached_cwd = Some(path);
-        self.last_update = Some(Instant::now());
-    }
-
-    pub fn get_cached_cwd(&self) -> Option<&PathBuf> {
-        if self.is_cache_valid() {
-            self.cached_cwd.as_ref()
-        } else {
-            None
-        }
-    }
-
-    pub fn set_cached_home(&mut self, path: PathBuf) {
-        self.cached_home = Some(path);
-    }
-
-    pub fn get_cached_home(&self) -> Option<&PathBuf> {
-        self.cached_home.as_ref()
-    }
-
     pub fn clear_cache(&mut self) {
-        self.cached_cwd = None;
-        self.cached_home = None;
-        self.last_update = None;
-    }
-
-    fn is_cache_valid(&self) -> bool {
-        self.last_update
-            .map(|last| last.elapsed() < self.cache_ttl)
-            .unwrap_or(false)
+        // No-op: cache fields removed
     }
 
     pub fn reset(&mut self) {
         self.always_on_top.store(false, Ordering::Release);
-        self.clear_cache();
     }
 }
 
@@ -143,7 +101,6 @@ impl WindowConfigManager {
         Self {
             platform_info: None,
             default_window_id: "main".to_string(),
-            operation_timeout: 5000,
         }
     }
 
@@ -151,24 +108,12 @@ impl WindowConfigManager {
         self.platform_info = Some(info);
     }
 
-    pub fn window_get_platform_info(&self) -> Option<&PlatformInfo> {
+    pub fn platform_info(&self) -> Option<&PlatformInfo> {
         self.platform_info.as_ref()
     }
 
-    pub fn get_default_window_id(&self) -> &str {
+    pub fn default_window_id(&self) -> &str {
         &self.default_window_id
-    }
-
-    pub fn set_default_window_id(&mut self, id: String) {
-        self.default_window_id = id;
-    }
-
-    pub fn get_operation_timeout(&self) -> u64 {
-        self.operation_timeout
-    }
-
-    pub fn set_operation_timeout(&mut self, timeout: u64) {
-        self.operation_timeout = timeout;
     }
 }
 

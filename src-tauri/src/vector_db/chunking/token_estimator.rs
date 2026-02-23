@@ -38,20 +38,6 @@ impl TokenEstimator {
         Self::estimate_tokens(text) > max_tokens
     }
 
-    /// Get token limits for different models
-    pub fn get_model_limit(model_name: &str) -> usize {
-        match model_name {
-            "BAAI/bge-small-en-v1.5" => 512,
-            "BAAI/bge-base-en-v1.5" => 512,
-            "BAAI/bge-large-en-v1.5" => 512,
-            "BAAI/bge-m3" => 8192,
-            "sentence-transformers/all-MiniLM-L6-v2" => 512,
-            "nomic-embed-text-v1" | "nomic-embed-text-v1.5" => 8192,
-            "jina-embeddings-v2-base-code" => 8192,
-            _ => 8192, // Default to large model limit
-        }
-    }
-
     /// Get model's chunk configuration (target_tokens, overlap_tokens)
     pub fn get_model_chunk_config(model_name: Option<&str>) -> (usize, usize) {
         let model = model_name.unwrap_or("BAAI/bge-m3");

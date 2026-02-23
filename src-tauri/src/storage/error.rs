@@ -141,10 +141,6 @@ impl StoragePathsError {
         StoragePathsError::DirectoryCreate { path, source }
     }
 
-    pub fn directory_size(path: PathBuf, source: std::io::Error) -> Self {
-        StoragePathsError::DirectorySize { path, source }
-    }
-
     pub fn internal(message: impl Into<String>) -> Self {
         StoragePathsError::Internal(message.into())
     }
@@ -244,12 +240,6 @@ impl SqlScriptError {
 
     pub fn read_file(path: PathBuf, source: std::io::Error) -> Self {
         SqlScriptError::ReadFile { path, source }
-    }
-
-    pub fn parse_statement(reason: impl Into<String>) -> Self {
-        SqlScriptError::ParseStatement {
-            reason: reason.into(),
-        }
     }
 
     pub fn internal(message: impl Into<String>) -> Self {

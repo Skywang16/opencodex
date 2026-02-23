@@ -121,10 +121,14 @@ export const useTerminalStore = defineStore('Terminal', () => {
   const currentWorkingDirectory = computed(() => activeTerminal.value?.cwd || null)
 
   const queueOperation = async <T>(operation: () => Promise<T>): Promise<T> => {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
       const wrappedOperation = async () => {
-        const result = await operation()
-        resolve(result)
+        try {
+          const result = await operation()
+          resolve(result)
+        } catch (err) {
+          reject(err)
+        }
       }
 
       operationQueue.value.push(wrappedOperation)
@@ -429,9 +433,15 @@ export const useTerminalStore = defineStore('Terminal', () => {
   const loadAvailableShells = async () => {
     shellManager.value.isLoading = true
     shellManager.value.error = null
-    const shells = await shellApi.getAvailableShells()
-    shellManager.value.availableShells = shells as ShellInfo[]
-    shellManager.value.isLoading = false
+    try {
+      const shells = await shellApi.getAvailableShells()
+      shellManager.value.availableShells = shells as ShellInfo[]
+    } catch (error) {
+      shellManager.value.error = error instanceof Error ? error.message : String(error)
+      console.error('Failed to load available shells:', error)
+    } finally {
+      shellManager.value.isLoading = false
+    }
   }
 
   const initializeShellManager = async () => {

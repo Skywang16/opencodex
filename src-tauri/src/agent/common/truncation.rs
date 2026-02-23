@@ -30,47 +30,6 @@ impl TruncationPolicy {
             tail: 0,
         }
     }
-
-    /// Compact shell output for summaries: 20 head + 50 tail lines
-    pub fn shell_compact() -> Self {
-        TruncationPolicy::Lines { head: 20, tail: 50 }
-    }
-
-    /// File content: ~8000 tokens (~32KB)
-    pub fn file_content() -> Self {
-        TruncationPolicy::Tokens(8000)
-    }
-
-    /// Tool output summary: ~2000 chars
-    pub fn tool_summary() -> Self {
-        TruncationPolicy::Chars(2000)
-    }
-
-    /// Web fetch content: ~4000 chars
-    pub fn web_content() -> Self {
-        TruncationPolicy::Chars(4000)
-    }
-
-    /// Get the byte budget for this policy
-    pub fn byte_budget(&self) -> usize {
-        match self {
-            TruncationPolicy::Chars(c) => c.saturating_mul(4), // conservative: assume 4 bytes/char
-            TruncationPolicy::Tokens(t) => t.saturating_mul(APPROX_BYTES_PER_TOKEN),
-            TruncationPolicy::Lines { head, tail } => {
-                // Estimate ~150 bytes per line average
-                (head + tail).saturating_mul(150)
-            }
-        }
-    }
-
-    /// Get the character budget for this policy
-    pub fn char_budget(&self) -> usize {
-        match self {
-            TruncationPolicy::Chars(c) => *c,
-            TruncationPolicy::Tokens(t) => t.saturating_mul(APPROX_BYTES_PER_TOKEN),
-            TruncationPolicy::Lines { head, tail } => (head + tail).saturating_mul(100),
-        }
-    }
 }
 
 /// Information about the original content before truncation
@@ -322,22 +281,6 @@ impl ExecOutputFormatter {
         }
 
         sections.join("\n")
-    }
-
-    /// Format as structured JSON (for structured output modes)
-    pub fn format_structured(&self) -> String {
-        let metadata = serde_json::json!({
-            "exit_code": self.exit_code,
-            "duration_seconds": self.duration_secs,
-            "truncated": self.was_truncated,
-            "original_lines": self.original_lines,
-        });
-
-        serde_json::json!({
-            "output": self.output,
-            "metadata": metadata,
-        })
-        .to_string()
     }
 }
 

@@ -72,30 +72,6 @@ impl<'a> AuditLogs<'a> {
         Self { db }
     }
 
-    /// Log audit event
-    pub async fn log_event(
-        &self,
-        operation: &str,
-        table_name: &str,
-        record_id: Option<&str>,
-        user_context: Option<&str>,
-        details: &str,
-        success: bool,
-        error_message: Option<&str>,
-    ) -> RepositoryResult<i64> {
-        let entry = AuditLogEntry::new(
-            operation.to_string(),
-            table_name.to_string(),
-            record_id.map(|s| s.to_string()),
-            user_context.map(|s| s.to_string()),
-            details.to_string(),
-            success,
-            error_message.map(|s| s.to_string()),
-        );
-
-        self.save(&entry).await
-    }
-
     /// Query audit logs
     pub async fn find_logs(
         &self,

@@ -82,16 +82,6 @@ impl ToolFilter {
         true
     }
 
-    /// Filter a list of tool names, returning only allowed ones.
-    pub fn filter_tools<'a>(&self, tools: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
-        tools.into_iter().filter(|t| self.is_allowed(t)).collect()
-    }
-
-    /// Check if this filter has any restrictions.
-    pub fn has_restrictions(&self) -> bool {
-        self.tools.is_some() || !self.disallowed_tools.is_empty()
-    }
-
     /// Merge with another filter.
     ///
     /// The result is the intersection of capabilities:

@@ -282,89 +282,6 @@ impl ShortcutManager {
         })
     }
 
-    pub async fn shortcuts_search(&self, options: SearchOptions) -> ShortcutsResult<SearchResult> {
-        let config = self.config_get().await?;
-        let mut matches = Vec::new();
-
-        for (index, binding) in config.iter().enumerate() {
-            let mut score = 0.0f32;
-            let mut matches_criteria = true;
-
-            if let Some(ref key) = options.key {
-                if binding.key.to_lowercase().contains(&key.to_lowercase()) {
-                    score += 0.3;
-                } else {
-                    matches_criteria = false;
-                }
-            }
-
-            if let Some(ref modifiers) = options.modifiers {
-                let matching_modifiers = modifiers
-                    .iter()
-                    .filter(|m| binding.modifiers.contains(m))
-                    .count();
-                if matching_modifiers > 0 {
-                    score += 0.2 * (matching_modifiers as f32 / modifiers.len() as f32);
-                } else if !modifiers.is_empty() {
-                    matches_criteria = false;
-                }
-            }
-
-            if let Some(ref action) = options.action {
-                let action_name = self.extract_action_name(&binding.action);
-                if action_name.to_lowercase().contains(&action.to_lowercase()) {
-                    score += 0.3;
-                } else {
-                    matches_criteria = false;
-                }
-            }
-
-            if let Some(ref query) = options.query {
-                let query_lower = query.to_lowercase();
-                let action_name = self.extract_action_name(&binding.action);
-
-                if binding.key.to_lowercase().contains(&query_lower)
-                    || binding
-                        .modifiers
-                        .iter()
-                        .any(|m| m.to_lowercase().contains(&query_lower))
-                    || action_name.to_lowercase().contains(&query_lower)
-                {
-                    score += 0.2;
-                } else {
-                    matches_criteria = false;
-                }
-            }
-
-            if options.query.is_none()
-                && options.key.is_none()
-                && options.modifiers.is_none()
-                && options.action.is_none()
-            {
-                score = 1.0;
-                matches_criteria = true;
-            }
-
-            if matches_criteria {
-                matches.push(SearchMatch {
-                    index,
-                    binding: binding.clone(),
-                    score: score.max(0.1),
-                });
-            }
-        }
-
-        matches.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        let total = matches.len();
-
-        Ok(SearchResult { matches, total })
-    }
-
     pub async fn execute_action(
         &self,
         action: &crate::config::types::ShortcutAction,
@@ -372,10 +289,6 @@ impl ShortcutManager {
     ) -> OperationResult<serde_json::Value> {
         let registry = self.action_registry.read().await;
         registry.execute_action(action, context).await
-    }
-
-    pub async fn get_action_registry(&self) -> Arc<RwLock<ActionRegistry>> {
-        Arc::clone(&self.action_registry)
     }
 
     // Private methods

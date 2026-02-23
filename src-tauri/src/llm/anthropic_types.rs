@@ -54,14 +54,6 @@ impl MessageContent {
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text(text.into())
     }
-
-    /// Create a single text block
-    pub fn text_block(text: impl Into<String>) -> Self {
-        Self::Blocks(vec![ContentBlock::Text {
-            text: text.into(),
-            cache_control: None,
-        }])
-    }
 }
 
 // ============================================================
@@ -193,14 +185,6 @@ impl CacheControl {
         Self {
             cache_type: "ephemeral".to_string(),
             ttl: None,
-        }
-    }
-
-    /// Create ephemeral cache with TTL
-    pub fn ephemeral_with_ttl(ttl: impl Into<String>) -> Self {
-        Self {
-            cache_type: "ephemeral".to_string(),
-            ttl: Some(ttl.into()),
         }
     }
 }
@@ -629,17 +613,6 @@ impl ContentBlock {
         Self::Text {
             text: text.into(),
             cache_control: Some(CacheControl::ephemeral()),
-        }
-    }
-
-    /// Create Base64 image block
-    pub fn image_base64(media_type: impl Into<String>, data: impl Into<String>) -> Self {
-        Self::Image {
-            source: ImageSource::Base64 {
-                media_type: media_type.into(),
-                data: data.into(),
-            },
-            cache_control: None,
         }
     }
 

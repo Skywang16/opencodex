@@ -190,35 +190,6 @@ impl PromptLoader {
         None
     }
 
-    /// Load workspace custom agents (.opencodex/agents/*.md)
-    pub async fn load_workspace_agents(&self) -> HashMap<String, String> {
-        let mut agents = HashMap::new();
-
-        let Some(ref workspace) = self.workspace_path else {
-            return agents;
-        };
-
-        let agents_dir = Path::new(workspace).join(".opencodex").join("agents");
-        let Ok(mut entries) = fs::read_dir(&agents_dir).await else {
-            return agents;
-        };
-
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) != Some("md") {
-                continue;
-            }
-
-            if let Ok(content) = fs::read_to_string(&path).await {
-                if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                    agents.insert(name.to_string(), content);
-                }
-            }
-        }
-
-        agents
-    }
-
     /// Clear cache
     pub fn clear_cache(&mut self) {
         self.cache.clear();

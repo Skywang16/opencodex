@@ -46,7 +46,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const evictOldSessions = () => {
     const currentId = selectedSession.value?.id
-    while (sessionAccessOrder.length > MAX_CACHED_SESSIONS) {
+    let guard = sessionAccessOrder.length
+    while (sessionAccessOrder.length > MAX_CACHED_SESSIONS && guard > 0) {
+      guard--
       const oldest = sessionAccessOrder[0]
       if (oldest === currentId) {
         sessionAccessOrder.shift()

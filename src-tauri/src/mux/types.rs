@@ -56,15 +56,6 @@ impl PtySize {
             pixel_height: 0,
         }
     }
-
-    pub fn with_pixels(rows: u16, cols: u16, pixel_width: u16, pixel_height: u16) -> Self {
-        Self {
-            rows,
-            cols,
-            pixel_width,
-            pixel_height,
-        }
-    }
 }
 
 impl Default for PtySize {

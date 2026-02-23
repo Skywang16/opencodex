@@ -370,45 +370,4 @@ impl LocalPane {
         line.push('\n');
         self.write(line.as_bytes())
     }
-
-    /// Send control character
-    pub fn send_control(&self, ctrl_char: char) -> PaneResult<()> {
-        let ctrl_code = match ctrl_char {
-            'c' => 0x03, // Ctrl+C
-            'd' => 0x04, // Ctrl+D
-            'z' => 0x1A, // Ctrl+Z
-            _ => {
-                return Err(PaneError::Internal(format!(
-                    "Unsupported control character: {ctrl_char}"
-                )))
-            }
-        };
-        self.write(&[ctrl_code])
-    }
-
-    /// Send special key sequence
-    pub fn send_key(&self, key: &str) -> PaneResult<()> {
-        let sequence: &[u8] = match key {
-            "Enter" => b"\r",
-            "Tab" => b"\t",
-            "Backspace" => b"\x7f",
-            "Escape" => b"\x1b",
-            "Up" => b"\x1b[A",
-            "Down" => b"\x1b[B",
-            "Right" => b"\x1b[C",
-            "Left" => b"\x1b[D",
-            "Home" => b"\x1b[H",
-            "End" => b"\x1b[F",
-            "PageUp" => b"\x1b[5~",
-            "PageDown" => b"\x1b[6~",
-            "Delete" => b"\x1b[3~",
-            "Insert" => b"\x1b[2~",
-            _ => {
-                return Err(PaneError::Internal(format!(
-                    "Unsupported key sequence: {key}"
-                )))
-            }
-        };
-        self.write(sequence)
-    }
 }

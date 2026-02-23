@@ -36,10 +36,6 @@ impl IterationContext {
         Arc::clone(&self.session)
     }
 
-    pub fn add_message(&mut self, message: MessageParam) {
-        self.current_messages.push(message);
-    }
-
     pub fn add_tool_call(&mut self, id: String, name: String, arguments: serde_json::Value) {
         self.pending_tools.push((id, name, arguments));
     }
@@ -54,12 +50,6 @@ impl IterationContext {
 
     pub fn append_output(&mut self, text: &str) {
         self.output.push_str(text);
-    }
-
-    pub fn track_file(&mut self, path: String) {
-        if !self.files_touched.contains(&path) {
-            self.files_touched.push(path);
-        }
     }
 
     pub fn messages(&self) -> &[MessageParam] {

@@ -46,11 +46,6 @@ impl<'a> FileOperationRecord<'a> {
         }
     }
 
-    pub fn with_state(mut self, state: FileRecordState) -> Self {
-        self.state_override = Some(state);
-        self
-    }
-
     pub fn recorded_at(mut self, recorded_at: DateTime<Utc>) -> Self {
         self.recorded_at = recorded_at;
         self
@@ -168,20 +163,6 @@ impl FileContextTracker {
                 recorded_at: now,
             })
             .collect())
-    }
-
-    pub async fn mark_file_as_stale(
-        &self,
-        path: impl AsRef<Path>,
-    ) -> AgentResult<TrackedFileRecord> {
-        let record = FileOperationRecord::new(path.as_ref(), FileRecordSource::UserEdited)
-            .with_state(FileRecordState::Stale);
-        self.track_file_operation(record).await
-    }
-
-    pub async fn take_recently_modified(&self) -> Vec<String> {
-        let mut guard = self.recently_modified.write().await;
-        guard.drain().collect()
     }
 
     pub async fn take_recent_agent_edits(&self) -> Vec<String> {

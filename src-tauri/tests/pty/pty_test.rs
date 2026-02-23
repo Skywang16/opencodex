@@ -71,24 +71,6 @@ fn test_pty_resize() {
 }
 
 #[test]
-fn test_pty_control_sequences() {
-    let pane_id = PaneId::new(5);
-    let size = PtySize::new(24, 80);
-
-    let pane = LocalPane::new(pane_id, size).expect("PTY创建失败");
-
-    // 测试控制字符
-    assert!(pane.send_control('c').is_ok(), "发送Ctrl+C应该成功");
-    assert!(pane.send_control('d').is_ok(), "发送Ctrl+D应该成功");
-
-    // 测试特殊键
-    assert!(pane.send_key("Enter").is_ok(), "发送Enter键应该成功");
-    assert!(pane.send_key("Tab").is_ok(), "发送Tab键应该成功");
-    assert!(pane.send_key("Up").is_ok(), "发送上箭头键应该成功");
-    assert!(pane.send_key("Down").is_ok(), "发送下箭头键应该成功");
-}
-
-#[test]
 fn test_pty_reader() {
     let pane_id = PaneId::new(6);
     let size = PtySize::new(24, 80);

@@ -127,11 +127,6 @@ impl ToolMetadata {
         self
     }
 
-    pub fn with_compaction_protection(mut self) -> Self {
-        self.protected_from_compaction = true;
-        self
-    }
-
     pub fn effective_timeout(&self) -> Duration {
         self.custom_timeout
             .unwrap_or_else(|| Duration::from_millis(self.priority.timeout_millis()))

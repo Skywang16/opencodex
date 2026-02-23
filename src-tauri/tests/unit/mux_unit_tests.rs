@@ -344,27 +344,6 @@ mod notification_system_tests {
     }
 
     #[test]
-    fn test_debug_subscriber() {
-        let mux = TerminalMux::new_shared();
-        let subscriber = TerminalMux::create_debug_subscriber();
-
-        let subscriber_id = mux.subscribe(subscriber);
-
-        // 发送一些通知进行测试（主要测试不会panic）
-        mux.notify(MuxNotification::PaneAdded(PaneId::new(1)));
-        mux.notify(MuxNotification::PaneOutput {
-            pane_id: PaneId::new(1),
-            data: b"test debug output".to_vec().into(),
-        });
-        mux.notify(MuxNotification::PaneRemoved(PaneId::new(1)));
-
-        thread::sleep(Duration::from_millis(10));
-
-        // 清理
-        mux.unsubscribe(subscriber_id);
-    }
-
-    #[test]
     fn test_subscriber_panic_handling() {
         let mux = TerminalMux::new_shared();
         let normal_count = Arc::new(AtomicUsize::new(0));

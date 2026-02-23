@@ -189,10 +189,6 @@ impl TaskContext {
             .await;
     }
 
-    pub async fn set_progress_channel(&self, channel: Option<Channel<TaskEvent>>) {
-        *self.states.progress_channel.lock().await = channel;
-    }
-
     pub async fn progress_channel(&self) -> Option<Channel<TaskEvent>> {
         self.states.progress_channel.lock().await.clone()
     }
@@ -394,24 +390,6 @@ impl TaskContext {
         f(&mut chain)
     }
 
-    /// Check if task is aborted
-    /// Simplified version: only checks aborted flag, no lock needed
-    pub fn check_aborted(&self, no_check_pause: bool) -> TaskExecutorResult<()> {
-        if self.states.aborted.load(Ordering::SeqCst) {
-            return Err(TaskExecutorError::TaskInterrupted);
-        }
-        if no_check_pause {
-            return Ok(());
-        }
-        // Pause check remains synchronous
-        let status = self.pause_status.load(Ordering::SeqCst);
-        if status != 0 {
-            // If paused, return error for caller to handle
-            return Err(TaskExecutorError::TaskInterrupted);
-        }
-        Ok(())
-    }
-
     /// Asynchronously check if task is aborted (with pause waiting)
     pub async fn check_aborted_async(&self, no_check_pause: bool) -> TaskExecutorResult<()> {
         if self.states.aborted.load(Ordering::SeqCst) || self.states.abort_token.is_cancelled() {
@@ -448,12 +426,6 @@ impl TaskContext {
     /// Check if already aborted
     pub fn is_aborted(&self) -> bool {
         self.states.aborted.load(Ordering::SeqCst) || self.states.abort_token.is_cancelled()
-    }
-
-    pub fn set_pause(&self, paused: bool, _abort_current_step: bool) {
-        let new_status = if paused { 1 } else { 0 };
-        self.pause_status.store(new_status, Ordering::SeqCst);
-        self.pause_notify.notify_waiters();
     }
 
     /// Create cancellation token for LLM stream
@@ -528,24 +500,6 @@ impl TaskContext {
                 content: MessageContent::Blocks(blocks),
             });
         }
-        Ok(())
-    }
-
-    // Deprecated in zero-abstraction model: initial prompts are handled explicitly by caller.
-    // Retained signature temporarily, but now implemented using set_system_prompt + add_user_message semantics without DB writes for system.
-    pub async fn set_initial_prompts(
-        &self,
-        system_prompt: String,
-        user_prompt: String,
-    ) -> TaskExecutorResult<()> {
-        {
-            let mut exec = self.states.execution.write().await;
-            exec.system_prompt = Some(SystemPrompt::Text(system_prompt));
-            exec.system_prompt_overlay = None;
-            exec.messages.clear();
-            exec.message_sequence = 0;
-        }
-        self.add_user_message(user_prompt).await?;
         Ok(())
     }
 
@@ -655,13 +609,6 @@ impl TaskContext {
         let mut exec = self.states.execution.write().await;
         exec.system_prompt = Some(SystemPrompt::Text(prompt));
         exec.system_prompt_overlay = None;
-        Ok(())
-    }
-
-    // Deprecated: system prompt is stored separately and not part of messages.
-    pub async fn update_system_prompt(&self, new_system_prompt: String) -> TaskExecutorResult<()> {
-        let mut exec = self.states.execution.write().await;
-        exec.system_prompt = Some(SystemPrompt::Text(new_system_prompt));
         Ok(())
     }
 
@@ -804,16 +751,6 @@ impl TaskContext {
             block,
         })
         .await
-    }
-
-    pub async fn active_assistant_message_id(&self) -> Option<i64> {
-        self.states
-            .messages
-            .lock()
-            .await
-            .assistant_message
-            .as_ref()
-            .map(|m| m.id)
     }
 
     pub async fn assistant_update_block(

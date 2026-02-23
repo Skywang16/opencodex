@@ -41,8 +41,4 @@ impl AIManagerState {
     pub fn database(&self) -> &Arc<DatabaseManager> {
         &self.database
     }
-
-    pub fn get_terminal_context_service(&self) -> &Arc<TerminalContextService> {
-        &self.terminal_context_service
-    }
 }

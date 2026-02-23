@@ -302,10 +302,14 @@ impl TerminalEventHandler {
                     "enabled": enabled
                 }),
             ),
-            // Note: PaneCwdChanged events should not be sent from Context layer to frontend, Mux is the single source
-            TerminalContextEvent::PaneCwdChanged { .. } => unreachable!(
-                "PaneCwdChanged should never be serialized from context_event_to_tauri_event; Mux is the single source"
-            ),
+            // PaneCwdChanged events should not be sent from Context layer to frontend, Mux is the single source
+            TerminalContextEvent::PaneCwdChanged { pane_id, .. } => {
+                tracing::error!(
+                    "BUG: PaneCwdChanged for pane {:?} should not reach context_event_to_tauri_event; Mux is the single source",
+                    pane_id
+                );
+                ("pane_context_updated", json!(null))
+            }
         }
     }
 }
@@ -381,18 +385,17 @@ mod tests {
     }
 
     #[test]
-    fn test_cwd_changed_event_conversion() {
+    fn test_cwd_changed_event_conversion_returns_noop() {
         let pane_id = PaneId::new(1);
         let event = TerminalContextEvent::PaneCwdChanged {
             pane_id,
             old_cwd: Some("/old/path".to_string()),
             new_cwd: "/new/path".to_string(),
         };
-        // No longer allow serializing PaneCwdChanged events from Context layer, should be unreachable
-        let result = std::panic::catch_unwind(|| {
-            let _ = TerminalEventHandler::context_event_to_tauri_event(&event);
-        });
-        assert!(result.is_err());
+        // PaneCwdChanged should not panic; it returns a safe no-op event
+        let (event_name, payload) = TerminalEventHandler::context_event_to_tauri_event(&event);
+        assert_eq!(event_name, "pane_context_updated");
+        assert_eq!(payload, serde_json::Value::Null);
     }
 
     #[test]

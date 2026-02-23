@@ -185,49 +185,6 @@ impl AIModelConfig {
             updated_at: now,
         }
     }
-
-    pub fn with_model_type(
-        provider: AIProvider,
-        api_url: String,
-        api_key: String,
-        model: String,
-        model_type: ModelType,
-    ) -> Self {
-        let now = Utc::now();
-        Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            provider,
-            model,
-            model_type,
-            auth_type: AuthType::ApiKey,
-            api_url: Some(api_url),
-            api_key: Some(api_key),
-            oauth_config: None,
-            options: None,
-            use_custom_base_url: None,
-            created_at: now,
-            updated_at: now,
-        }
-    }
-
-    /// Create OAuth authenticated model
-    pub fn with_oauth(provider: AIProvider, model: String, oauth_config: OAuthConfig) -> Self {
-        let now = Utc::now();
-        Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            provider,
-            model,
-            model_type: ModelType::Chat,
-            auth_type: AuthType::OAuth,
-            api_url: None,
-            api_key: None,
-            oauth_config: Some(oauth_config),
-            options: None,
-            use_custom_base_url: None,
-            created_at: now,
-            updated_at: now,
-        }
-    }
 }
 
 /// AI model data access struct

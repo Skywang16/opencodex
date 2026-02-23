@@ -125,10 +125,6 @@ impl ShellIntegrationManager {
         *self.lock_context_service_write() = Some(context_service);
     }
 
-    pub fn remove_context_service_integration(&self) {
-        *self.lock_context_service_write() = None;
-    }
-
     pub fn subscribe_events(&self) -> broadcast::Receiver<(PaneId, ShellEvent)> {
         self.event_sender.subscribe()
     }
@@ -178,10 +174,6 @@ impl ShellIntegrationManager {
 
     pub fn update_current_working_directory(&self, pane_id: PaneId, cwd: String) {
         self.apply_cwd(pane_id, cwd);
-    }
-
-    pub fn get_pane_state(&self, pane_id: PaneId) -> Option<()> {
-        self.states.get(&pane_id).map(|_| ())
     }
 
     pub fn with_pane_state<F, R>(&self, pane_id: PaneId, f: F) -> Option<R>
@@ -244,28 +236,6 @@ impl ShellIntegrationManager {
         }
     }
 
-    pub fn disable_integration(&self, pane_id: PaneId) {
-        let changed = {
-            let mut state = self
-                .states
-                .entry(pane_id)
-                .or_insert_with(PaneShellState::new);
-            if !matches!(
-                state.value().integration_state,
-                ShellIntegrationState::Disabled
-            ) {
-                state.value_mut().integration_state = ShellIntegrationState::Disabled;
-                state.value_mut().current_command = None;
-                true
-            } else {
-                false
-            }
-        };
-        if changed {
-            self.notify_context_service_integration_changed(pane_id, false);
-        }
-    }
-
     pub fn is_integration_enabled(&self, pane_id: PaneId) -> bool {
         self.states
             .get(&pane_id)
@@ -273,54 +243,11 @@ impl ShellIntegrationManager {
             .unwrap_or(false)
     }
 
-    pub fn with_current_command<F, R>(&self, pane_id: PaneId, f: F) -> Option<R>
-    where
-        F: FnOnce(&CommandInfo) -> R,
-    {
-        self.states
-            .get(&pane_id)
-            .and_then(|state| state.current_command.as_ref().map(f))
-    }
-
-    pub fn get_current_command(&self, pane_id: PaneId) -> Option<Arc<CommandInfo>> {
-        self.states.get(&pane_id).and_then(|state| {
-            state
-                .current_command
-                .as_ref()
-                .map(|cmd| Arc::new(cmd.clone()))
-        })
-    }
-
     pub fn get_command_history(&self, pane_id: PaneId) -> Vec<Arc<CommandInfo>> {
         self.states
             .get(&pane_id)
             .map(|state| state.command_history.iter().map(Arc::clone).collect())
             .unwrap_or_default()
-    }
-
-    pub fn get_integration_state(&self, pane_id: PaneId) -> ShellIntegrationState {
-        self.states
-            .get(&pane_id)
-            .map(|state| state.integration_state.clone())
-            .unwrap_or(ShellIntegrationState::Disabled)
-    }
-
-    pub fn get_command_stats(&self, pane_id: PaneId) -> Option<(usize, usize, usize)> {
-        self.states.get(&pane_id).map(|state| {
-            let history_total = state.command_history.len();
-            let running = state
-                .current_command
-                .as_ref()
-                .filter(|cmd| !cmd.is_finished())
-                .map(|_| 1)
-                .unwrap_or(0);
-            let finished = history_total;
-            (history_total, running, finished)
-        })
-    }
-
-    pub fn cleanup_pane(&self, pane_id: PaneId) {
-        self.states.remove(&pane_id);
     }
 
     pub fn get_multiple_pane_states(&self, pane_ids: &[PaneId]) -> HashMap<PaneId, PaneShellState> {

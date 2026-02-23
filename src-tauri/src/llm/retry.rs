@@ -19,11 +19,11 @@ pub struct RetryConfig {
 impl Default for RetryConfig {
     fn default() -> Self {
         Self {
-            max_retries: 10,
-            initial_delay_ms: 20000,
-            max_delay_ms: 20000,
-            backoff_multiplier: 1.0,
-            jitter: false,
+            max_retries: 4,
+            initial_delay_ms: 1000,
+            max_delay_ms: 30000,
+            backoff_multiplier: 2.0,
+            jitter: true,
         }
     }
 }
@@ -187,11 +187,14 @@ mod tests {
 
     #[test]
     fn test_delay_calculation() {
-        let config = RetryConfig::default();
-        // Fixed 20s interval for all attempts
-        assert_eq!(config.delay_for_attempt(0), Duration::from_millis(20000));
-        assert_eq!(config.delay_for_attempt(1), Duration::from_millis(20000));
-        assert_eq!(config.delay_for_attempt(2), Duration::from_millis(20000));
+        let config = RetryConfig {
+            jitter: false,
+            ..RetryConfig::default()
+        };
+        // Exponential backoff: 1s, 2s, 4s, 8s (capped at 30s)
+        assert_eq!(config.delay_for_attempt(0), Duration::from_millis(1000));
+        assert_eq!(config.delay_for_attempt(1), Duration::from_millis(2000));
+        assert_eq!(config.delay_for_attempt(2), Duration::from_millis(4000));
     }
 
     #[test]

@@ -253,24 +253,9 @@ impl TerminalSystemConfig {
         Ok(())
     }
 
-    /// Cleanup interval helper
-    pub fn cleanup_interval(&self) -> Duration {
-        Duration::from_secs(self.cleanup.interval_seconds)
-    }
-
-    /// Stale threshold helper
-    pub fn stale_threshold(&self) -> Duration {
-        Duration::from_secs(self.cleanup.stale_threshold_seconds)
-    }
-
     /// Shell cache TTL helper
     pub fn shell_cache_ttl(&self) -> Duration {
         Duration::from_secs(self.shell.cache_ttl_seconds)
-    }
-
-    /// Shell cache maximum age helper
-    pub fn shell_max_cache_age(&self) -> Duration {
-        Duration::from_secs(self.shell.max_cache_age_seconds)
     }
 }
 

@@ -60,39 +60,6 @@ impl ContextCollector {
         self.parsers.insert(command.to_string(), parser);
     }
 
-    /// Collect command execution context
-    pub fn collect_context(
-        &self,
-        command: String,
-        args: Vec<String>,
-        working_directory: String,
-        stdout: String,
-        stderr: String,
-        exit_code: Option<i32>,
-        duration: Option<u64>,
-    ) -> ContextCollectorResult<()> {
-        // Try to parse output
-        let parsed_output = self.parse_output(&command, &stdout)?;
-        let output = CommandOutput::new(stdout, stderr);
-        let output_with_parsed = output.with_parsed_data(parsed_output);
-
-        let mut context = CommandExecutionContext::new(command, args, working_directory);
-        context = context.with_output(output_with_parsed);
-
-        if let Some(code) = exit_code {
-            context = context.with_exit_code(code);
-        }
-
-        if let Some(dur) = duration {
-            context = context.with_duration(dur);
-        }
-
-        // Save context
-        self.add_context(context)?;
-
-        Ok(())
-    }
-
     /// Parse command output
     fn parse_output(
         &self,
@@ -137,41 +104,6 @@ impl ContextCollector {
             .map_err(|_| ContextCollectorError::MutexPoisoned {
                 resource: "contexts",
             })
-    }
-
-    /// Get all contexts
-    pub fn get_contexts(&self) -> ContextCollectorResult<Vec<CommandExecutionContext>> {
-        let contexts = self.lock_contexts()?;
-        Ok(contexts.iter().cloned().collect())
-    }
-
-    /// Get recent contexts
-    pub fn get_recent_contexts(
-        &self,
-        count: usize,
-    ) -> ContextCollectorResult<Vec<CommandExecutionContext>> {
-        let contexts = self.lock_contexts()?;
-        Ok(contexts.iter().rev().take(count).cloned().collect())
-    }
-
-    /// Search contexts by command
-    pub fn search_contexts_by_command(
-        &self,
-        command: &str,
-    ) -> ContextCollectorResult<Vec<CommandExecutionContext>> {
-        let contexts = self.lock_contexts()?;
-        Ok(contexts
-            .iter()
-            .filter(|ctx| ctx.command == command)
-            .cloned()
-            .collect())
-    }
-
-    /// Clear contexts
-    pub fn clear_contexts(&self) -> ContextCollectorResult<()> {
-        let mut contexts = self.lock_contexts()?;
-        contexts.clear();
-        Ok(())
     }
 }
 

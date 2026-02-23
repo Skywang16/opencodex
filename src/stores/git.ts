@@ -366,11 +366,6 @@ export const useGitStore = defineStore('git', () => {
     selectedFileIsStaged.value = staged
   }
 
-  const selectCommitFile = (hash: string, filePath: string) => {
-    // TODO: Implement commit file diff viewer
-    console.warn('Commit file diff not yet implemented:', hash, filePath)
-  }
-
   watch(
     currentPath,
     () => {
@@ -446,7 +441,6 @@ export const useGitStore = defineStore('git', () => {
     initRepository,
 
     selectDiffFile,
-    selectCommitFile,
     checkoutBranch,
   }
 })

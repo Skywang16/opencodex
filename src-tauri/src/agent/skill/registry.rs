@@ -123,22 +123,6 @@ impl SkillRegistry {
             Ok(false)
         }
     }
-
-    /// Batch get skill contents
-    pub async fn get_multiple_contents(&self, names: &[String]) -> AgentResult<Vec<SkillContent>> {
-        let mut contents = Vec::with_capacity(names.len());
-
-        for name in names {
-            match self.get_or_load_content(name).await {
-                Ok(content) => contents.push(content),
-                Err(e) => {
-                    tracing::warn!("Failed to load skill '{}': {}", name, e);
-                }
-            }
-        }
-
-        Ok(contents)
-    }
 }
 
 impl Default for SkillRegistry {

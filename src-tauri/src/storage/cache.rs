@@ -103,33 +103,6 @@ impl UnifiedCache {
 
     // ==================== New API with namespace ====================
 
-    /// Get cache value (with namespace)
-    pub async fn get_ns(&self, namespace: CacheNamespace, key: &str) -> Option<Value> {
-        self.get(&namespace.make_key(key)).await
-    }
-
-    /// Set cache value (with namespace)
-    pub async fn set_ns(
-        &self,
-        namespace: CacheNamespace,
-        key: &str,
-        value: Value,
-    ) -> CacheResult<()> {
-        self.set(&namespace.make_key(key), value).await
-    }
-
-    /// Set cache value with TTL (with namespace)
-    pub async fn set_ns_with_ttl(
-        &self,
-        namespace: CacheNamespace,
-        key: &str,
-        value: Value,
-        ttl: Duration,
-    ) -> CacheResult<()> {
-        self.set_with_ttl(&namespace.make_key(key), value, ttl)
-            .await
-    }
-
     /// Serialize and store arbitrary value (with namespace)
     pub async fn set_serialized_ns<T>(
         &self,
@@ -175,11 +148,6 @@ impl UnifiedCache {
         self.remove(&namespace.make_key(key)).await
     }
 
-    /// Check if key exists (with namespace)
-    pub async fn contains_key_ns(&self, namespace: CacheNamespace, key: &str) -> bool {
-        self.contains_key(&namespace.make_key(key)).await
-    }
-
     /// Clear entire namespace
     pub async fn clear_namespace(&self, namespace: CacheNamespace) -> usize {
         let prefix = namespace.prefix();
@@ -204,35 +172,7 @@ impl UnifiedCache {
         removed
     }
 
-    /// Get all keys in namespace (without prefix)
-    pub async fn keys_in_namespace(&self, namespace: CacheNamespace) -> Vec<String> {
-        let prefix = namespace.prefix();
-        let prefix_len = prefix.len();
-
-        self.purge_expired().await;
-        self.data
-            .read()
-            .await
-            .keys()
-            .filter_map(|key| {
-                if key.starts_with(prefix) {
-                    Some(key[prefix_len..].to_string())
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
     // ==================== Convenience methods (common shortcuts) ====================
-
-    /// Rules: Get global rules
-    pub async fn get_global_rules(&self) -> Option<String> {
-        self.get_deserialized_ns(CacheNamespace::Rules, "global_rules")
-            .await
-            .ok()
-            .flatten()
-    }
 
     /// Rules: Set global rules
     pub async fn set_global_rules(&self, rules: Option<String>) -> CacheResult<()> {
@@ -243,14 +183,6 @@ impl UnifiedCache {
             self.remove_ns(CacheNamespace::Rules, "global_rules").await;
             Ok(())
         }
-    }
-
-    /// Rules: Get project rules
-    pub async fn get_project_rules(&self) -> Option<String> {
-        self.get_deserialized_ns(CacheNamespace::Rules, "project_rules")
-            .await
-            .ok()
-            .flatten()
     }
 
     /// Rules: Set project rules
@@ -446,15 +378,6 @@ impl UnifiedCache {
     pub async fn keys(&self) -> Vec<String> {
         self.purge_expired().await;
         self.data.read().await.keys().cloned().collect()
-    }
-
-    /// Batch set
-    pub async fn set_batch(&self, items: HashMap<String, Value>) -> CacheResult<()> {
-        let mut data = self.data.write().await;
-        for (key, value) in items {
-            data.insert(key, CacheEntry::new(value, None));
-        }
-        Ok(())
     }
 
     /// Batch get

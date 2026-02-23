@@ -45,10 +45,6 @@ impl ReasoningPart {
         }
     }
 
-    pub fn append_text(&mut self, delta: &str) {
-        self.text.push_str(delta);
-    }
-
     pub fn complete(&mut self) {
         self.time.end = Some(Utc::now().timestamp_millis());
         // Trim in place to avoid allocation

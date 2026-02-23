@@ -6,7 +6,6 @@
 use sha2::{Digest, Sha256};
 use sqlx::{Row, SqlitePool};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncRead, AsyncReadExt};
 
 use super::config::CheckpointConfig;
 use super::models::CheckpointResult;
@@ -76,71 +75,6 @@ impl BlobStore {
         );
 
         Ok(hash)
-    }
-
-    /// Stream storage for large files
-    pub async fn store_stream<R: AsyncRead + Unpin>(
-        &self,
-        mut reader: R,
-    ) -> CheckpointResult<String> {
-        let mut hasher = Sha256::new();
-        let mut content = Vec::new();
-        let mut buffer = vec![0u8; self.config.stream_buffer_size];
-
-        // Stream read and compute hash
-        loop {
-            let bytes_read = reader.read(&mut buffer).await?;
-            if bytes_read == 0 {
-                break;
-            }
-
-            let chunk = &buffer[..bytes_read];
-            hasher.update(chunk);
-            content.extend_from_slice(chunk);
-
-            // Check file size limit
-            if self.config.is_file_too_large(content.len() as u64) {
-                return Err(super::models::CheckpointError::FileTooLarge(
-                    content.len() as u64
-                ));
-            }
-        }
-
-        let hash = hex::encode(hasher.finalize());
-
-        // Check if already exists
-        if self.exists(&hash).await? {
-            self.increment_ref(&hash).await?;
-            return Ok(hash);
-        }
-
-        // Store content
-        self.store_content(&hash, &content).await?;
-        Ok(hash)
-    }
-
-    /// Internal method to store content
-    async fn store_content(&self, hash: &str, content: &[u8]) -> CheckpointResult<()> {
-        let size = content.len() as i64;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        sqlx::query(
-            r#"
-            INSERT INTO checkpoint_blobs (hash, content, size, ref_count, created_at)
-            VALUES (?, ?, ?, 1, ?)
-            "#,
-        )
-        .bind(hash)
-        .bind(content)
-        .bind(size)
-        .bind(now)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
     }
 
     /// Get content by hash

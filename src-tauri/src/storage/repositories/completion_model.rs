@@ -106,35 +106,6 @@ impl<'a> CompletionModelRepo<'a> {
         Ok(())
     }
 
-    pub async fn upsert_entity(
-        &self,
-        entity_type: &str,
-        value: &str,
-        used_ts: u64,
-    ) -> RepositoryResult<()> {
-        sqlx::query(
-            r#"
-            INSERT INTO completion_entity_stats
-                (entity_type, value, use_count, last_used_ts)
-            VALUES
-                (?, ?, 1, ?)
-            ON CONFLICT(entity_type, value) DO UPDATE SET
-                use_count = use_count + 1,
-                last_used_ts = CASE
-                    WHEN excluded.last_used_ts > last_used_ts THEN excluded.last_used_ts
-                    ELSE last_used_ts
-                END
-            "#,
-        )
-        .bind(entity_type)
-        .bind(value)
-        .bind(used_ts as i64)
-        .execute(self.pool())
-        .await?;
-
-        Ok(())
-    }
-
     pub async fn top_next_keys(
         &self,
         prev_id: i64,
@@ -168,29 +139,6 @@ impl<'a> CompletionModelRepo<'a> {
         .await?;
 
         Ok(id)
-    }
-
-    pub async fn top_commands_by_frecency(
-        &self,
-        prefix: &str,
-        limit: i64,
-    ) -> RepositoryResult<Vec<(String, i64, i64, i64)>> {
-        // Returns: (key, use_count, success_count, last_used_ts)
-        let rows = sqlx::query_as::<_, (String, i64, i64, i64)>(
-            r#"
-            SELECT key, use_count, success_count, last_used_ts
-            FROM completion_command_keys
-            WHERE key LIKE (? || '%')
-            ORDER BY last_used_ts DESC, use_count DESC
-            LIMIT ?
-            "#,
-        )
-        .bind(prefix)
-        .bind(limit)
-        .fetch_all(self.pool())
-        .await?;
-
-        Ok(rows)
     }
 
     pub async fn prune_older_than(&self, cutoff_ts: u64) -> RepositoryResult<()> {

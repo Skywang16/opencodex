@@ -213,9 +213,4 @@ impl OAuthManager {
         // If no expiration time info, conservatively don't refresh (use access_token if available)
         false
     }
-
-    /// Check if OAuth config is valid (has access_token)
-    pub fn is_authorized(&self, oauth_config: &StorageOAuthConfig) -> bool {
-        oauth_config.access_token.is_some()
-    }
 }
