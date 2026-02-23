@@ -124,7 +124,6 @@ export interface Conversation {
 }
 
 export type ChatStatus = 'idle' | 'loading' | 'streaming' | 'error'
-export type ChatMode = 'chat' | 'agent'
 
 export interface ChatInputState {
   value: string

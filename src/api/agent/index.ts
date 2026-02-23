@@ -28,7 +28,6 @@ export class AgentApi {
    * Execute Agent task
    * @param userPrompt User input
    * @param sessionId Session ID
-   * @param chatMode Chat mode ('chat' | 'agent')
    * @param modelId Model ID
    * @param images Image attachments (optional)
    * @returns Returns task progress stream

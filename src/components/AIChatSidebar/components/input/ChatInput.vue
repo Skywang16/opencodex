@@ -33,7 +33,6 @@
     canSend?: boolean
     selectedModel?: string | null
     modelOptions?: Array<{ label: string; value: string | number }>
-    chatMode?: 'chat' | 'agent'
   }
 
   interface Emits {
@@ -42,7 +41,6 @@
     (e: 'stop'): void
     (e: 'update:selectedModel', value: string | null): void
     (e: 'model-change', value: string | null): void
-    (e: 'mode-change', mode: 'chat' | 'agent'): void
   }
 
   const props = withDefaults(defineProps<Props>(), {
@@ -52,7 +50,6 @@
     canSend: false,
     selectedModel: null,
     modelOptions: () => [],
-    chatMode: 'chat',
   })
 
   onBeforeUnmount(() => {
@@ -107,17 +104,6 @@
     get: () => props.modelValue,
     set: (value: string) => emit('update:modelValue', value),
   })
-
-  const modeOptions = computed(() => [
-    {
-      label: 'Chat',
-      value: 'chat',
-    },
-    {
-      label: 'Agent',
-      value: 'agent',
-    },
-  ])
 
   const handleKeydown = (event: KeyboardEvent) => {
     // When / is pressed (half-width), trigger command menu (Claude-style at start)
@@ -299,14 +285,6 @@
     const modelId = target.value || null
     emit('update:selectedModel', modelId)
     emit('model-change', modelId)
-  }
-
-  const handleModeChange = (event: Event) => {
-    const target = event.target as HTMLSelectElement
-    const mode = target.value as 'chat' | 'agent'
-    if (mode === 'chat' || mode === 'agent') {
-      emit('mode-change', mode)
-    }
   }
 
   const indexStatus = ref<{
@@ -607,11 +585,6 @@
 
     <div class="input-bottom">
       <div class="bottom-left">
-        <select class="native-select mode-selector" :value="chatMode" @change="handleModeChange">
-          <option v-for="option in modeOptions" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
         <select class="native-select model-selector" :value="selectedModel" @change="handleModelChange">
           <option value="" disabled>{{ t('ai.select_model') }}</option>
           <option v-for="option in modelOptions" :key="option.value" :value="option.value">
@@ -921,10 +894,6 @@
     color: var(--text-200);
   }
 
-  .mode-selector {
-    min-width: 60px;
-  }
-
   .model-selector {
     min-width: 80px;
     max-width: 160px;
@@ -1058,10 +1027,6 @@
   }
 
   @container (max-width: 280px) {
-    .mode-selector {
-      min-width: 45px;
-    }
-
     .model-selector {
       min-width: 55px;
       max-width: 85px;

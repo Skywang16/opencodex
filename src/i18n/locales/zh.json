@@ -154,7 +154,6 @@
     "select_folder": "选择工作区文件夹"
   },
   "ai": {
-    "select_mode": "选择模式",
     "select_model": "选择AI模型"
   },
   "ai_model": {

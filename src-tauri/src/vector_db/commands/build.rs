@@ -270,7 +270,10 @@ pub async fn vector_build_index_start(
                     error = %e,
                     "Failed to refresh embedding config before build; using existing vector engine"
                 );
-                state.current_search_engine()
+                match state.current_search_engine() {
+                    Some(engine) => engine,
+                    None => return Ok(api_error!("vector_db.engine_not_configured")),
+                }
             }
         };
 

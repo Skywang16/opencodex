@@ -10,17 +10,24 @@ use std::sync::RwLock;
 
 /// Vector database global state (managed by Tauri)
 pub struct VectorDbState {
-    search_engine: RwLock<Arc<SemanticSearchEngine>>,
+    search_engine: RwLock<Option<Arc<SemanticSearchEngine>>>,
 }
 
 impl VectorDbState {
     pub fn new(search_engine: Arc<SemanticSearchEngine>) -> Self {
         Self {
-            search_engine: RwLock::new(search_engine),
+            search_engine: RwLock::new(Some(search_engine)),
         }
     }
 
-    pub fn current_search_engine(&self) -> Arc<SemanticSearchEngine> {
+    /// Create a state with no search engine (embedding model not configured).
+    pub fn empty() -> Self {
+        Self {
+            search_engine: RwLock::new(None),
+        }
+    }
+
+    pub fn current_search_engine(&self) -> Option<Arc<SemanticSearchEngine>> {
         self.search_engine
             .read()
             .expect("vector search engine lock poisoned")
@@ -32,6 +39,6 @@ impl VectorDbState {
             .search_engine
             .write()
             .expect("vector search engine lock poisoned");
-        *guard = search_engine;
+        *guard = Some(search_engine);
     }
 }

@@ -1,5 +1,4 @@
 import { workspaceApi } from '@/api/workspace'
-import type { ChatMode } from '@/types'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
@@ -11,7 +10,6 @@ export const useLayoutStore = defineStore('layout', () => {
   const terminalPanelHeight = ref(200)
   const aiSidebarVisible = ref(false)
   const aiSidebarWidth = ref(350)
-  const aiChatMode = ref<ChatMode>('agent')
   const selectedModelId = ref<string | null>(null)
 
   // Non-persisted state
@@ -30,7 +28,6 @@ export const useLayoutStore = defineStore('layout', () => {
         'ui.terminal_height',
         'ui.ai_sidebar_visible',
         'ui.ai_sidebar_width',
-        'ui.ai_chat_mode',
         'ui.selected_model_id',
       ])
 
@@ -43,10 +40,6 @@ export const useLayoutStore = defineStore('layout', () => {
       if (prefs['ui.ai_sidebar_visible'] !== undefined)
         aiSidebarVisible.value = prefs['ui.ai_sidebar_visible'] === 'true'
       if (prefs['ui.ai_sidebar_width'] !== undefined) aiSidebarWidth.value = Number(prefs['ui.ai_sidebar_width']) || 350
-      if (prefs['ui.ai_chat_mode'] !== undefined) {
-        const mode = prefs['ui.ai_chat_mode']
-        if (mode === 'chat' || mode === 'agent') aiChatMode.value = mode
-      }
       if (prefs['ui.selected_model_id'] !== undefined) selectedModelId.value = prefs['ui.selected_model_id'] || null
     } catch (e) {
       console.warn('Failed to load layout preferences:', e)
@@ -86,11 +79,6 @@ export const useLayoutStore = defineStore('layout', () => {
   const setAiSidebarWidth = (w: number) => {
     aiSidebarWidth.value = Math.max(300, Math.min(800, w))
     persist('ui.ai_sidebar_width', String(aiSidebarWidth.value))
-  }
-
-  const setAiChatMode = (mode: ChatMode) => {
-    aiChatMode.value = mode
-    persist('ui.ai_chat_mode', mode)
   }
 
   const setSelectedModelId = (id: string | null) => {
@@ -143,7 +131,6 @@ export const useLayoutStore = defineStore('layout', () => {
     terminalPanelHeight,
     aiSidebarVisible,
     aiSidebarWidth,
-    aiChatMode,
     selectedModelId,
     showSettings,
     initialized,
@@ -158,7 +145,6 @@ export const useLayoutStore = defineStore('layout', () => {
     setTerminalPanelHeight,
     setAiSidebarVisible,
     setAiSidebarWidth,
-    setAiChatMode,
     setSelectedModelId,
 
     // Settings

@@ -156,7 +156,6 @@
     "select_folder": "Select Workspace Folder"
   },
   "ai": {
-    "select_mode": "Select mode",
     "select_model": "Select AI model"
   },
   "ai_model": {

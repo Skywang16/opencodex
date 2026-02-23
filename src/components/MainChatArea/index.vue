@@ -47,7 +47,7 @@
   const { selectedSession } = storeToRefs(workspaceStore)
 
   // Use storeToRefs to ensure reactive tracking
-  const { messageList, currentSession, currentWorkspacePath, isSending, isCurrentSessionSending, chatMode } =
+  const { messageList, currentSession, currentWorkspacePath, isSending, isCurrentSessionSending } =
     storeToRefs(aiChatStore)
   const { actions, selectedAction } = storeToRefs(runActionsStore)
   const { terminalPanelVisible } = storeToRefs(layoutStore)
@@ -197,10 +197,6 @@
     }
 
     await aiChatStore.sendMessage(message, images)
-  }
-
-  const handleSwitchMode = (mode: 'chat' | 'agent') => {
-    aiChatStore.setChatMode(mode)
   }
 
   const selectedModelId = ref<string | null>(null)
@@ -409,7 +405,6 @@
       <MessageList
         :messages="messageList"
         :is-loading="isCurrentSessionSending"
-        :chat-mode="chatMode"
         :session-id="currentSession?.id ?? null"
         :workspace-path="currentWorkspacePath ?? ''"
       />
@@ -426,11 +421,9 @@
         :can-send="canSend"
         :selected-model="selectedModelId"
         :model-options="modelOptions"
-        :chat-mode="chatMode"
         @send="sendMessage"
         @stop="stopMessage"
         @update:selected-model="handleModelChange"
-        @mode-change="handleSwitchMode"
       />
     </div>
 

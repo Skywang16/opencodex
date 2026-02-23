@@ -76,10 +76,6 @@
     }
   }
 
-  const handleSwitchMode = (mode: 'chat' | 'agent') => {
-    aiChatStore.setChatMode(mode)
-  }
-
   const startDrag = (event: MouseEvent) => {
     event.preventDefault()
 
@@ -216,7 +212,6 @@
           <MessageList
             :messages="aiChatStore.messageList"
             :is-loading="aiChatStore.isCurrentSessionSending"
-            :chat-mode="aiChatStore.chatMode"
             :session-id="aiChatStore.currentSession?.id ?? null"
             :workspace-path="aiChatStore.currentWorkspacePath ?? ''"
           />
@@ -234,11 +229,9 @@
         :can-send="canSend"
         :selected-model="selectedModelId"
         :model-options="modelOptions"
-        :chat-mode="aiChatStore.chatMode"
         @send="sendMessage"
         @stop="stopMessage"
         @update:selected-model="handleModelChange"
-        @mode-change="handleSwitchMode"
       />
     </div>
 

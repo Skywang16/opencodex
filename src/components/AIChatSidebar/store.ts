@@ -5,7 +5,7 @@ import type { ImageAttachment } from '@/stores/imageLightbox'
 import { useLayoutStore } from '@/stores/layout'
 import { useToolConfirmationDialogStore } from '@/stores/toolConfirmationDialog'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { ChatMode, RetryStatus } from '@/types'
+import type { RetryStatus } from '@/types'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
@@ -24,8 +24,6 @@ export const useAIChatStore = defineStore('ai-chat', () => {
   // UI State (delegated to layoutStore)
   const isVisible = computed(() => layoutStore.aiSidebarVisible)
   const sidebarWidth = computed(() => layoutStore.aiSidebarWidth)
-  const chatMode = computed(() => layoutStore.aiChatMode)
-
   // Local UI state
   const isInitialized = ref(false)
   const error = ref<string | null>(null)
@@ -157,10 +155,6 @@ export const useAIChatStore = defineStore('ai-chat', () => {
 
   const setSidebarWidth = (width: number) => {
     layoutStore.setAiSidebarWidth(width)
-  }
-
-  const setChatMode = (mode: ChatMode) => {
-    layoutStore.setAiChatMode(mode)
   }
 
   // Session operations
@@ -422,7 +416,6 @@ export const useAIChatStore = defineStore('ai-chat', () => {
     // UI state
     isVisible,
     sidebarWidth,
-    chatMode,
     isInitialized,
     error,
     canSendMessage,
@@ -443,7 +436,6 @@ export const useAIChatStore = defineStore('ai-chat', () => {
     // Operations
     toggleSidebar,
     setSidebarWidth,
-    setChatMode,
     startNewChat,
     switchSession,
     sendMessage,

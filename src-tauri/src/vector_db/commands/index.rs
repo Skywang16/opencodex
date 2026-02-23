@@ -23,7 +23,11 @@ pub async fn get_index_status(
         }));
     }
 
-    let config = state.current_search_engine().config().clone();
+    let engine = match state.current_search_engine() {
+        Some(e) => e,
+        None => return Ok(api_error!("vector_db.engine_not_configured")),
+    };
+    let config = engine.config().clone();
     match crate::vector_db::storage::IndexManager::new(&workspace_path, config) {
         Ok(manager) => Ok(api_success!(manager.get_status_with_size_bytes())),
         Err(e) => {
@@ -41,9 +45,9 @@ pub async fn delete_workspace_index(
     let root = PathBuf::from(&path);
     let index_dir = root.join(".opencodex").join("index");
 
-    state
-        .current_search_engine()
-        .invalidate_workspace_index(&root);
+    if let Some(engine) = state.current_search_engine() {
+        engine.invalidate_workspace_index(&root);
+    }
 
     if index_dir.exists() {
         let dir = index_dir.clone();

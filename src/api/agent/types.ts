@@ -6,9 +6,6 @@
 
 import type { TaskEvent } from '@/types'
 
-// Re-export domain types used by this module
-export type { ChatMode } from '@/types/domain/ai'
-
 /**
  * Task execution parameters
  */

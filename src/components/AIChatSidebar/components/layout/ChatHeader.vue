@@ -10,7 +10,6 @@
   interface Props {
     sessions: SessionRecord[]
     currentSessionId?: number | null
-    chatMode?: 'chat' | 'agent'
     isLoading?: boolean
   }
 

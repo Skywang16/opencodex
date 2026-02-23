@@ -259,6 +259,7 @@ pub fn initialize_app_states<R: tauri::Runtime>(app: &tauri::App<R>) -> SetupRes
             }
             Err(e) => {
                 warn!("Failed to initialize vector DB: {}", e);
+                app.manage(VectorDbState::empty());
                 None
             }
         }

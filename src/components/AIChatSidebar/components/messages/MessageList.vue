@@ -20,7 +20,6 @@
   interface Props {
     messages: Message[]
     isLoading?: boolean
-    chatMode?: string
     sessionId?: number | null
     workspacePath?: string
   }
