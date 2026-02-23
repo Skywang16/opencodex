@@ -1,5 +1,7 @@
 <script setup lang="ts">
-  import { SLASH_COMMANDS, SLASH_COMMAND_ICONS, type SlashCommand } from '@/types/slashCommand'
+  import { agentApi, type SkillSummary } from '@/api/agent'
+  import { useWorkspaceStore } from '@/stores/workspace'
+  import { createSlashCommands, SLASH_COMMAND_ICONS, type SlashCommand } from '@/types/slashCommand'
   import { computed, nextTick, onMounted, ref, watch } from 'vue'
   import { useI18n } from 'vue-i18n'
   import McpServerList from './McpServerList.vue'
@@ -11,21 +13,25 @@
 
   const emit = defineEmits<Emits>()
   const { t } = useI18n()
+  const workspaceStore = useWorkspaceStore()
 
   const searchQuery = ref('')
   const searchInput = ref<HTMLInputElement>()
   const selectedIndex = ref(0)
   const showMcpList = ref(false)
+  const skillCommands = ref<SlashCommand[]>([])
 
-  const allCommands = computed(() => SLASH_COMMANDS)
+  const builtinCommands = computed(() => createSlashCommands(t))
+
+  const allCommands = computed(() => [...builtinCommands.value, ...skillCommands.value])
 
   const filteredCommands = computed(() => {
     if (!searchQuery.value) return allCommands.value
     const query = searchQuery.value.toLowerCase()
     return allCommands.value.filter(
       cmd =>
-        t(cmd.labelKey).toLowerCase().includes(query) ||
-        (cmd.descriptionKey && t(cmd.descriptionKey).toLowerCase().includes(query)) ||
+        cmd.label.toLowerCase().includes(query) ||
+        (cmd.description && cmd.description.toLowerCase().includes(query)) ||
         cmd.id.toLowerCase().includes(query)
     )
   })
@@ -106,9 +112,29 @@
 
   const getIcon = (iconName: string) => SLASH_COMMAND_ICONS[iconName] || ''
 
+  const skillToCommand = (skill: SkillSummary): SlashCommand => ({
+    id: `skill:${skill.name}`,
+    icon: 'skill',
+    label: skill.name,
+    description: skill.description,
+    group: 'Skills',
+    badge: skill.source === 'global' ? t('skills_page.global') : t('skills_page.workspace'),
+    type: 'template',
+  })
+
+  const loadSkills = async () => {
+    try {
+      const skills = await agentApi.listSkills(workspaceStore.currentWorkspacePath || '')
+      skillCommands.value = skills.map(skillToCommand)
+    } catch {
+      skillCommands.value = []
+    }
+  }
+
   onMounted(async () => {
     await nextTick()
     searchInput.value?.focus()
+    await loadSkills()
   })
 
   defineExpose({
@@ -146,10 +172,10 @@
           >
             <span class="command-icon" v-html="getIcon(command.icon)" />
             <span class="command-content">
-              <span class="command-label">{{ t(command.labelKey) }}</span>
-              <span v-if="command.descriptionKey" class="command-description">{{ t(command.descriptionKey) }}</span>
+              <span class="command-label">{{ command.label }}</span>
+              <span v-if="command.description" class="command-description">{{ command.description }}</span>
             </span>
-            <span v-if="command.badgeKey" class="command-badge">{{ t(command.badgeKey) }}</span>
+            <span v-if="command.badge" class="command-badge">{{ command.badge }}</span>
           </button>
         </template>
 

@@ -10,7 +10,8 @@
     initial: string
     /** 'installed' shows source badge, 'discover' shows install button */
     variant: 'installed' | 'discover'
-    source?: 'global' | 'workspace'
+    /** Badge text for installed skills (e.g. "Global", workspace dir name) */
+    source?: string
   }>()
 
   defineEmits<{
@@ -30,7 +31,7 @@
         <p class="skill-desc">{{ description }}</p>
       </div>
       <span v-if="variant === 'installed' && source" class="skill-source-badge">
-        {{ source === 'global' ? t('skills_page.global') : t('skills_page.workspace') }}
+        {{ source }}
       </span>
       <div v-if="variant === 'discover'" class="skill-actions">
         <button class="quick-install-btn" :title="t('skills_page.install')" @click.stop="$emit('quick-install')">

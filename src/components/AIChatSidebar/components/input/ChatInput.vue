@@ -9,7 +9,7 @@
   import { useTerminalSelection } from '@/composables/useTerminalSelection'
   import { useTerminalStore } from '@/stores/Terminal'
   import { useWorkspaceStore } from '@/stores/workspace'
-  import { SLASH_COMMANDS, SLASH_COMMAND_ICONS, type SlashCommand } from '@/types/slashCommand'
+  import { createSlashCommands, SLASH_COMMAND_ICONS, type SlashCommand } from '@/types/slashCommand'
   import { createMessage } from '@/ui/composables/message-api'
   import { getImageFromClipboard, processImageFile, validateImageFile } from '@/utils/imageUtils'
   import { homeDir } from '@tauri-apps/api/path'
@@ -158,7 +158,7 @@
       const match = value.match(/^(\/|／)([a-zA-Z0-9-]+)\b\s*/i)
       if (match) {
         const id = match[2].toLowerCase()
-        const cmd = SLASH_COMMANDS.find(c => c.id === id)
+        const cmd = createSlashCommands(t).find(c => c.id === id)
         if (cmd) {
           selectedCommand.value = cmd
           inputValue.value = value.slice(match[0].length)
@@ -564,7 +564,7 @@
 
     <div v-if="selectedCommand" class="command-tag">
       <span class="command-icon" v-html="getIcon(selectedCommand.icon)" />
-      <span class="command-label">{{ t(selectedCommand.labelKey) }}</span>
+      <span class="command-label">{{ selectedCommand.label }}</span>
       <button class="command-remove" @click="removeCommand">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="18" y1="6" x2="6" y2="18" />

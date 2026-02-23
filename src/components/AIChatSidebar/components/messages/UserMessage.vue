@@ -1,6 +1,6 @@
 <script setup lang="ts">
   import { useImageLightboxStore } from '@/stores/imageLightbox'
-  import { SLASH_COMMANDS, SLASH_COMMAND_ICONS } from '@/types/slashCommand'
+  import { createSlashCommands, SLASH_COMMAND_ICONS } from '@/types/slashCommand'
   import type { CheckpointSummary, Message } from '@/types'
   import { computed } from 'vue'
   import { useI18n } from 'vue-i18n'
@@ -47,11 +47,11 @@
   const commandInfo = computed(() => {
     const id = parsedContent.value.commandId
     if (!id) return null
-    const cmd = SLASH_COMMANDS.find(c => c.id === id)
+    const cmd = createSlashCommands(t).find(c => c.id === id)
     if (!cmd) return { id, label: `/${id}`, icon: '' }
     return {
       id,
-      label: t(cmd.labelKey),
+      label: cmd.label,
       icon: SLASH_COMMAND_ICONS[cmd.icon] || '',
     }
   })

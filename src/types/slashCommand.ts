@@ -1,10 +1,10 @@
 export interface SlashCommand {
   id: string
   icon: string
-  labelKey: string
-  descriptionKey?: string
+  label: string
+  description?: string
   group?: string
-  badgeKey?: string
+  badge?: string
   type: 'template' | 'action'
 }
 
@@ -15,45 +15,48 @@ export const SLASH_COMMAND_ICONS: Record<string, string> = {
   plan: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 12h6"/><path d="M9 16h6"/></svg>`,
   wand: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8 19 13"/><path d="M15 9h.01"/><path d="M17.8 6.2 19 5"/><path d="m3 21 9-9"/><path d="M12.2 6.2 11 5"/></svg>`,
   download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
+  skill: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/></svg>`,
 }
 
-export const SLASH_COMMANDS: SlashCommand[] = [
+type TranslateFn = (key: string) => string
+
+export const createSlashCommands = (t: TranslateFn): SlashCommand[] => [
   {
     id: 'code-review',
     icon: 'sparkles',
-    labelKey: 'slash_commands.code_review',
+    label: t('slash_commands.code_review'),
     type: 'template',
   },
   {
     id: 'mcp',
     icon: 'mcp',
-    labelKey: 'slash_commands.mcp',
-    descriptionKey: 'slash_commands.mcp_description',
+    label: t('slash_commands.mcp'),
+    description: t('slash_commands.mcp_description'),
     type: 'action',
   },
   {
     id: 'plan-mode',
     icon: 'plan',
-    labelKey: 'slash_commands.plan_mode',
-    descriptionKey: 'slash_commands.plan_mode_description',
+    label: t('slash_commands.plan_mode'),
+    description: t('slash_commands.plan_mode_description'),
     type: 'action',
   },
   {
     id: 'skill-creator',
     icon: 'wand',
-    labelKey: 'slash_commands.skill_creator',
-    descriptionKey: 'slash_commands.skill_creator_description',
+    label: t('slash_commands.skill_creator'),
+    description: t('slash_commands.skill_creator_description'),
     group: 'Skills',
-    badgeKey: 'slash_commands.badge_system',
+    badge: t('slash_commands.badge_system'),
     type: 'template',
   },
   {
     id: 'skill-installer',
     icon: 'download',
-    labelKey: 'slash_commands.skill_installer',
-    descriptionKey: 'slash_commands.skill_installer_description',
+    label: t('slash_commands.skill_installer'),
+    description: t('slash_commands.skill_installer_description'),
     group: 'Skills',
-    badgeKey: 'slash_commands.badge_system',
+    badge: t('slash_commands.badge_system'),
     type: 'action',
   },
 ]

@@ -32,10 +32,39 @@ pub async fn file_handle_open(path: String) -> TauriApiResult<String> {
     }
 }
 
+#[tauri::command]
+pub async fn open_in_editor(path: String) -> TauriApiResult<()> {
+    let path_buf = PathBuf::from(&path);
+    if !path_buf.exists() {
+        warn!("Path does not exist: {}", path);
+        return Ok(api_error!("common.not_found"));
+    }
+
+    // Detect system default code editor via file extension association
+    let extensions = ["rs", "ts", "js", "py", "md", "txt"];
+    for ext in &extensions {
+        if let Some(editor) = open_in_editor::Editor::new_for_file_extension(ext) {
+            if editor.open_paths([&path_buf]).is_ok() {
+                return Ok(api_success!(()));
+            }
+        }
+    }
+
+    // Fallback: open with system default handler
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(&path).spawn();
+    }
+
+    Ok(api_success!(()))
+}
+
 pub fn register_all_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder.invoke_handler(tauri::generate_handler![
         // File drag and drop command
         file_handle_open,
+        // Open directory in editor
+        open_in_editor,
         // Workspace management commands (from workspace module)
         crate::workspace::commands::workspace_get_recent,
         crate::workspace::commands::workspace_add_recent,

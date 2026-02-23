@@ -3,6 +3,7 @@
   import { useWorkspaceStore } from '@/stores/workspace'
   import { XButton, XModal } from '@/ui'
   import { renderMarkdown } from '@/utils/markdown'
+  import { invoke } from '@tauri-apps/api/core'
   import { appDataDir } from '@tauri-apps/api/path'
   import { mkdir, readTextFile, remove, writeTextFile } from '@tauri-apps/plugin-fs'
   import { openUrl } from '@tauri-apps/plugin-opener'
@@ -121,6 +122,11 @@
     openUrl(url).catch(err => console.warn('Failed to open:', err))
   }
 
+  const openSkillDir = () => {
+    const dir = props.installedSkill?.skillDir
+    if (dir) invoke('open_in_editor', { path: dir }).catch(err => console.warn('Failed to open in editor:', err))
+  }
+
   const installSkill = async (target: 'global' | 'workspace') => {
     const skill = props.discoverSkill
     if (!skill) return
@@ -225,7 +231,7 @@
           </XButton>
         </div>
         <div class="dialog-footer-right">
-          <XButton variant="secondary" size="medium" @click="openExternal(installedSkill.skillDir)">
+          <XButton variant="secondary" size="medium" @click="openSkillDir">
             <template #icon>
               <svg
                 viewBox="0 0 24 24"

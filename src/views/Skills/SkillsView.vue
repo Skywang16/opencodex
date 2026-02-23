@@ -3,7 +3,7 @@
   import { useWorkspaceStore } from '@/stores/workspace'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
-  import { computed, onMounted, ref } from 'vue'
+  import { computed, onMounted, ref, watch } from 'vue'
   import { useI18n } from 'vue-i18n'
   import SkillCard from './SkillCard.vue'
   import SkillDetailDialog from './SkillDetailDialog.vue'
@@ -23,8 +23,13 @@
     tags: string[]
   }
 
+  // ============ Types ============
+  interface InstalledSkill extends SkillSummary {
+    badge: string
+  }
+
   // ============ State ============
-  const installedSkills = ref<SkillSummary[]>([])
+  const installedSkills = ref<InstalledSkill[]>([])
   const installedLoading = ref(false)
   const discoverSkills = ref<DiscoverSkill[]>([])
   const discoverLoading = ref(false)
@@ -32,7 +37,7 @@
 
   // Dialog
   const selectedDiscover = ref<DiscoverSkill | null>(null)
-  const selectedInstalled = ref<SkillSummary | null>(null)
+  const selectedInstalled = ref<InstalledSkill | null>(null)
 
   // ============ Computed ============
   const filteredDiscoverSkills = computed(() => {
@@ -46,11 +51,40 @@
     )
   })
 
+  const wsDirName = (path: string) => path.split('/').filter(Boolean).pop() || path
+
   // ============ Data Loading ============
   const loadInstalledSkills = async () => {
     installedLoading.value = true
     try {
-      installedSkills.value = await agentApi.listSkills(workspaceStore.currentWorkspacePath || '')
+      const seen = new Map<string, InstalledSkill>()
+      const globalLabel = t('skills_page.global')
+
+      const addSkills = (skills: SkillSummary[], wsPath: string) => {
+        const wsLabel = wsDirName(wsPath)
+        for (const s of skills) {
+          const key = `${s.source}:${s.skillDir}`
+          if (!seen.has(key)) {
+            seen.set(key, { ...s, badge: s.source === 'global' ? globalLabel : wsLabel })
+          }
+        }
+      }
+
+      // Load global + current workspace skills
+      const currentPath = workspaceStore.currentWorkspacePath || ''
+      addSkills(await agentApi.listSkills(currentPath), currentPath)
+
+      // Load skills from all other workspaces
+      for (const ws of workspaceStore.workspaces) {
+        if (ws.path === currentPath) continue
+        try {
+          addSkills(await agentApi.listSkills(ws.path), ws.path)
+        } catch {
+          // skip unreachable workspaces
+        }
+      }
+
+      installedSkills.value = Array.from(seen.values())
     } catch (error) {
       console.warn('Failed to load installed skills:', error)
       installedSkills.value = []
@@ -125,6 +159,11 @@
     await loadInstalledSkills()
     await loadDiscoverSkills()
   })
+
+  watch(
+    () => workspaceStore.currentWorkspacePath,
+    () => loadInstalledSkills()
+  )
 </script>
 
 <template>
@@ -188,7 +227,7 @@
               :description="skill.description"
               :color="getIcon(skill.name).color"
               :initial="getIcon(skill.name).initial"
-              :source="skill.source"
+              :source="skill.badge"
               @click="selectedInstalled = skill"
             />
           </div>

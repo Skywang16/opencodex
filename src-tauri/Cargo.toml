@@ -152,6 +152,7 @@ hf-hub = "0.3"
 notify = "6.1"
 debounce = "0.2"
 diffy = "0.3"
+open_in_editor = "0.2.1"
 
 [dev-dependencies]
 tempfile = "3.8"
