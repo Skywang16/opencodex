@@ -1,10 +1,11 @@
-use crate::api_success;
 use crate::settings::types::{EffectiveSettings, Settings};
 use crate::settings::SettingsManager;
-use crate::utils::{ApiResponse, TauriApiResult};
+use crate::utils::TauriApiResult;
+use crate::{api_error, api_success};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::State;
+use tracing::warn;
 
 #[tauri::command]
 pub async fn get_global_settings(
@@ -12,7 +13,10 @@ pub async fn get_global_settings(
 ) -> TauriApiResult<Settings> {
     match state.get_global_settings().await {
         Ok(settings) => Ok(api_success!(settings)),
-        Err(e) => Ok(ApiResponse::error(e.to_string())),
+        Err(e) => {
+            warn!("Failed to get global settings: {}", e);
+            Ok(api_error!("settings.get_failed"))
+        }
     }
 }
 
@@ -23,7 +27,10 @@ pub async fn update_global_settings(
 ) -> TauriApiResult<crate::utils::EmptyData> {
     match state.update_global_settings(&settings).await {
         Ok(_) => Ok(api_success!()),
-        Err(e) => Ok(ApiResponse::error(e.to_string())),
+        Err(e) => {
+            warn!("Failed to update global settings: {}", e);
+            Ok(api_error!("settings.update_failed"))
+        }
     }
 }
 
@@ -37,7 +44,10 @@ pub async fn get_workspace_settings(
         .await
     {
         Ok(settings) => Ok(api_success!(settings)),
-        Err(e) => Ok(ApiResponse::error(e.to_string())),
+        Err(e) => {
+            warn!("Failed to get workspace settings: {}", e);
+            Ok(api_error!("settings.get_failed"))
+        }
     }
 }
 
@@ -52,7 +62,10 @@ pub async fn update_workspace_settings(
         .await
     {
         Ok(_) => Ok(api_success!()),
-        Err(e) => Ok(ApiResponse::error(e.to_string())),
+        Err(e) => {
+            warn!("Failed to update workspace settings: {}", e);
+            Ok(api_error!("settings.update_failed"))
+        }
     }
 }
 
@@ -64,6 +77,9 @@ pub async fn get_effective_settings(
     let workspace = workspace.map(PathBuf::from);
     match state.get_effective_settings(workspace).await {
         Ok(settings) => Ok(api_success!(settings)),
-        Err(e) => Ok(ApiResponse::error(e.to_string())),
+        Err(e) => {
+            warn!("Failed to get effective settings: {}", e);
+            Ok(api_error!("settings.get_failed"))
+        }
     }
 }

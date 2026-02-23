@@ -40,7 +40,10 @@ pub async fn terminal_config_get(
             let terminal_config = config.terminal.clone();
             Ok(api_success!(terminal_config))
         }
-        Err(_) => Ok(api_error!("config.get_failed")),
+        Err(e) => {
+            warn!("Failed to get terminal config: {}", e);
+            Ok(api_error!("config.get_failed"))
+        }
     }
 }
 
@@ -59,7 +62,10 @@ pub async fn terminal_config_set(
 
     match result {
         Ok(_) => Ok(api_success!()),
-        Err(_) => Ok(api_error!("config.update_failed")),
+        Err(e) => {
+            warn!("Failed to set terminal config: {}", e);
+            Ok(api_error!("config.update_failed"))
+        }
     }
 }
 
@@ -70,7 +76,10 @@ pub async fn terminal_config_validate(
 ) -> TauriApiResult<TerminalConfigValidationResult> {
     let config = match state.config_get().await {
         Ok(c) => c,
-        Err(_) => return Ok(api_error!("config.get_failed")),
+        Err(e) => {
+            warn!("Failed to get config for validation: {}", e);
+            return Ok(api_error!("config.get_failed"));
+        }
     };
     let terminal_config = &config.terminal;
 
@@ -136,6 +145,9 @@ pub async fn terminal_config_reset_to_defaults(
 
     match result {
         Ok(_) => Ok(api_success!()),
-        Err(_) => Ok(api_error!("config.reset_failed")),
+        Err(e) => {
+            warn!("Failed to reset terminal config to defaults: {}", e);
+            Ok(api_error!("config.reset_failed"))
+        }
     }
 }

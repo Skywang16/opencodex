@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use tauri::{AppHandle, Runtime, State};
+use tracing::warn;
 
 use crate::utils::TauriApiResult;
 use crate::{api_error, api_success};
@@ -18,10 +19,19 @@ pub async fn file_watcher_start<R: Runtime>(
         return Ok(api_error!("common.invalid_path"));
     }
 
+    let path_buf = std::path::PathBuf::from(&path);
+    if !path_buf.exists() {
+        warn!("File watcher path does not exist: {}", path);
+        return Ok(api_error!("common.not_found"));
+    }
+
     let cfg = config.unwrap_or_default();
     match watcher.start(app_handle, path, cfg).await {
         Ok(status) => Ok(api_success!(status)),
-        Err(e) => Ok(api_error!(e.as_str())),
+        Err(e) => {
+            warn!("File watcher start failed: {}", e);
+            Ok(api_error!("file_watcher.start_failed"))
+        }
     }
 }
 

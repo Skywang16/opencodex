@@ -124,7 +124,13 @@ pub async fn shell_pane_setup_integration(
     // Actual Shell Integration setup
     match mux.setup_pane_integration_with_script(pane_id, silent) {
         Ok(_) => Ok(api_success!()),
-        Err(_) => Ok(api_error!("shell.setup_integration_failed")),
+        Err(e) => {
+            error!(
+                "Failed to setup shell integration for pane {}: {}",
+                pane_id, e
+            );
+            Ok(api_error!("shell.setup_integration_failed"))
+        }
     }
 }
 

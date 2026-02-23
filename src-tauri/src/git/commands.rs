@@ -1,13 +1,17 @@
 use crate::git::GitService;
 use crate::utils::{ApiResponse, EmptyData, TauriApiResult};
 use crate::{api_error, api_success};
+use tracing::warn;
 
 fn map_git_error<T>(e: crate::git::GitError) -> ApiResponse<T> {
     match e.code {
         crate::git::GitErrorCode::GitNotInstalled
         | crate::git::GitErrorCode::NotARepository
         | crate::git::GitErrorCode::ParseError => api_error!(e.message.as_str()),
-        _ => ApiResponse::error(e.message),
+        _ => {
+            warn!("Git operation failed [{:?}]: {}", e.code, e.message);
+            api_error!("git.command_failed")
+        }
     }
 }
 
@@ -15,10 +19,7 @@ fn map_git_error<T>(e: crate::git::GitError) -> ApiResponse<T> {
 pub async fn git_check_repository(path: String) -> TauriApiResult<Option<String>> {
     match GitService::is_repository(&path).await {
         Ok(root) => Ok(api_success!(root)),
-        Err(e) => match e.code {
-            crate::git::GitErrorCode::GitNotInstalled => Ok(api_error!(e.message.as_str())),
-            _ => Ok(ApiResponse::error(e.message)),
-        },
+        Err(e) => Ok(map_git_error(e)),
     }
 }
 
@@ -26,11 +27,7 @@ pub async fn git_check_repository(path: String) -> TauriApiResult<Option<String>
 pub async fn git_get_status(path: String) -> TauriApiResult<crate::git::RepositoryStatus> {
     match GitService::get_status(&path).await {
         Ok(status) => Ok(api_success!(status)),
-        Err(e) => match e.code {
-            crate::git::GitErrorCode::GitNotInstalled => Ok(api_error!(e.message.as_str())),
-            crate::git::GitErrorCode::ParseError => Ok(api_error!(e.message.as_str())),
-            _ => Ok(ApiResponse::error(e.message)),
-        },
+        Err(e) => Ok(map_git_error(e)),
     }
 }
 
@@ -38,11 +35,7 @@ pub async fn git_get_status(path: String) -> TauriApiResult<crate::git::Reposito
 pub async fn git_get_branches(path: String) -> TauriApiResult<Vec<crate::git::BranchInfo>> {
     match GitService::get_branches(&path).await {
         Ok(branches) => Ok(api_success!(branches)),
-        Err(e) => match e.code {
-            crate::git::GitErrorCode::GitNotInstalled => Ok(api_error!(e.message.as_str())),
-            crate::git::GitErrorCode::NotARepository => Ok(api_error!(e.message.as_str())),
-            _ => Ok(ApiResponse::error(e.message)),
-        },
+        Err(e) => Ok(map_git_error(e)),
     }
 }
 
@@ -56,11 +49,7 @@ pub async fn git_get_commits(
     let skip = skip.unwrap_or(0);
     match GitService::get_commits(&path, limit, skip).await {
         Ok(commits) => Ok(api_success!(commits)),
-        Err(e) => match e.code {
-            crate::git::GitErrorCode::GitNotInstalled => Ok(api_error!(e.message.as_str())),
-            crate::git::GitErrorCode::NotARepository => Ok(api_error!(e.message.as_str())),
-            _ => Ok(ApiResponse::error(e.message)),
-        },
+        Err(e) => Ok(map_git_error(e)),
     }
 }
 
@@ -71,11 +60,7 @@ pub async fn git_get_commit_files(
 ) -> TauriApiResult<Vec<crate::git::CommitFileChange>> {
     match GitService::get_commit_files(&path, &commit_hash).await {
         Ok(files) => Ok(api_success!(files)),
-        Err(e) => match e.code {
-            crate::git::GitErrorCode::GitNotInstalled => Ok(api_error!(e.message.as_str())),
-            crate::git::GitErrorCode::NotARepository => Ok(api_error!(e.message.as_str())),
-            _ => Ok(ApiResponse::error(e.message)),
-        },
+        Err(e) => Ok(map_git_error(e)),
     }
 }
 
@@ -93,11 +78,7 @@ pub async fn git_get_diff(
 
     match result {
         Ok(diff) => Ok(api_success!(diff)),
-        Err(e) => match e.code {
-            crate::git::GitErrorCode::GitNotInstalled => Ok(api_error!(e.message.as_str())),
-            crate::git::GitErrorCode::NotARepository => Ok(api_error!(e.message.as_str())),
-            _ => Ok(ApiResponse::error(e.message)),
-        },
+        Err(e) => Ok(map_git_error(e)),
     }
 }
 

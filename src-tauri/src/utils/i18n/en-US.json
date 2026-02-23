@@ -29,7 +29,7 @@
   },
   "common": {
     "invalid_params": "Invalid parameters",
-    "not_found": "Resource not found",
+    "not_found": "Target path does not exist",
     "invalid_id": "Invalid ID",
     "empty_content": "Content cannot be empty",
     "path_empty": "Path cannot be empty",
@@ -55,7 +55,7 @@
   "completion": {
     "get_failed": "Failed to get completion suggestions",
     "init_failed": "Failed to initialize completion engine",
-    "engine_not_initialized": "Completion engine not initialized",
+    "engine_not_initialized": "Completion feature not ready",
     "stats_failed": "Failed to get completion statistics",
     "clear_cache_failed": "Failed to clear completion cache"
   },
@@ -71,7 +71,7 @@
     "update_failed": "Failed to update configuration",
     "validate_failed": "Failed to validate configuration",
     "reset_failed": "Failed to reset configuration",
-    "get_folder_path_failed": "Failed to get configuration folder",
+    "get_folder_path_failed": "Config directory does not exist",
     "open_folder_failed": "Failed to open configuration folder"
   },
   "agent": {
@@ -94,18 +94,65 @@
     "list_failed": "Failed to list tasks",
     "pause_failed": "Failed to pause task",
     "switch_failed": "Failed to switch agent",
+    "terminal_manager_not_initialized": "Agent terminal not ready",
     "tool_confirm_not_found": "Tool confirmation request not found",
     "unknown_agent_type": "Unknown agent type",
+    "validate_skill_failed": "Failed to validate skill format",
     "ui": {
       "conversations_failed": "Failed to load conversations",
       "messages_failed": "Failed to load messages"
     }
   },
+  "checkpoint": {
+    "list_failed": "Failed to list checkpoints",
+    "not_found": "Checkpoint not found",
+    "rollback_failed": "Failed to rollback checkpoint",
+    "diff_failed": "Failed to compute checkpoint diff",
+    "get_content_failed": "Failed to get checkpoint file content"
+  },
   "llm": {
-    "call_failed": "LLM call failed",
-    "stream_failed": "Stream call failed",
+    "call_failed": "AI model call failed",
+    "stream_failed": "AI model response failed",
     "get_models_failed": "Failed to get model list",
-    "test_connection_failed": "Failed to test model connection"
+    "test_connection_failed": "Failed to test model connection",
+    "refresh_models_failed": "Failed to refresh model list"
+  },
+  "node": {
+    "list_versions_failed": "Failed to list Node.js versions",
+    "unknown_version_manager": "Unknown version manager"
+  },
+  "preferences": {
+    "batch_get_failed": "Failed to get preferences",
+    "set_failed": "Failed to save preference"
+  },
+  "workspace": {
+    "get_failed": "Failed to get workspace",
+    "sessions_failed": "Failed to list sessions",
+    "messages_failed": "Failed to get messages",
+    "active_session_failed": "Failed to get active session",
+    "create_session_failed": "Failed to create session",
+    "set_active_session_failed": "Failed to set active session",
+    "clear_active_session_failed": "Failed to clear active session",
+    "delete_session_failed": "Failed to delete session",
+    "session_not_found": "Session not found",
+    "trim_session_failed": "Failed to trim session messages",
+    "recent": {
+      "get_failed": "Failed to get recent workspaces",
+      "add_failed": "Failed to add recent workspace",
+      "remove_failed": "Failed to remove recent workspace",
+      "maintain_failed": "Failed to clean up workspace records"
+    },
+    "rules": {
+      "load_failed": "Failed to load project rules",
+      "save_failed": "Failed to save project rules"
+    },
+    "run_actions": {
+      "list_failed": "Failed to list run actions",
+      "create_failed": "Failed to create run action",
+      "update_failed": "Failed to update run action",
+      "delete_failed": "Failed to delete run action",
+      "set_selected_failed": "Failed to set selected run action"
+    }
   },
   "shell": {
     "pane_not_exist": "Terminal pane does not exist",
@@ -148,9 +195,9 @@
   "window": {
     "get_current_directory_failed": "Failed to get current directory",
     "get_home_directory_failed": "Failed to get home directory",
-    "get_instance_failed": "Failed to get window instance",
+    "get_instance_failed": "Window unavailable",
     "get_platform_info_failed": "Failed to get platform information",
-    "get_window_id_failed": "Failed to get window identifier",
+    "get_window_id_failed": "Window initialization failed",
     "get_state_failed": "Failed to get window state",
     "missing_always_on_top_param": "Missing always-on-top parameter",
     "set_always_on_top_failed": "Failed to set always-on-top state",
@@ -167,10 +214,17 @@
     "index_not_found": "Index not ready, please build index first or enable auto-rebuild",
     "delete_failed": "Failed to delete index"
   },
+  "file_watcher": {
+    "start_failed": "Failed to start file watcher"
+  },
   "storage": {
     "get_config_failed": "Failed to get configuration",
     "update_config_failed": "Failed to update configuration",
     "save_session_failed": "Failed to save session state"
+  },
+  "settings": {
+    "get_failed": "Failed to get settings",
+    "update_failed": "Failed to update settings"
   },
   "vector_db": {
     "index_failed": "Failed to index files",

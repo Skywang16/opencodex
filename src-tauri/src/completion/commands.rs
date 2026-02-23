@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use tauri::State;
+use tracing::warn;
 
 pub struct CompletionState {
     engine: OnceLock<Arc<CompletionEngine>>,
@@ -81,7 +82,10 @@ pub async fn completion_get(
 
             Ok(api_success!(response))
         }
-        Err(_) => Ok(api_error!("completion.get_failed")),
+        Err(e) => {
+            warn!("Failed to get completions: {}", e);
+            Ok(api_error!("completion.get_failed"))
+        }
     }
 }
 
@@ -107,9 +111,15 @@ pub async fn completion_init_engine(
     {
         Ok(engine) => match state.set_engine(Arc::new(engine)) {
             Ok(_) => Ok(api_success!()),
-            Err(_) => Ok(api_error!("completion.init_failed")),
+            Err(e) => {
+                warn!("Failed to set completion engine: {}", e);
+                Ok(api_error!("completion.init_failed"))
+            }
         },
-        Err(_) => Ok(api_error!("completion.init_failed")),
+        Err(e) => {
+            warn!("Failed to create completion engine: {}", e);
+            Ok(api_error!("completion.init_failed"))
+        }
     }
 }
 
@@ -125,7 +135,10 @@ pub async fn completion_clear_cache(
 
     match engine.clear_cached_results().await {
         Ok(_) => Ok(api_success!()),
-        Err(_) => Ok(api_error!("completion.clear_cache_failed")),
+        Err(e) => {
+            warn!("Failed to clear completion cache: {}", e);
+            Ok(api_error!("completion.clear_cache_failed"))
+        }
     }
 }
 
@@ -149,6 +162,9 @@ pub async fn completion_get_stats(
         Ok(stats) => Ok(api_success!(CompletionStats {
             provider_count: stats.provider_count,
         })),
-        Err(_) => Ok(api_error!("completion.stats_failed")),
+        Err(e) => {
+            warn!("Failed to get completion stats: {}", e);
+            Ok(api_error!("completion.stats_failed"))
+        }
     }
 }

@@ -29,7 +29,7 @@
   },
   "common": {
     "invalid_params": "参数无效",
-    "not_found": "资源不存在",
+    "not_found": "目标路径不存在",
     "invalid_id": "无效的ID",
     "empty_content": "内容不能为空",
     "path_empty": "路径不能为空",
@@ -55,8 +55,8 @@
   "completion": {
     "get_failed": "获取补全建议失败",
     "init_failed": "初始化补全引擎失败",
-    "engine_not_initialized": "补全引擎未初始化",
-    "stats_failed": "获取统计信息失败",
+    "engine_not_initialized": "补全功能尚未就绪",
+    "stats_failed": "获取补全统计信息失败",
     "clear_cache_failed": "清理补全缓存失败"
   },
   "git": {
@@ -71,7 +71,7 @@
     "update_failed": "更新配置失败",
     "validate_failed": "配置校验失败",
     "reset_failed": "重置配置失败",
-    "get_folder_path_failed": "获取配置目录失败",
+    "get_folder_path_failed": "配置目录不存在",
     "open_folder_failed": "打开配置目录失败"
   },
   "agent": {
@@ -94,18 +94,65 @@
     "list_failed": "获取任务列表失败",
     "pause_failed": "暂停任务失败",
     "switch_failed": "切换 Agent 失败",
+    "terminal_manager_not_initialized": "Agent 终端尚未就绪",
     "tool_confirm_not_found": "工具确认请求不存在",
     "unknown_agent_type": "未知 Agent 类型",
+    "validate_skill_failed": "验证 Skill 格式失败",
     "ui": {
       "conversations_failed": "获取会话列表失败",
       "messages_failed": "获取消息列表失败"
     }
   },
+  "checkpoint": {
+    "list_failed": "获取检查点列表失败",
+    "not_found": "检查点不存在",
+    "rollback_failed": "回滚检查点失败",
+    "diff_failed": "比较检查点差异失败",
+    "get_content_failed": "获取检查点文件内容失败"
+  },
   "llm": {
-    "call_failed": "LLM调用失败",
-    "stream_failed": "流式调用失败",
+    "call_failed": "AI 模型调用失败",
+    "stream_failed": "AI 模型响应失败",
     "get_models_failed": "获取模型列表失败",
-    "test_connection_failed": "测试模型连接失败"
+    "test_connection_failed": "测试模型连接失败",
+    "refresh_models_failed": "刷新模型列表失败"
+  },
+  "node": {
+    "list_versions_failed": "获取 Node.js 版本列表失败",
+    "unknown_version_manager": "未知的版本管理器"
+  },
+  "preferences": {
+    "batch_get_failed": "批量获取偏好设置失败",
+    "set_failed": "保存偏好设置失败"
+  },
+  "workspace": {
+    "get_failed": "获取工作区失败",
+    "sessions_failed": "获取会话列表失败",
+    "messages_failed": "获取消息列表失败",
+    "active_session_failed": "获取活跃会话失败",
+    "create_session_failed": "创建会话失败",
+    "set_active_session_failed": "设置活跃会话失败",
+    "clear_active_session_failed": "清除活跃会话失败",
+    "delete_session_failed": "删除会话失败",
+    "session_not_found": "会话不存在",
+    "trim_session_failed": "清理会话消息失败",
+    "recent": {
+      "get_failed": "获取最近工作区失败",
+      "add_failed": "添加最近工作区失败",
+      "remove_failed": "移除最近工作区失败",
+      "maintain_failed": "清理工作区记录失败"
+    },
+    "rules": {
+      "load_failed": "加载项目规则失败",
+      "save_failed": "保存项目规则失败"
+    },
+    "run_actions": {
+      "list_failed": "获取运行操作列表失败",
+      "create_failed": "创建运行操作失败",
+      "update_failed": "更新运行操作失败",
+      "delete_failed": "删除运行操作失败",
+      "set_selected_failed": "设置选中运行操作失败"
+    }
   },
   "shell": {
     "pane_not_exist": "终端面板不存在",
@@ -148,9 +195,9 @@
   "window": {
     "get_current_directory_failed": "获取当前目录失败",
     "get_home_directory_failed": "获取家目录失败",
-    "get_instance_failed": "获取窗口实例失败",
+    "get_instance_failed": "窗口不可用",
     "get_platform_info_failed": "获取平台信息失败",
-    "get_window_id_failed": "获取窗口标识失败",
+    "get_window_id_failed": "窗口初始化失败",
     "get_state_failed": "获取窗口状态失败",
     "missing_always_on_top_param": "缺少置顶参数",
     "set_always_on_top_failed": "设置置顶状态失败",
@@ -167,10 +214,17 @@
     "index_not_found": "索引未就绪，请先构建索引或启用自动重建",
     "delete_failed": "删除索引失败"
   },
+  "file_watcher": {
+    "start_failed": "启动文件监听失败"
+  },
   "storage": {
     "get_config_failed": "获取配置失败",
     "update_config_failed": "更新配置失败",
     "save_session_failed": "保存会话状态失败"
+  },
+  "settings": {
+    "get_failed": "获取设置失败",
+    "update_failed": "更新设置失败"
   },
   "vector_db": {
     "index_failed": "索引文件失败",

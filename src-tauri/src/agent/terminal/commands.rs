@@ -2,6 +2,7 @@ use crate::agent::terminal::AgentTerminal;
 use crate::agent::terminal::AgentTerminalManager;
 use crate::utils::{EmptyData, TauriApiResult};
 use crate::{api_error, api_success};
+use tracing::warn;
 
 #[tauri::command]
 pub async fn agent_terminal_list(session_id: Option<i64>) -> TauriApiResult<Vec<AgentTerminal>> {
@@ -20,7 +21,10 @@ pub async fn agent_terminal_abort(terminal_id: String) -> TauriApiResult<EmptyDa
     };
     match manager.abort_terminal(&terminal_id) {
         Ok(_) => Ok(api_success!()),
-        Err(_) => Ok(api_error!("common.operation_failed")),
+        Err(e) => {
+            warn!("Failed to abort agent terminal {}: {}", terminal_id, e);
+            Ok(api_error!("common.operation_failed"))
+        }
     }
 }
 
@@ -32,6 +36,9 @@ pub async fn agent_terminal_remove(terminal_id: String) -> TauriApiResult<EmptyD
     };
     match manager.remove_terminal(&terminal_id) {
         Ok(_) => Ok(api_success!()),
-        Err(_) => Ok(api_error!("common.operation_failed")),
+        Err(e) => {
+            warn!("Failed to remove agent terminal {}: {}", terminal_id, e);
+            Ok(api_error!("common.operation_failed"))
+        }
     }
 }

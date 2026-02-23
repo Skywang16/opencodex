@@ -5,12 +5,16 @@ use crate::utils::{EmptyData, TauriApiResult};
 use crate::{api_error, api_success};
 use std::sync::Arc;
 use tauri::{AppHandle, State};
+use tracing::warn;
 
 #[tauri::command]
 pub async fn config_get(state: State<'_, Arc<ConfigManager>>) -> TauriApiResult<AppConfig> {
     match state.config_get().await {
         Ok(config) => Ok(api_success!(config)),
-        Err(_) => Ok(api_error!("config.get_failed")),
+        Err(e) => {
+            warn!("Failed to get config: {}", e);
+            Ok(api_error!("config.get_failed"))
+        }
     }
 }
 
@@ -21,7 +25,10 @@ pub async fn config_set(
 ) -> TauriApiResult<EmptyData> {
     match state.config_set(new_config).await {
         Ok(_) => Ok(api_success!()),
-        Err(_) => Ok(api_error!("config.update_failed")),
+        Err(e) => {
+            warn!("Failed to set config: {}", e);
+            Ok(api_error!("config.update_failed"))
+        }
     }
 }
 
@@ -32,7 +39,10 @@ pub async fn config_reset_to_defaults(
     let default_config = create_default_config();
     match state.config_set(default_config).await {
         Ok(_) => Ok(api_success!()),
-        Err(_) => Ok(api_error!("config.reset_failed")),
+        Err(e) => {
+            warn!("Failed to reset config to defaults: {}", e);
+            Ok(api_error!("config.reset_failed"))
+        }
     }
 }
 

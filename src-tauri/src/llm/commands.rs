@@ -26,7 +26,10 @@ pub async fn llm_call(
 ) -> TauriApiResult<Message> {
     match state.service.call(request).await {
         Ok(response) => Ok(api_success!(response)),
-        Err(_) => Ok(api_error!("llm.call_failed")),
+        Err(e) => {
+            tracing::error!("LLM call failed: {}", e);
+            Ok(api_error!("llm.call_failed"))
+        }
     }
 }
 
@@ -40,7 +43,10 @@ pub async fn llm_call_stream(
     let token = CancellationToken::new();
     let mut stream = match state.service.call_stream(request, token).await {
         Ok(stream) => stream,
-        Err(_) => return Ok(api_error!("llm.stream_failed")),
+        Err(e) => {
+            tracing::error!("LLM stream call failed: {}", e);
+            return Ok(api_error!("llm.stream_failed"));
+        }
     };
 
     while let Some(chunk_result) = stream.next().await {
@@ -77,7 +83,10 @@ pub async fn llm_get_available_models(
 ) -> TauriApiResult<Vec<String>> {
     match state.service.get_available_models().await {
         Ok(models) => Ok(api_success!(models)),
-        Err(_) => Ok(api_error!("llm.get_models_failed")),
+        Err(e) => {
+            tracing::error!("Failed to get available models: {}", e);
+            Ok(api_error!("llm.get_models_failed"))
+        }
     }
 }
 
@@ -89,7 +98,10 @@ pub async fn llm_test_model_connection(
 ) -> TauriApiResult<bool> {
     match state.service.test_model_connection(&model_id).await {
         Ok(result) => Ok(api_success!(result)),
-        Err(_) => Ok(api_error!("llm.test_connection_failed")),
+        Err(e) => {
+            tracing::error!("Failed to test model connection: {}", e);
+            Ok(api_error!("llm.test_connection_failed"))
+        }
     }
 }
 

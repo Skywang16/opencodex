@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::State;
 use tokio::sync::Mutex;
+use tracing::warn;
 
 pub struct ShortcutManagerState {
     pub manager: Arc<Mutex<ShortcutManager>>,
@@ -38,7 +39,10 @@ pub async fn shortcuts_get_config(
     let manager = state.manager.lock().await;
     match manager.config_get().await {
         Ok(config) => Ok(api_success!(config)),
-        Err(_) => Ok(api_error!("shortcuts.get_failed")),
+        Err(e) => {
+            warn!("Failed to get shortcuts config: {}", e);
+            Ok(api_error!("shortcuts.get_failed"))
+        }
     }
 }
 
@@ -50,7 +54,10 @@ pub async fn shortcuts_update_config(
     let manager = state.manager.lock().await;
     match manager.config_update(config).await {
         Ok(_) => Ok(api_success!()),
-        Err(_) => Ok(api_error!("shortcuts.update_failed")),
+        Err(e) => {
+            warn!("Failed to update shortcuts config: {}", e);
+            Ok(api_error!("shortcuts.update_failed"))
+        }
     }
 }
 
@@ -62,7 +69,10 @@ pub async fn shortcuts_validate_config(
     let manager = state.manager.lock().await;
     match manager.config_validate(&config).await {
         Ok(result) => Ok(api_success!(result)),
-        Err(_) => Ok(api_error!("shortcuts.validate_failed")),
+        Err(e) => {
+            warn!("Failed to validate shortcuts config: {}", e);
+            Ok(api_error!("shortcuts.validate_failed"))
+        }
     }
 }
 
@@ -74,7 +84,10 @@ pub async fn shortcuts_detect_conflicts(
     let manager = state.manager.lock().await;
     match manager.detect_conflicts(&config).await {
         Ok(result) => Ok(api_success!(result)),
-        Err(_) => Ok(api_error!("shortcuts.detect_conflicts_failed")),
+        Err(e) => {
+            warn!("Failed to detect shortcut conflicts: {}", e);
+            Ok(api_error!("shortcuts.detect_conflicts_failed"))
+        }
     }
 }
 
@@ -86,7 +99,10 @@ pub async fn shortcuts_add(
     let manager = state.manager.lock().await;
     match manager.shortcuts_add(binding).await {
         Ok(_) => Ok(api_success!()),
-        Err(_) => Ok(api_error!("shortcuts.add_failed")),
+        Err(e) => {
+            warn!("Failed to add shortcut: {}", e);
+            Ok(api_error!("shortcuts.add_failed"))
+        }
     }
 }
 
@@ -98,7 +114,10 @@ pub async fn shortcuts_remove(
     let manager = state.manager.lock().await;
     match manager.shortcuts_remove(index).await {
         Ok(removed) => Ok(api_success!(removed)),
-        Err(_) => Ok(api_error!("shortcuts.remove_failed")),
+        Err(e) => {
+            warn!("Failed to remove shortcut: {}", e);
+            Ok(api_error!("shortcuts.remove_failed"))
+        }
     }
 }
 
@@ -111,7 +130,10 @@ pub async fn shortcuts_update(
     let manager = state.manager.lock().await;
     match manager.shortcuts_update(index, binding).await {
         Ok(_) => Ok(api_success!()),
-        Err(_) => Ok(api_error!("shortcuts.update_failed")),
+        Err(e) => {
+            warn!("Failed to update shortcut: {}", e);
+            Ok(api_error!("shortcuts.update_failed"))
+        }
     }
 }
 
@@ -122,7 +144,10 @@ pub async fn shortcuts_reset_to_defaults(
     let manager = state.manager.lock().await;
     match manager.reset_to_defaults().await {
         Ok(_) => Ok(api_success!()),
-        Err(_) => Ok(api_error!("shortcuts.reset_failed")),
+        Err(e) => {
+            warn!("Failed to reset shortcuts to defaults: {}", e);
+            Ok(api_error!("shortcuts.reset_failed"))
+        }
     }
 }
 
@@ -133,7 +158,10 @@ pub async fn shortcuts_get_statistics(
     let manager = state.manager.lock().await;
     match manager.get_statistics().await {
         Ok(stats) => Ok(api_success!(stats)),
-        Err(_) => Ok(api_error!("shortcuts.get_stats_failed")),
+        Err(e) => {
+            warn!("Failed to get shortcut statistics: {}", e);
+            Ok(api_error!("shortcuts.get_stats_failed"))
+        }
     }
 }
 

@@ -14,6 +14,7 @@ use crate::{api_error, api_success};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use tracing::warn;
 
 /// Theme configuration status
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,7 +38,10 @@ pub async fn theme_get_config_status(
 ) -> TauriApiResult<ThemeConfigStatus> {
     let config = match config_manager.config_get().await {
         Ok(config) => config,
-        Err(_) => return Ok(api_error!("config.get_failed")),
+        Err(e) => {
+            warn!("Failed to get config for theme status: {}", e);
+            return Ok(api_error!("config.get_failed"));
+        }
     };
 
     let theme_config = &config.appearance.theme_config;
@@ -60,7 +64,10 @@ pub async fn theme_get_current(
 ) -> TauriApiResult<Theme> {
     let config = match config_manager.config_get().await {
         Ok(config) => config,
-        Err(_) => return Ok(api_error!("config.get_failed")),
+        Err(e) => {
+            warn!("Failed to get config for current theme: {}", e);
+            return Ok(api_error!("config.get_failed"));
+        }
     };
 
     let theme_config = &config.appearance.theme_config;
@@ -71,7 +78,10 @@ pub async fn theme_get_current(
         .await
     {
         Ok(theme) => Ok(api_success!(theme)),
-        Err(_) => Ok(api_error!("config.get_failed")),
+        Err(e) => {
+            warn!("Failed to load current theme: {}", e);
+            Ok(api_error!("config.get_failed"))
+        }
     }
 }
 
@@ -89,20 +99,21 @@ pub async fn theme_set_terminal<R: Runtime>(
     }
 
     // Update configuration
-    if config_manager
+    if let Err(e) = config_manager
         .config_update(|config| {
             config.appearance.theme_config.terminal_theme = theme_name.clone();
             config.appearance.theme_config.follow_system = false; // Switch to manual mode
             Ok(())
         })
         .await
-        .is_err()
     {
+        warn!("Failed to update theme config: {}", e);
         return Ok(api_error!("config.update_failed"));
     }
 
     // Emit theme change event to ensure frontend responds immediately
-    if app_handle.emit("theme-changed", &theme_name).is_err() {
+    if let Err(e) = app_handle.emit("theme-changed", &theme_name) {
+        warn!("Failed to emit theme-changed event: {}", e);
         return Ok(api_error!("config.update_failed"));
     }
 
@@ -133,7 +144,7 @@ pub async fn theme_set_follow_system<R: Runtime>(
     }
 
     // Update configuration
-    if config_manager
+    if let Err(e) = config_manager
         .config_update(|config| {
             config.appearance.theme_config.follow_system = follow_system;
 
@@ -148,25 +159,26 @@ pub async fn theme_set_follow_system<R: Runtime>(
             Ok(())
         })
         .await
-        .is_err()
     {
+        warn!("Failed to update follow-system theme config: {}", e);
         return Ok(api_error!("config.update_failed"));
     }
 
     if follow_system {
         let config = match config_manager.config_get().await {
             Ok(config) => config,
-            Err(_) => return Ok(api_error!("config.get_failed")),
+            Err(e) => {
+                warn!("Failed to get config after follow-system update: {}", e);
+                return Ok(api_error!("config.get_failed"));
+            }
         };
         let is_system_dark = SystemThemeDetector::is_dark_mode();
         let current_theme_name =
             theme_service.get_current_theme_name(&config.appearance.theme_config, is_system_dark);
 
         // Emit theme change event
-        if app_handle
-            .emit("theme-changed", &current_theme_name)
-            .is_err()
-        {
+        if let Err(e) = app_handle.emit("theme-changed", &current_theme_name) {
+            warn!("Failed to emit theme-changed event: {}", e);
             return Ok(api_error!("config.update_failed"));
         }
     }
@@ -181,7 +193,10 @@ pub async fn theme_get_available(
 ) -> TauriApiResult<Vec<Theme>> {
     let theme_list = match theme_service.theme_manager().list_themes().await {
         Ok(list) => list,
-        Err(_) => return Ok(api_error!("config.get_failed")),
+        Err(e) => {
+            warn!("Failed to list available themes: {}", e);
+            return Ok(api_error!("config.get_failed"));
+        }
     };
 
     let mut themes = Vec::new();
