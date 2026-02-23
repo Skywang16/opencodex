@@ -7,7 +7,7 @@ import { useToolConfirmationDialogStore } from '@/stores/toolConfirmationDialog'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { ChatMode, RetryStatus } from '@/types'
 import { defineStore } from 'pinia'
-import { computed, ref, shallowRef } from 'vue'
+import { computed, ref } from 'vue'
 
 export interface QueuedMessage {
   id: string
@@ -36,78 +36,59 @@ export const useAIChatStore = defineStore('ai-chat', () => {
   const pendingCommandId = ref<string | null>(null)
 
   // Message queue: per-session, memory-only (no persistence)
-  const messageQueueMap = shallowRef<Map<number, QueuedMessage[]>>(new Map())
+  const messageQueueMap = ref<Map<number, QueuedMessage[]>>(new Map())
   const userCancelled = ref(false)
 
-  const currentSessionQueue = computed<QueuedMessage[]>(() => {
+  // 获取当前会话的消息队列，无会话返回 null
+  const getCurrentQueue = (): QueuedMessage[] | null => {
     const sid = currentSession.value?.id
-    if (sid == null) return []
-    return messageQueueMap.value.get(sid) ?? []
-  })
-
-  const _setQueue = (sessionId: number, queue: QueuedMessage[]) => {
-    const map = new Map(messageQueueMap.value)
-    if (queue.length === 0) {
-      map.delete(sessionId)
-    } else {
-      map.set(sessionId, queue)
+    if (sid == null) return null
+    let q = messageQueueMap.value.get(sid)
+    if (!q) {
+      q = []
+      messageQueueMap.value.set(sid, q)
     }
-    messageQueueMap.value = map
+    return q
   }
 
+  const currentSessionQueue = computed(() => getCurrentQueue() ?? [])
+
   const enqueueMessage = (content: string, images?: ImageAttachment[]) => {
-    const sid = currentSession.value?.id
-    if (sid == null) return
-    const queue = [...(messageQueueMap.value.get(sid) ?? [])]
-    queue.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, content, images })
-    _setQueue(sid, queue)
+    getCurrentQueue()?.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, content, images })
   }
 
   const removeQueuedMessage = (messageId: string) => {
-    const sid = currentSession.value?.id
-    if (sid == null) return
-    const queue = (messageQueueMap.value.get(sid) ?? []).filter(m => m.id !== messageId)
-    _setQueue(sid, queue)
+    const q = getCurrentQueue()
+    if (!q) return
+    const i = q.findIndex(m => m.id === messageId)
+    if (i >= 0) q.splice(i, 1)
   }
 
   const updateQueuedMessage = (messageId: string, content: string) => {
-    const sid = currentSession.value?.id
-    if (sid == null) return
-    const queue = (messageQueueMap.value.get(sid) ?? []).map(m => (m.id === messageId ? { ...m, content } : m))
-    _setQueue(sid, queue)
+    const msg = getCurrentQueue()?.find(m => m.id === messageId)
+    if (msg) msg.content = content
   }
 
-  const reorderQueuedMessage = (fromIndex: number, toIndex: number) => {
-    const sid = currentSession.value?.id
-    if (sid == null) return
-    const queue = [...(messageQueueMap.value.get(sid) ?? [])]
-    if (fromIndex < 0 || fromIndex >= queue.length || toIndex < 0 || toIndex >= queue.length) return
-    const [item] = queue.splice(fromIndex, 1)
-    queue.splice(toIndex, 0, item)
-    _setQueue(sid, queue)
+  const reorderQueuedMessage = (from: number, to: number) => {
+    const q = getCurrentQueue()
+    if (!q || from < 0 || from >= q.length || to < 0 || to >= q.length) return
+    const [item] = q.splice(from, 1)
+    q.splice(to, 0, item)
   }
 
   const sendQueuedMessageNow = async (messageId: string) => {
-    const sid = currentSession.value?.id
-    if (sid == null) return
-    const queue = messageQueueMap.value.get(sid) ?? []
-    const msg = queue.find(m => m.id === messageId)
-    if (!msg) return
-    // Remove from queue first
-    _setQueue(
-      sid,
-      queue.filter(m => m.id !== messageId)
-    )
+    const q = getCurrentQueue()
+    if (!q) return
+    const i = q.findIndex(m => m.id === messageId)
+    if (i < 0) return
+    const [msg] = q.splice(i, 1)
     await sendMessage(msg.content, msg.images)
   }
 
-  const _processQueue = async () => {
-    const sid = currentSession.value?.id
-    if (sid == null) return
-    const queue = messageQueueMap.value.get(sid) ?? []
-    if (queue.length === 0) return
-    const next = queue[0]
-    _setQueue(sid, queue.slice(1))
+  const processQueue = async () => {
+    const q = getCurrentQueue()
+    if (!q?.length) return
+    const [next] = q.splice(0, 1)
     await sendMessage(next.content, next.images)
   }
 
@@ -318,7 +299,7 @@ export const useAIChatStore = defineStore('ai-chat', () => {
       retryStatus.value = null
       // Auto-send next queued message only on natural completion
       if (!userCancelled.value) {
-        void _processQueue()
+        void processQueue()
       }
       userCancelled.value = false
     })
