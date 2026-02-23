@@ -59,7 +59,11 @@
     "input_placeholder": "询问 OpenCodex 任何问题，/ 输入命令",
     "upload_image": "上传图片",
     "max_images_reached": "最多只能上传5张图片",
-    "model_not_support_images": "当前模型不支持图片输入"
+    "model_not_support_images": "当前模型不支持图片输入",
+    "queue_count": "{count} 条消息排队中",
+    "queue_edit": "编辑",
+    "queue_delete": "删除",
+    "queue_send_now": "立即发送"
   },
   "slash_commands": {
     "search_placeholder": "搜索命令",

@@ -59,7 +59,11 @@
     "input_placeholder": "Ask OpenCodex anything, / for commands",
     "upload_image": "Upload image",
     "max_images_reached": "Maximum 5 images allowed",
-    "model_not_support_images": "Current model does not support image input"
+    "model_not_support_images": "Current model does not support image input",
+    "queue_count": "{count} message queued | {count} messages queued",
+    "queue_edit": "Edit",
+    "queue_delete": "Delete",
+    "queue_send_now": "Send now"
   },
   "slash_commands": {
     "search_placeholder": "Search",

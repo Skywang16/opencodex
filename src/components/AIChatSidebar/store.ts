@@ -7,7 +7,13 @@ import { useToolConfirmationDialogStore } from '@/stores/toolConfirmationDialog'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { ChatMode, RetryStatus } from '@/types'
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
+
+export interface QueuedMessage {
+  id: string
+  content: string
+  images?: ImageAttachment[]
+}
 
 export const useAIChatStore = defineStore('ai-chat', () => {
   const workspaceStore = useWorkspaceStore()
@@ -28,6 +34,82 @@ export const useAIChatStore = defineStore('ai-chat', () => {
   const contextUsage = ref<{ tokensUsed: number; contextWindow: number } | null>(null)
   const retryStatus = ref<RetryStatus | null>(null)
   const pendingCommandId = ref<string | null>(null)
+
+  // Message queue: per-session, memory-only (no persistence)
+  const messageQueueMap = shallowRef<Map<number, QueuedMessage[]>>(new Map())
+  const userCancelled = ref(false)
+
+  const currentSessionQueue = computed<QueuedMessage[]>(() => {
+    const sid = currentSession.value?.id
+    if (sid == null) return []
+    return messageQueueMap.value.get(sid) ?? []
+  })
+
+  const _setQueue = (sessionId: number, queue: QueuedMessage[]) => {
+    const map = new Map(messageQueueMap.value)
+    if (queue.length === 0) {
+      map.delete(sessionId)
+    } else {
+      map.set(sessionId, queue)
+    }
+    messageQueueMap.value = map
+  }
+
+  const enqueueMessage = (content: string, images?: ImageAttachment[]) => {
+    const sid = currentSession.value?.id
+    if (sid == null) return
+    const queue = [...(messageQueueMap.value.get(sid) ?? [])]
+    queue.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, content, images })
+    _setQueue(sid, queue)
+  }
+
+  const removeQueuedMessage = (messageId: string) => {
+    const sid = currentSession.value?.id
+    if (sid == null) return
+    const queue = (messageQueueMap.value.get(sid) ?? []).filter(m => m.id !== messageId)
+    _setQueue(sid, queue)
+  }
+
+  const updateQueuedMessage = (messageId: string, content: string) => {
+    const sid = currentSession.value?.id
+    if (sid == null) return
+    const queue = (messageQueueMap.value.get(sid) ?? []).map(m => (m.id === messageId ? { ...m, content } : m))
+    _setQueue(sid, queue)
+  }
+
+  const reorderQueuedMessage = (fromIndex: number, toIndex: number) => {
+    const sid = currentSession.value?.id
+    if (sid == null) return
+    const queue = [...(messageQueueMap.value.get(sid) ?? [])]
+    if (fromIndex < 0 || fromIndex >= queue.length || toIndex < 0 || toIndex >= queue.length) return
+    const [item] = queue.splice(fromIndex, 1)
+    queue.splice(toIndex, 0, item)
+    _setQueue(sid, queue)
+  }
+
+  const sendQueuedMessageNow = async (messageId: string) => {
+    const sid = currentSession.value?.id
+    if (sid == null) return
+    const queue = messageQueueMap.value.get(sid) ?? []
+    const msg = queue.find(m => m.id === messageId)
+    if (!msg) return
+    // Remove from queue first
+    _setQueue(
+      sid,
+      queue.filter(m => m.id !== messageId)
+    )
+    await sendMessage(msg.content, msg.images)
+  }
+
+  const _processQueue = async () => {
+    const sid = currentSession.value?.id
+    if (sid == null) return
+    const queue = messageQueueMap.value.get(sid) ?? []
+    if (queue.length === 0) return
+    const next = queue[0]
+    _setQueue(sid, queue.slice(1))
+    await sendMessage(next.content, next.images)
+  }
 
   // Task execution state — single source of truth
   // idle: no task running
@@ -234,6 +316,11 @@ export const useAIChatStore = defineStore('ai-chat', () => {
       cancelRequested.value = false
       resetTaskState()
       retryStatus.value = null
+      // Auto-send next queued message only on natural completion
+      if (!userCancelled.value) {
+        void _processQueue()
+      }
+      userCancelled.value = false
     })
 
     cancelFunction.value = () => {
@@ -314,6 +401,7 @@ export const useAIChatStore = defineStore('ai-chat', () => {
 
   const stopCurrentTask = (): void => {
     if (isSending.value && cancelFunction.value) {
+      userCancelled.value = true
       try {
         cancelFunction.value()
       } catch (e) {
@@ -374,5 +462,13 @@ export const useAIChatStore = defineStore('ai-chat', () => {
     clearError,
     initialize,
     pendingCommandId,
+
+    // Message queue
+    currentSessionQueue,
+    enqueueMessage,
+    removeQueuedMessage,
+    updateQueuedMessage,
+    reorderQueuedMessage,
+    sendQueuedMessageNow,
   }
 })

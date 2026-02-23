@@ -22,6 +22,7 @@
   import VectorIndexContent from '../vectorIndex/VectorIndexContent.vue'
   import ContextUsageRing from './ContextUsageRing.vue'
   import ImagePreview, { type ImageAttachment } from './ImagePreview.vue'
+  import MessageQueue from './MessageQueue.vue'
   import SlashCommandMenu from './SlashCommandMenu.vue'
 
   interface Props {
@@ -218,8 +219,10 @@
     textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden'
   }
 
+  const showStopButton = computed(() => props.loading && !props.canSend && imageAttachments.value.length === 0)
+
   const handleButtonClick = () => {
-    if (props.loading) {
+    if (props.loading && !props.canSend && imageAttachments.value.length === 0) {
       emit('stop')
     } else if (props.canSend || imageAttachments.value.length > 0) {
       // Write commandId directly to store before emitting send
@@ -573,6 +576,14 @@
       </button>
     </div>
 
+    <MessageQueue
+      :queue="aiChatStore.currentSessionQueue"
+      @remove="aiChatStore.removeQueuedMessage"
+      @update="aiChatStore.updateQueuedMessage"
+      @send-now="aiChatStore.sendQueuedMessageNow"
+      @reorder="aiChatStore.reorderQueuedMessage"
+    />
+
     <ContextUsageRing :context-usage="aiChatStore.contextUsage" class="context-usage-indicator" />
 
     <div class="input-main">
@@ -651,11 +662,11 @@
         </button>
         <button
           class="send-button"
-          :class="{ 'stop-button': loading }"
+          :class="{ 'stop-button': showStopButton }"
           :disabled="!loading && !canSend"
           @click="handleButtonClick"
         >
-          <svg v-if="loading" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <svg v-if="showStopButton" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
             <rect x="6" y="6" width="12" height="12" rx="2" />
           </svg>
           <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

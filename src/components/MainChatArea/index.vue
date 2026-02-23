@@ -172,7 +172,9 @@
   const chatInputRef = ref<InstanceType<typeof ChatInput>>()
 
   const canSend = computed(() => {
-    return messageInput.value.trim().length > 0 && aiChatStore.canSendMessage
+    const hasContent = messageInput.value.trim().length > 0
+    if (aiChatStore.isSending) return hasContent && aiChatStore.hasWorkspace
+    return hasContent && aiChatStore.canSendMessage
   })
 
   const sendMessage = async (
@@ -187,6 +189,11 @@
 
     if (images && images.length > 0) {
       chatInputRef.value?.clearImages()
+    }
+
+    if (aiChatStore.isSending) {
+      aiChatStore.enqueueMessage(message, images)
+      return
     }
 
     await aiChatStore.sendMessage(message, images)
