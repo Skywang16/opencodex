@@ -64,6 +64,11 @@ struct GrepArgs {
     /// Case insensitive search
     #[serde(alias = "case_insensitive", default)]
     ignore_case: Option<bool>,
+    /// Output mode: "content" (default, matching lines with snippets),
+    /// "files_with_matches" (only file paths - much faster, saves tokens),
+    /// "count" (match counts per file)
+    #[serde(alias = "output_mode")]
+    output_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -74,6 +79,13 @@ pub struct GrepResultEntry {
     pub end_line: usize,
     pub snippet: String,
     pub language: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrepCountEntry {
+    pub file_path: String,
+    pub count: usize,
 }
 
 pub struct GrepTool;
@@ -87,6 +99,155 @@ impl Default for GrepTool {
 impl GrepTool {
     pub fn new() -> Self {
         Self
+    }
+
+    /// files_with_matches mode: only return file paths that contain a match
+    async fn grep_files_only(
+        &self,
+        path: &Path,
+        pattern: &str,
+        max_results: usize,
+        include: Option<&str>,
+        ignore_case: bool,
+    ) -> Result<Vec<String>, String> {
+        let path = path.to_path_buf();
+        let pattern = pattern.to_string();
+        let include = include.map(|s| s.to_string());
+
+        tokio::task::spawn_blocking(move || {
+            Self::grep_files_only_sync(
+                &path,
+                &pattern,
+                max_results,
+                include.as_deref(),
+                ignore_case,
+            )
+        })
+        .await
+        .map_err(|e| format!("Search task failed: {e}"))?
+    }
+
+    fn grep_files_only_sync(
+        path: &Path,
+        pattern: &str,
+        max_results: usize,
+        include: Option<&str>,
+        ignore_case: bool,
+    ) -> Result<Vec<String>, String> {
+        let matcher = RegexMatcherBuilder::new()
+            .case_insensitive(ignore_case)
+            .build(pattern)
+            .map_err(|e| format!("Invalid regex pattern: {e}"))?;
+
+        let walker = build_walker(path, include);
+        let mut files = Vec::with_capacity(max_results);
+
+        for entry in walker.flatten() {
+            if files.len() >= max_results {
+                break;
+            }
+            let entry_path = entry.path();
+            if entry_path.is_dir() {
+                continue;
+            }
+            if let Ok(meta) = entry_path.metadata() {
+                if meta.len() > 1024 * 1024 {
+                    continue;
+                }
+            }
+
+            let mut found = false;
+            let mut searcher = Searcher::new();
+            let _ = searcher.search_path(
+                &matcher,
+                entry_path,
+                UTF8(|_line_num, _line| {
+                    found = true;
+                    Ok(false) // stop after first match
+                }),
+            );
+            if found {
+                files.push(entry_path.display().to_string());
+            }
+        }
+
+        Ok(files)
+    }
+
+    /// count mode: return match counts per file
+    async fn grep_count(
+        &self,
+        path: &Path,
+        pattern: &str,
+        max_results: usize,
+        include: Option<&str>,
+        ignore_case: bool,
+    ) -> Result<Vec<GrepCountEntry>, String> {
+        let path = path.to_path_buf();
+        let pattern = pattern.to_string();
+        let include = include.map(|s| s.to_string());
+
+        tokio::task::spawn_blocking(move || {
+            Self::grep_count_sync(
+                &path,
+                &pattern,
+                max_results,
+                include.as_deref(),
+                ignore_case,
+            )
+        })
+        .await
+        .map_err(|e| format!("Search task failed: {e}"))?
+    }
+
+    fn grep_count_sync(
+        path: &Path,
+        pattern: &str,
+        max_results: usize,
+        include: Option<&str>,
+        ignore_case: bool,
+    ) -> Result<Vec<GrepCountEntry>, String> {
+        let matcher = RegexMatcherBuilder::new()
+            .case_insensitive(ignore_case)
+            .build(pattern)
+            .map_err(|e| format!("Invalid regex pattern: {e}"))?;
+
+        let walker = build_walker(path, include);
+        let mut entries = Vec::with_capacity(max_results);
+
+        for entry in walker.flatten() {
+            if entries.len() >= max_results {
+                break;
+            }
+            let entry_path = entry.path();
+            if entry_path.is_dir() {
+                continue;
+            }
+            if let Ok(meta) = entry_path.metadata() {
+                if meta.len() > 1024 * 1024 {
+                    continue;
+                }
+            }
+
+            let mut count = 0usize;
+            let mut searcher = Searcher::new();
+            let _ = searcher.search_path(
+                &matcher,
+                entry_path,
+                UTF8(|_line_num, _line| {
+                    count += 1;
+                    Ok(true)
+                }),
+            );
+            if count > 0 {
+                entries.push(GrepCountEntry {
+                    file_path: entry_path.display().to_string(),
+                    count,
+                });
+            }
+        }
+
+        Ok(entries)
     }
 
     async fn grep_search(
@@ -136,39 +297,7 @@ impl GrepTool {
         // When context_lines == 0, we collect individual line matches directly.
         let results = RefCell::new(Vec::with_capacity(max_results));
 
-        // Build glob override for include filter
-        let mut builder = WalkBuilder::new(path);
-        builder
-            .hidden(false)
-            .git_ignore(true)
-            .git_global(true)
-            .git_exclude(true);
-
-        // Apply include glob filter using types
-        if let Some(glob_pattern) = include {
-            let mut types_builder = ignore::types::TypesBuilder::new();
-            types_builder.add("custom", glob_pattern).ok();
-            types_builder.select("custom");
-            if let Ok(types) = types_builder.build() {
-                builder.types(types);
-            }
-        }
-
-        builder.filter_entry(|entry| {
-            if entry.depth() == 0 {
-                return true;
-            }
-            let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-            if is_dir {
-                let name = entry.file_name().to_string_lossy();
-                if BUILTIN_SKIP_DIRS.contains(&name.as_ref()) {
-                    return false;
-                }
-            }
-            true
-        });
-
-        let walker = builder.build();
+        let walker = build_walker(path, include);
 
         'outer: for entry in walker.flatten() {
             if results.borrow().len() >= max_results {
@@ -293,11 +422,20 @@ impl RunnableTool for GrepTool {
 - Searches file contents using regular expressions
 - Supports full regex syntax (e.g., "log.*Error", "function\s+\w+")
 - Automatically respects .gitignore and skips binary files
-- Returns file paths, line numbers, and matching content snippets
 - Filter files by glob pattern with the include parameter (e.g., "*.js", "*.{ts,tsx}")
 - Use ignore_case for case-insensitive search
 - Use context_lines to include surrounding lines for each match
 - Use maxResults to limit output for broad patterns (default: 20, max: 200)
+
+Output modes (outputMode parameter):
+- "content" (default): Returns matching lines with snippets — use when you need to see the actual code
+- "files_with_matches": Returns only file paths — much faster, saves tokens. Use this FIRST to find which files are relevant, then read_file to inspect them
+- "count": Returns match counts per file — useful for gauging how spread out a pattern is
+
+Recommended search workflow:
+1. Start with outputMode="files_with_matches" to find relevant files
+2. Use read_file with mode="outline" on promising files to understand structure
+3. Use read_file with mode="symbol" or grep with outputMode="content" for specific code
 
 When to use grep vs other tools:
 - Use grep for exact matches: symbol names, strings, error messages, imports
@@ -307,8 +445,9 @@ When to use grep vs other tools:
 - When doing an open-ended search that may require multiple rounds of grepping, use the Task tool with the explore agent instead
 
 Examples:
+- Find which files use a symbol: {"pattern": "TaskExecutor", "outputMode": "files_with_matches"}
 - Find function definitions: {"pattern": "fn main", "path": "/project/src"}
-- Find TODOs: {"pattern": "TODO|FIXME"}
+- Count matches: {"pattern": "TODO|FIXME", "outputMode": "count"}
 - Find imports: {"pattern": "^import.*react", "ignore_case": true}
 - Find with file filter: {"pattern": "Session", "include": "*.ts"}
 - Find with context: {"pattern": "handleError", "context_lines": 3}"#
@@ -322,11 +461,16 @@ Examples:
                     "type": "string",
                     "description": "Regex pattern to search for"
                 },
+                "outputMode": {
+                    "type": "string",
+                    "enum": ["content", "files_with_matches", "count"],
+                    "description": "Output mode: 'content' (default) shows matching lines, 'files_with_matches' shows only file paths (fastest, saves tokens), 'count' shows match counts per file"
+                },
                 "maxResults": {
                     "type": "number",
                     "minimum": 1,
                     "maximum": 200,
-                    "description": "Max results (default: 20, max: 200)"
+                    "description": "Max results (default: 20, max: 200). In 'count' and 'files_with_matches' modes, limits the number of files returned."
                 },
                 "path": {
                     "type": "string",
@@ -340,7 +484,7 @@ Examples:
                     "type": "number",
                     "minimum": 0,
                     "maximum": 10,
-                    "description": "Number of context lines before and after each match (default: 0)"
+                    "description": "Number of context lines before and after each match (default: 0). Only used in 'content' mode."
                 },
                 "ignoreCase": {
                     "type": "boolean",
@@ -376,8 +520,8 @@ Examples:
             .unwrap_or(DEFAULT_MAX_RESULTS)
             .min(MAX_RESULTS_LIMIT);
 
-        let context_lines = args.context_lines.unwrap_or(0).min(10);
         let ignore_case = args.ignore_case.unwrap_or(false);
+        let output_mode = args.output_mode.as_deref().unwrap_or("content");
 
         let search_path = match resolve_to_absolute(args.path.as_deref(), &context.cwd) {
             Ok(path) => path,
@@ -392,22 +536,50 @@ Examples:
         }
 
         let started = Instant::now();
-        let result = self
-            .grep_search(
-                &search_path,
-                pattern,
-                max_results,
-                args.include.as_deref(),
-                context_lines,
-                ignore_case,
-            )
-            .await;
+
+        // Execute search — all modes produce (file_paths, summary, details, ext_info)
+        let outcome: Result<GrepOutcome, String> = match output_mode {
+            "files_with_matches" => self
+                .grep_files_only(&search_path, pattern, max_results, args.include.as_deref(), ignore_case)
+                .await
+                .map(|files| {
+                    let summary = format!("Found {} files matching \"{}\"", files.len(), pattern);
+                    let details = files.join("\n");
+                    let ext = json!({ "files": &files, "totalFound": files.len(), "pattern": pattern });
+                    GrepOutcome { file_paths: files, summary, details, ext_info: ext }
+                }),
+            "count" => self
+                .grep_count(&search_path, pattern, max_results, args.include.as_deref(), ignore_case)
+                .await
+                .map(|entries| {
+                    let total: usize = entries.iter().map(|e| e.count).sum();
+                    let file_paths: Vec<String> = entries.iter().map(|e| e.file_path.clone()).collect();
+                    let summary = format!("Found {} total matches across {} files", total, entries.len());
+                    let details = format_count_details(&entries);
+                    let ext = json!({ "counts": entries, "totalMatches": total, "totalFiles": entries.len(), "pattern": pattern });
+                    GrepOutcome { file_paths, summary, details, ext_info: ext }
+                }),
+            _ => {
+                let context_lines = args.context_lines.unwrap_or(0).min(10);
+                self.grep_search(&search_path, pattern, max_results, args.include.as_deref(), context_lines, ignore_case)
+                    .await
+                    .map(|entries| {
+                        let file_paths: Vec<String> = entries.iter().map(|e| e.file_path.clone()).collect();
+                        let summary = format!("Found {} matches", entries.len());
+                        let details = format_result_details(&entries);
+                        let ext = json!({ "results": entries, "totalFound": entries.len(), "pattern": pattern });
+                        GrepOutcome { file_paths, summary, details, ext_info: ext }
+                    })
+            }
+        };
+
         let elapsed_ms = started.elapsed().as_millis() as u64;
 
-        match result {
-            Ok(entries) => {
-                for entry in &entries {
-                    if let Ok(p) = PathBuf::from(&entry.file_path).canonicalize() {
+        match outcome {
+            Ok(outcome) => {
+                // Track all matched files
+                for file_path in &outcome.file_paths {
+                    if let Ok(p) = PathBuf::from(file_path).canonicalize() {
                         let _ = context
                             .file_tracker()
                             .track_file_operation(FileOperationRecord::new(
@@ -418,7 +590,7 @@ Examples:
                     }
                 }
 
-                if entries.is_empty() {
+                if outcome.file_paths.is_empty() {
                     return Ok(ToolResult {
                         content: vec![ToolResultContent::Success(format!(
                             "No matches for pattern \"{pattern}\""
@@ -430,21 +602,15 @@ Examples:
                     });
                 }
 
-                let summary = format!("Found {} matches ({}ms)", entries.len(), elapsed_ms);
-                let details = format_result_details(&entries);
-
                 Ok(ToolResult {
                     content: vec![ToolResultContent::Success(format!(
-                        "{summary}\n\n{details}"
+                        "{} ({}ms)\n\n{}",
+                        outcome.summary, elapsed_ms, outcome.details
                     ))],
                     status: ToolResultStatus::Success,
                     cancel_reason: None,
                     execution_time_ms: Some(elapsed_ms),
-                    ext_info: Some(json!({
-                        "results": entries,
-                        "totalFound": entries.len(),
-                        "pattern": pattern,
-                    })),
+                    ext_info: Some(outcome.ext_info),
                 })
             }
             Err(err_msg) => Ok(tool_error(err_msg)),
@@ -452,9 +618,51 @@ Examples:
     }
 }
 
+struct GrepOutcome {
+    file_paths: Vec<String>,
+    summary: String,
+    details: String,
+    ext_info: serde_json::Value,
+}
+
 // ============================================================================
 // Helper functions
 // ============================================================================
+
+/// Shared walker builder used by all grep modes
+fn build_walker(path: &Path, include: Option<&str>) -> ignore::Walk {
+    let mut builder = WalkBuilder::new(path);
+    builder
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true);
+
+    if let Some(glob_pattern) = include {
+        let mut types_builder = ignore::types::TypesBuilder::new();
+        types_builder.add("custom", glob_pattern).ok();
+        types_builder.select("custom");
+        if let Ok(types) = types_builder.build() {
+            builder.types(types);
+        }
+    }
+
+    builder.filter_entry(|entry| {
+        if entry.depth() == 0 {
+            return true;
+        }
+        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+        if is_dir {
+            let name = entry.file_name().to_string_lossy();
+            if BUILTIN_SKIP_DIRS.contains(&name.as_ref()) {
+                return false;
+            }
+        }
+        true
+    });
+
+    builder.build()
+}
 
 fn language_from_path(path: &Path) -> String {
     use crate::vector_db::core::Language;
@@ -536,4 +744,12 @@ fn format_result_details(results: &[GrepResultEntry]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+fn format_count_details(entries: &[GrepCountEntry]) -> String {
+    entries
+        .iter()
+        .map(|entry| format!("{}:{}", entry.file_path, entry.count))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
