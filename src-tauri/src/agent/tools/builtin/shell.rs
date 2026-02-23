@@ -220,7 +220,7 @@ Git safety: Never commit/push/amend without explicit user request."#
 
         if is_background {
             let message = format!(
-                "Command running in background (terminalId: {}). Use read_agent_terminal to check output.",
+                "Command running in background (terminalId: {}). Use read_terminal with this terminalId to check output.",
                 terminal.id
             );
             return Ok(ToolResult {

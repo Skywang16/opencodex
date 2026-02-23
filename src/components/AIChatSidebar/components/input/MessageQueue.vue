@@ -162,9 +162,9 @@
             ref="editInput"
             v-model="editContent"
             class="queue-edit-input"
-            rows="1"
+            rows="2"
             @keydown="handleEditKeydown"
-            @blur="confirmEdit"
+            @blur="cancelEdit"
           />
         </div>
 

@@ -437,7 +437,7 @@ impl AgentTerminalManager {
             overlay.push_str("### Running (background)\n");
             for term in &running_background {
                 overlay.push_str(&format!(
-                    "- `{}`: `{}` (use `read_agent_terminal` with terminalId)\n",
+                    "- `{}`: `{}` (use `read_terminal` with terminalId)\n",
                     term.id, term.command
                 ));
             }
@@ -455,7 +455,7 @@ impl AgentTerminalManager {
                     .map(|code| format!("exit {code}"))
                     .unwrap_or_else(|| "exit unknown".to_string());
                 overlay.push_str(&format!(
-                    "- `{}`: `{}` finished ({}) - use `read_agent_terminal`\n",
+                    "- `{}`: `{}` finished ({}) - use `read_terminal` with terminalId\n",
                     term.id, term.command, exit_label
                 ));
             }

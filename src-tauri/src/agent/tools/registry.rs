@@ -1043,7 +1043,6 @@ fn build_tool_action_for_prompt(tool_name: &str, workspace_root: PathBuf) -> Too
         "grep" => ToolAction::new("grep", workspace_root, vec![]),
         "semantic_search" => ToolAction::new("semantic_search", workspace_root, vec![]),
         "read_terminal" => ToolAction::new("terminal", workspace_root, vec![]),
-        "read_agent_terminal" => ToolAction::new("terminal", workspace_root, vec![]),
         "syntax_diagnostics" => ToolAction::new("syntax_diagnostics", workspace_root, vec![]),
         "todowrite" => ToolAction::new("todowrite", workspace_root, vec![]),
         "task" => ToolAction::new("task", workspace_root, vec![]),
@@ -1111,7 +1110,6 @@ fn build_tool_action(
             ToolAction::new("web_search", workspace_root, vec![q.to_string()])
         }
         "read_terminal" => ToolAction::new("terminal", workspace_root, vec![]),
-        "read_agent_terminal" => ToolAction::new("terminal", workspace_root, vec![]),
         "syntax_diagnostics" => ToolAction::new("syntax_diagnostics", workspace_root, vec![]),
         "todowrite" => ToolAction::new("todowrite", workspace_root, vec![]),
         "task" => {

@@ -3,18 +3,19 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::agent::core::context::TaskContext;
-use crate::agent::error::ToolExecutorResult;
+use crate::agent::error::{ToolExecutorError, ToolExecutorResult};
+use crate::agent::terminal::AgentTerminalManager;
 use crate::agent::tools::{
     RunnableTool, ToolCategory, ToolMetadata, ToolPriority, ToolResult, ToolResultContent,
     ToolResultStatus,
 };
 use crate::mux::singleton::get_mux;
-use crate::mux::PaneId;
 use crate::terminal::TerminalScrollback;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReadTerminalArgs {
+    terminal_id: Option<String>,
     max_lines: Option<usize>,
 }
 
@@ -39,13 +40,12 @@ impl RunnableTool for ReadTerminalTool {
     }
 
     fn description(&self) -> &str {
-        r#"Reads the current visible content from the active terminal pane.
+        r#"Reads terminal output from the active terminal or a background agent terminal.
 
 Usage:
-- Returns the terminal output buffer that the user is currently viewing
-- Includes recent command outputs, error messages, and terminal history
-- Useful for analyzing terminal errors or debugging command failures
-- Use maxLines parameter to control how much history to retrieve (default: 1000)
+- Without terminalId: reads the user's active terminal pane
+- With terminalId: reads a background agent terminal (from shell tool with background=true)
+- Use maxLines to control how much history to retrieve (default: 1000)
 
 Note: This is NOT for reading source files - use read_file instead."#
     }
@@ -54,11 +54,15 @@ Note: This is NOT for reading source files - use read_file instead."#
         json!({
             "type": "object",
             "properties": {
+                "terminalId": {
+                    "type": "string",
+                    "description": "Agent terminal ID to read from. If omitted, reads the active user terminal."
+                },
                 "maxLines": {
                     "type": "number",
                     "minimum": 1,
                     "maximum": 10000,
-                    "description": "Maximum number of lines to return from the terminal buffer. Default: 1000. Use lower values for recent output, higher values for full history."
+                    "description": "Maximum number of lines to return. Default: 1000."
                 }
             }
         })
@@ -77,17 +81,11 @@ Note: This is NOT for reading source files - use read_file instead."#
         let args: ReadTerminalArgs = serde_json::from_value(args)?;
         let max_lines = args.max_lines.unwrap_or(1000);
 
-        // Get active terminal's pane_id
-        // Prefer using the first available pane in mux
-        let mux = get_mux();
-        let pane_id = mux.list_panes().into_iter().next().ok_or_else(|| {
-            crate::agent::error::ToolExecutorError::ExecutionFailed {
-                tool_name: "read_terminal".to_string(),
-                error: "No terminal panes found. Please ensure a terminal is open.".to_string(),
-            }
-        })?;
-
-        let buffer = TerminalScrollback::global().get_text_lossy(pane_id.as_u32());
+        let (buffer, pane_id) = if let Some(ref tid) = args.terminal_id {
+            read_agent_terminal(tid)?
+        } else {
+            read_active_terminal()?
+        };
 
         if buffer.is_empty() {
             return Ok(ToolResult {
@@ -98,30 +96,18 @@ Note: This is NOT for reading source files - use read_file instead."#
                 cancel_reason: None,
                 execution_time_ms: None,
                 ext_info: Some(json!({
-                    "paneId": pane_id.as_u32(),
+                    "paneId": pane_id,
                     "lineCount": 0,
                     "isEmpty": true
                 })),
             });
         }
 
-        // Split by lines and limit line count
         let lines: Vec<&str> = buffer.lines().collect();
         let total_lines = lines.len();
-        let lines_to_return = total_lines.min(max_lines);
-
-        // Take last N lines (most recent content)
         let start_index = total_lines.saturating_sub(max_lines);
-
         let selected_lines: Vec<&str> = lines.iter().skip(start_index).copied().collect();
         let result_text = selected_lines.join("\n");
-
-        // Get terminal size information
-        let mux = get_mux();
-        let size = mux
-            .get_pane(PaneId::new(pane_id.as_u32()))
-            .map(|pane| pane.get_size())
-            .unwrap_or_default();
 
         Ok(ToolResult {
             content: vec![ToolResultContent::Success(result_text)],
@@ -129,15 +115,48 @@ Note: This is NOT for reading source files - use read_file instead."#
             cancel_reason: None,
             execution_time_ms: None,
             ext_info: Some(json!({
-                "paneId": pane_id.as_u32(),
+                "paneId": pane_id,
+                "terminalId": args.terminal_id,
                 "totalLines": total_lines,
-                "returnedLines": lines_to_return,
+                "returnedLines": total_lines.min(max_lines),
                 "truncated": total_lines > max_lines,
-                "terminalSize": {
-                    "cols": size.cols,
-                    "rows": size.rows
-                }
             })),
         })
     }
+}
+
+fn read_active_terminal() -> ToolExecutorResult<(String, u32)> {
+    let mux = get_mux();
+    let pane_id =
+        mux.list_panes()
+            .into_iter()
+            .next()
+            .ok_or_else(|| ToolExecutorError::ExecutionFailed {
+                tool_name: "read_terminal".to_string(),
+                error: "No terminal panes found. Please ensure a terminal is open.".to_string(),
+            })?;
+    let buffer = TerminalScrollback::global().get_text_lossy(pane_id.as_u32());
+    Ok((buffer, pane_id.as_u32()))
+}
+
+fn read_agent_terminal(terminal_id: &str) -> ToolExecutorResult<(String, u32)> {
+    let manager =
+        AgentTerminalManager::global().ok_or_else(|| ToolExecutorError::ExecutionFailed {
+            tool_name: "read_terminal".to_string(),
+            error: "Agent terminal manager is not initialized.".to_string(),
+        })?;
+    let terminal =
+        manager
+            .get_terminal(terminal_id)
+            .ok_or_else(|| ToolExecutorError::ExecutionFailed {
+                tool_name: "read_terminal".to_string(),
+                error: format!("Terminal '{}' not found.", terminal_id),
+            })?;
+    let buffer = manager.get_terminal_output(terminal_id).map_err(|e| {
+        ToolExecutorError::ExecutionFailed {
+            tool_name: "read_terminal".to_string(),
+            error: e,
+        }
+    })?;
+    Ok((buffer, terminal.pane_id))
 }
