@@ -429,7 +429,7 @@ fn multi_occurrence_replacer(content: &str, find: &str) -> Vec<String> {
 
 /// Replace old_text with new_text in content, using a pipeline of increasingly
 /// fuzzy matching strategies. Returns the new content or an error message.
-fn replace(
+pub(crate) fn replace(
     content: &str,
     old_text: &str,
     new_text: &str,
@@ -704,7 +704,7 @@ Parameters:
 // Helpers
 // ============================================================================
 
-async fn load_file_text(path: &Path) -> Result<String, ToolResult> {
+pub(crate) async fn load_file_text(path: &Path) -> Result<String, ToolResult> {
     match fs::metadata(path).await {
         Ok(meta) => {
             if meta.is_dir() {
@@ -739,7 +739,7 @@ async fn load_file_text(path: &Path) -> Result<String, ToolResult> {
     }
 }
 
-async fn track_edit(context: &TaskContext, path: &Path) -> ToolExecutorResult<()> {
+pub(crate) async fn track_edit(context: &TaskContext, path: &Path) -> ToolExecutorResult<()> {
     context
         .file_tracker()
         .track_file_operation(FileOperationRecord::new(
@@ -753,7 +753,7 @@ async fn track_edit(context: &TaskContext, path: &Path) -> ToolExecutorResult<()
     Ok(())
 }
 
-fn success_result(text: String, ext: serde_json::Value) -> ToolResult {
+pub(crate) fn success_result(text: String, ext: serde_json::Value) -> ToolResult {
     ToolResult {
         content: vec![ToolResultContent::Success(text)],
         status: ToolResultStatus::Success,
@@ -763,7 +763,7 @@ fn success_result(text: String, ext: serde_json::Value) -> ToolResult {
     }
 }
 
-fn error_result(message: impl Into<String>) -> ToolResult {
+pub(crate) fn error_result(message: impl Into<String>) -> ToolResult {
     ToolResult {
         content: vec![ToolResultContent::Error(message.into())],
         status: ToolResultStatus::Error,
@@ -773,7 +773,7 @@ fn error_result(message: impl Into<String>) -> ToolResult {
     }
 }
 
-async fn snapshot_before_edit(
+pub(crate) async fn snapshot_before_edit(
     context: &TaskContext,
     tool_name: &str,
     path: &Path,

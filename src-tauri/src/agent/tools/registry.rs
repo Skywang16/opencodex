@@ -1039,6 +1039,7 @@ fn build_tool_action_for_prompt(tool_name: &str, workspace_root: PathBuf) -> Too
         "read_file" => ToolAction::new("read", workspace_root, vec![]),
         "write_file" => ToolAction::new("write", workspace_root, vec![]),
         "edit_file" => ToolAction::new("edit", workspace_root, vec![]),
+        "multi_edit_file" => ToolAction::new("edit", workspace_root, vec![]),
         "list_files" => ToolAction::new("list", workspace_root, vec![]),
         "grep" => ToolAction::new("grep", workspace_root, vec![]),
         "semantic_search" => ToolAction::new("semantic_search", workspace_root, vec![]),
@@ -1081,6 +1082,11 @@ fn build_tool_action(
             path_variants(args, metadata, context),
         ),
         "edit_file" => ToolAction::new(
+            "edit",
+            workspace_root,
+            path_variants(args, metadata, context),
+        ),
+        "multi_edit_file" => ToolAction::new(
             "edit",
             workspace_root,
             path_variants(args, metadata, context),

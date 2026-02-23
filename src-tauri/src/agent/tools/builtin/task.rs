@@ -1,6 +1,7 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::time::Duration;
 
 use crate::agent::core::context::{SubtaskRequest, TaskContext};
 use crate::agent::error::{ToolExecutorError, ToolExecutorResult};
@@ -139,21 +140,16 @@ impl RunnableTool for TaskTool {
                 error: e.to_string(),
             })?;
 
-        let response = match context
-            .subtask_runner()
-            .run_subtask(
-                context,
-                SubtaskRequest {
-                    description: description.clone(),
-                    prompt: prompt.clone(),
-                    subagent_type: subagent_type.clone(),
-                    session_id: Some(child_session_id),
-                    call_id: Some(call_id.clone()),
-                    model_id: model_id.clone(),
-                },
-            )
-            .await
-        {
+        let request = SubtaskRequest {
+            description: description.clone(),
+            prompt: prompt.clone(),
+            subagent_type: subagent_type.clone(),
+            session_id: Some(child_session_id),
+            call_id: Some(call_id.clone()),
+            model_id: model_id.clone(),
+        };
+
+        let response = match context.subtask_runner().run_subtask(context, request).await {
             Ok(r) => r,
             Err(e) => {
                 let _ = context

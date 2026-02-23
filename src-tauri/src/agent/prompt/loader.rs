@@ -33,6 +33,10 @@ impl BuiltinPrompts {
         include_str!("../../../prompts/agents/research.md")
     }
 
+    pub fn agent_bulk_edit() -> &'static str {
+        include_str!("../../../prompts/agents/bulk_edit.md")
+    }
+
     pub fn agent_execute() -> &'static str {
         include_str!("../../../prompts/agents/execute.md")
     }
@@ -157,6 +161,7 @@ impl PromptLoader {
             ("agents", "explore") => Some(BuiltinPrompts::agent_explore()),
             ("agents", "general") => Some(BuiltinPrompts::agent_general()),
             ("agents", "research") => Some(BuiltinPrompts::agent_research()),
+            ("agents", "bulk_edit") => Some(BuiltinPrompts::agent_bulk_edit()),
             ("agents", "execute") => Some(BuiltinPrompts::agent_execute()),
             ("reminders", "plan_mode") => Some(BuiltinPrompts::reminder_plan_mode()),
             ("reminders", "coder_with_plan") => Some(BuiltinPrompts::reminder_coder_with_plan()),

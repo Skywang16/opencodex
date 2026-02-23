@@ -3,7 +3,7 @@ name: plan
 description: Planning agent for analysis and strategy (read-only)
 mode: primary
 max_steps: 100
-tools: read_file, grep, list_files, semantic_search, task, web_fetch
+tools: read_file, grep, glob, list_files, semantic_search, task, web_fetch
 ---
 
 # Plan Mode

@@ -22,9 +22,9 @@ pub use registry::{ToolExecutionStats, ToolRegistry};
 
 // Builtin tool type re-exports
 pub use builtin::{
-    GlobTool, GrepTool, ListFilesTool, ReadFileTool, ReadTerminalTool, SemanticSearchTool,
-    ShellTool, SyntaxDiagnosticsTool, TaskTool, TodoWriteTool, UnifiedEditTool, WebFetchTool,
-    WebSearchTool, WriteFileTool,
+    GlobTool, GrepTool, ListFilesTool, MultiEditTool, ReadFileTool, ReadTerminalTool,
+    SemanticSearchTool, ShellTool, SyntaxDiagnosticsTool, TaskTool, TodoWriteTool, UnifiedEditTool,
+    WebFetchTool, WebSearchTool, WriteFileTool,
 };
 
 use std::sync::Arc;
@@ -144,6 +144,15 @@ async fn register_builtin_tools(
         .register(
             "edit_file",
             Arc::new(UnifiedEditTool::new()),
+            is_chat_mode,
+            availability_ctx,
+        )
+        .await
+        .ok();
+    registry
+        .register(
+            "multi_edit_file",
+            Arc::new(MultiEditTool::new()),
             is_chat_mode,
             availability_ctx,
         )

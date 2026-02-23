@@ -107,6 +107,7 @@ impl AgentConfigLoader {
             ("plan", BuiltinPrompts::agent_plan()),
             ("explore", BuiltinPrompts::agent_explore()),
             ("general", BuiltinPrompts::agent_general()),
+            ("bulk_edit", BuiltinPrompts::agent_bulk_edit()),
             ("research", BuiltinPrompts::agent_research()),
         ];
 
