@@ -67,7 +67,7 @@
   const themeStore = useThemeStore()
   const terminalSelection = useTerminalSelection()
 
-  const { inputState, terminalEnv, updateInputLine } = useTerminalState()
+  const { terminalEnv, updateInputLine } = useTerminalState()
   const { searchState, searchBoxRef, closeSearch, handleSearch, findNext, findPrevious, handleOpenTerminalSearch } =
     useTerminalSearch()
   const { handleOutputBinary: handleTerminalOutputBinary } = useTerminalOutput()
@@ -371,8 +371,6 @@
           scheduleCursorPositionUpdate()
         })
       )
-
-      trackDisposable(terminal.value.onKey(e => handleKeyDown(e.domEvent)))
 
       trackDisposable(terminal.value.onCursorMove(scheduleCursorPositionUpdate))
       // Removed onScroll listener to reduce performance overhead during scrolling
