@@ -272,7 +272,6 @@
       "open_settings": "Open Settings",
       "new_terminal": "New Terminal",
       "clear_terminal": "Clear Terminal",
-      "accept_completion": "Accept Completion",
       "toggle_terminal_panel": "Toggle Terminal Panel",
       "toggle_window_pin": "Toggle Window Pin",
       "clone_repository": "Clone Repository"

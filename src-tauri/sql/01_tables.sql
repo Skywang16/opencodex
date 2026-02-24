@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS ai_models (
     model_type TEXT DEFAULT 'chat' CHECK (model_type IN ('chat', 'embedding')),
     config_json TEXT,
     use_custom_base_url INTEGER DEFAULT 0,
-    
+
     -- OAuth 支持
     auth_type TEXT NOT NULL DEFAULT 'api_key' CHECK (auth_type IN ('api_key', 'oauth')),
     oauth_provider TEXT CHECK (oauth_provider IN ('openai_codex', 'claude_pro', 'gemini_advanced') OR oauth_provider IS NULL),
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS ai_models (
     oauth_access_token_encrypted TEXT,
     oauth_token_expires_at INTEGER,
     oauth_metadata TEXT,  -- JSON: {"account_id": "...", "subscription_tier": "..."}
-    
+
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(provider, model_name)
@@ -198,39 +198,5 @@ CREATE TABLE IF NOT EXISTS checkpoint_file_snapshots (
     UNIQUE (checkpoint_id, relative_path)
 );
 
--- ===========================
--- Completion learning model (offline, small footprint)
--- ===========================
-
-CREATE TABLE IF NOT EXISTS completion_command_keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    key TEXT NOT NULL UNIQUE,
-    root TEXT NOT NULL,
-    sub TEXT,
-    use_count INTEGER NOT NULL DEFAULT 0,
-    success_count INTEGER NOT NULL DEFAULT 0,
-    fail_count INTEGER NOT NULL DEFAULT 0,
-    last_used_ts INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS completion_transitions (
-    prev_id INTEGER NOT NULL,
-    next_id INTEGER NOT NULL,
-    count INTEGER NOT NULL DEFAULT 0,
-    success_count INTEGER NOT NULL DEFAULT 0,
-    fail_count INTEGER NOT NULL DEFAULT 0,
-    last_used_ts INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (prev_id, next_id),
-    FOREIGN KEY (prev_id) REFERENCES completion_command_keys(id) ON DELETE CASCADE,
-    FOREIGN KEY (next_id) REFERENCES completion_command_keys(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS completion_entity_stats (
-    entity_type TEXT NOT NULL,
-    value TEXT NOT NULL,
-    use_count INTEGER NOT NULL DEFAULT 0,
-    last_used_ts INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (entity_type, value)
-);
 
 -- Legacy triggers removed with legacy tables.

@@ -72,9 +72,6 @@ export const useShortcutListener = () => {
       case 'command_palette':
         frontendResult = shortcutActionsService.commandPalette()
         break
-      case 'accept_completion':
-        frontendResult = shortcutActionsService.acceptCompletion()
-        break
       case 'terminal_search':
         frontendResult = shortcutActionsService.terminalSearch()
         break

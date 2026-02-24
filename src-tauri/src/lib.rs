@@ -3,7 +3,6 @@ pub mod ai;
 pub mod checkpoint;
 pub mod code_intel;
 pub mod commands;
-pub mod completion;
 pub mod config;
 pub mod events;
 pub mod file_watcher;

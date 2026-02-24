@@ -270,7 +270,6 @@
       "open_settings": "打开设置",
       "new_terminal": "新建终端",
       "clear_terminal": "清空终端",
-      "accept_completion": "接受补全",
       "toggle_terminal_panel": "显示/隐藏终端",
       "toggle_window_pin": "切换窗口置顶",
       "clone_repository": "克隆仓库"

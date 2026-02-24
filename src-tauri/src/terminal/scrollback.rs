@@ -1,8 +1,7 @@
 //! Terminal scrollback buffer.
 //!
 //! This buffer is used for UI replay when a terminal tab is mounted/unmounted.
-//! It is intentionally separate from the completion `OutputAnalyzer`, which may
-//! clear buffers based on command boundaries.
+//! Also tracks per-pane last command output for agent use.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -53,6 +52,7 @@ impl ScrollbackEntry {
 /// A process-wide, in-memory scrollback buffer keyed by `pane_id`.
 pub struct TerminalScrollback {
     inner: Mutex<HashMap<u32, ScrollbackEntry>>,
+    last_command_output: Mutex<HashMap<u32, String>>,
 }
 
 static GLOBAL_SCROLLBACK: OnceLock<Arc<TerminalScrollback>> = OnceLock::new();
@@ -61,6 +61,7 @@ impl TerminalScrollback {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
+            last_command_output: Mutex::new(HashMap::new()),
         }
     }
 
@@ -98,6 +99,27 @@ impl TerminalScrollback {
     pub fn remove(&self, pane_id: u32) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.remove(&pane_id);
+        let mut lco = self
+            .last_command_output
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        lco.remove(&pane_id);
+    }
+
+    pub fn set_last_command_output(&self, pane_id: u32, output: String) {
+        let mut lco = self
+            .last_command_output
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        lco.insert(pane_id, output);
+    }
+
+    pub fn get_last_command_output(&self, pane_id: u32) -> Option<String> {
+        let lco = self
+            .last_command_output
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        lco.get(&pane_id).cloned()
     }
 }
 

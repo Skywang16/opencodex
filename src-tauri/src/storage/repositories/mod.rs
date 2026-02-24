@@ -10,7 +10,6 @@
 pub mod ai_models;
 pub mod app_preferences;
 pub mod audit_logs;
-pub mod completion_model;
 
 // ==================== Repository structs ====================
 pub use ai_models::{
@@ -18,4 +17,3 @@ pub use ai_models::{
 };
 pub use app_preferences::AppPreferences;
 pub use audit_logs::AuditLogs;
-pub use completion_model::CompletionModelRepo;

@@ -9,16 +9,6 @@
       @click="focusTerminal"
     ></div>
 
-    <TerminalCompletion
-      ref="completionRef"
-      :input="inputState.currentLine"
-      :working-directory="terminalEnv.workingDirectory"
-      :terminal-element="terminalRef"
-      :terminal-cursor-position="terminalEnv.cursorPosition"
-      :is-mac="terminalEnv.isMac"
-      @suggestion-change="handleSuggestionChange"
-    />
-
     <SearchBox
       :visible="searchState.visible"
       @close="() => closeSearch(searchAddon)"
@@ -59,7 +49,6 @@
 
   import SearchBox from '@/components/common/SearchBox.vue'
   import type { ITheme } from '@xterm/xterm'
-  import TerminalCompletion from './TerminalCompletion.vue'
   import TerminalLoading from './TerminalLoading.vue'
 
   import '@xterm/xterm/css/xterm.css'
@@ -78,7 +67,7 @@
   const themeStore = useThemeStore()
   const terminalSelection = useTerminalSelection()
 
-  const { inputState, terminalEnv, updateInputLine, handleSuggestionChange } = useTerminalState()
+  const { inputState, terminalEnv, updateInputLine } = useTerminalState()
   const { searchState, searchBoxRef, closeSearch, handleSearch, findNext, findPrevious, handleOpenTerminalSearch } =
     useTerminalSearch()
   const { handleOutputBinary: handleTerminalOutputBinary } = useTerminalOutput()
@@ -86,8 +75,6 @@
   // === Core References ===
   const terminalRef = ref<HTMLElement | null>(null)
   const terminal = ref<Terminal | null>(null)
-  const completionRef = ref<{ hasCompletion: () => boolean; acceptCompletion: () => string } | null>(null)
-
   const fitAddon = ref<FitAddon | null>(null)
   const searchAddon = ref<SearchAddon | null>(null)
   // Streaming UTF-8 decoder: for OSC parsing and state dispatch only, rendering uses writeUtf8
@@ -471,64 +458,6 @@
   }
 
   /**
-   * Handle keyboard events for completion shortcuts
-   * Mac uses Cmd + Right Arrow, other systems use Ctrl + Right Arrow
-   */
-  const handleKeyDown = (event: KeyboardEvent) => {
-    const isCompletionShortcut = terminalEnv.isMac
-      ? event.metaKey && event.key === 'ArrowRight' // Mac: Cmd + Right Arrow
-      : event.ctrlKey && event.key === 'ArrowRight' // Windows/Linux: Ctrl + Right Arrow
-
-    if (isCompletionShortcut) {
-      try {
-        if (completionRef.value?.hasCompletion()) {
-          event.preventDefault()
-          event.stopPropagation()
-
-          const completionText = completionRef.value.acceptCompletion()
-          if (completionText && completionText.trim()) {
-            acceptCompletion(completionText)
-          }
-        }
-      } catch (error) {
-        console.warn('Failed to accept completion:', error)
-      }
-    }
-  }
-
-  /**
-   * Accept completion suggestion and insert text into current input line
-   */
-  const acceptCompletion = (completionText: string) => {
-    if (!completionText || !completionText.trim() || !terminal.value) {
-      return
-    }
-
-    try {
-      inputState.currentLine += completionText
-      inputState.cursorCol += completionText.length
-
-      terminalStore.writeToTerminal(props.terminalId, completionText).catch(() => {})
-
-      updateTerminalCursorPosition()
-    } catch (error) {
-      console.warn('Failed to update terminal cursor position:', error)
-    }
-  }
-
-  /**
-   * Handle shortcut-triggered completion accept event
-   */
-  const handleAcceptCompletionShortcut = () => {
-    if (completionRef.value?.hasCompletion()) {
-      const completionText = completionRef.value.acceptCompletion()
-      if (completionText && completionText.trim()) {
-        acceptCompletion(completionText)
-      }
-    }
-  }
-
-  /**
    * Handle clear terminal event
    */
   const handleClearTerminal = () => {
@@ -742,7 +671,6 @@
       }
 
       if (terminalRef.value) {
-        addDomListener(terminalRef.value, 'accept-completion', handleAcceptCompletionShortcut)
         addDomListener(terminalRef.value, 'clear-terminal', handleClearTerminal)
       }
 
@@ -785,7 +713,6 @@
     }
 
     if (terminalRef.value) {
-      terminalRef.value.removeEventListener('accept-completion', handleAcceptCompletionShortcut)
       terminalRef.value.removeEventListener('clear-terminal', handleClearTerminal)
     }
 

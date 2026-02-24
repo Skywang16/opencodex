@@ -6,7 +6,6 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::broadcast;
 use tracing::{error, warn};
 
-use crate::completion::output_analyzer::OutputAnalyzer;
 use crate::events::{ShellEvent, TerminalContextEvent};
 use crate::mux::{MuxNotification, PaneId, SubscriberCallback, TerminalMux};
 use crate::terminal::error::EventHandlerResult;
@@ -47,15 +46,6 @@ impl TerminalEventHandler {
                     .state::<crate::terminal::channel_state::TerminalChannelState>();
                 state.manager.send_data(pane_id.as_u32(), data.as_ref());
 
-                // Synchronously feed to OutputAnalyzer for history cache
-                let text = String::from_utf8_lossy(data);
-                if let Err(e) = OutputAnalyzer::global().analyze_output(pane_id.as_u32(), &text) {
-                    warn!(
-                        "OutputAnalyzer analyze_output failed: pane_id={}, err={}",
-                        pane_id.as_u32(),
-                        e
-                    );
-                }
                 true
             }
             MuxNotification::PaneRemoved(pane_id) => {
@@ -136,41 +126,11 @@ impl TerminalEventHandler {
         pane_id: PaneId,
         event: ShellEvent,
     ) {
-        // Feed command events from Shell Integration to completion context system:
-        // This is the fundamental data source for "predict next command" hit rate.
+        // Record last command output for agent use
         if let ShellEvent::CommandEvent { command } = &event {
-            if let Err(e) =
-                OutputAnalyzer::global().on_shell_command_event(pane_id.as_u32(), command)
-            {
-                warn!(
-                    "OutputAnalyzer on_shell_command_event failed: pane_id={}, err={}",
-                    pane_id.as_u32(),
-                    e
-                );
-            }
-
-            // Also feed to offline learning model (SQLite) for "next command" prediction and ranking.
             if command.is_finished() {
-                use crate::completion::learning::{CommandFinishedEvent, CompletionLearningState};
-                use std::time::{SystemTime, UNIX_EPOCH};
-
-                if let Some(command_line) = command.command_line.clone() {
-                    let finished_ts = command
-                        .end_time_wallclock
-                        .unwrap_or_else(SystemTime::now)
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
-
-                    let learning = app_handle.state::<CompletionLearningState>();
-                    learning.record_finished(CommandFinishedEvent {
-                        pane_id: pane_id.as_u32(),
-                        command_line,
-                        cwd: command.working_directory.clone(),
-                        exit_code: command.exit_code,
-                        finished_ts,
-                    });
-                }
+                let output = TerminalScrollback::global().get_text_lossy(pane_id.as_u32());
+                TerminalScrollback::global().set_last_command_output(pane_id.as_u32(), output);
             }
         }
 

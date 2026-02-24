@@ -119,11 +119,6 @@ pub fn register_all_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> t
         crate::shell::commands::shell_pane_setup_integration,
         crate::shell::commands::shell_pane_get_state,
         crate::shell::commands::shell_execute_background_program,
-        // Completion feature commands
-        crate::completion::commands::completion_init_engine,
-        crate::completion::commands::completion_get,
-        crate::completion::commands::completion_clear_cache,
-        crate::completion::commands::completion_get_stats,
         // Git integration commands
         crate::git::commands::git_check_repository,
         crate::git::commands::git_get_status,

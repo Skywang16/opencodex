@@ -277,28 +277,6 @@ impl ActionRegistry {
                 },
             )
             .await;
-
-        let _ = self
-            .register_action(
-                ActionMetadata {
-                    name: "accept_completion".to_string(),
-                    description: "Accept current completion suggestion".to_string(),
-
-                    requires_terminal: true,
-                    is_system_action: false,
-                    supported_platforms: vec![
-                        "windows".to_string(),
-                        "macos".to_string(),
-                        "linux".to_string(),
-                    ],
-                },
-                |_context| {
-                    Ok(serde_json::Value::String(
-                        "🔥 Completion accept function triggered!".to_string(),
-                    ))
-                },
-            )
-            .await;
     }
 
     async fn register_system_actions(&mut self) {

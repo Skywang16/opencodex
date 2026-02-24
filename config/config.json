@@ -49,7 +49,6 @@
     { "key": "f", "modifiers": ["cmd"], "action": "terminal_search" },
     { "key": "s", "modifiers": ["cmd"], "action": "open_settings" },
     { "key": "t", "modifiers": ["cmd"], "action": "new_terminal" },
-    { "key": "right", "modifiers": ["cmd"], "action": "accept_completion" },
     { "key": "l", "modifiers": ["cmd"], "action": "clear_terminal" },
     { "key": "`", "modifiers": ["cmd"], "action": "toggle_terminal_panel" },
     { "key": "p", "modifiers": ["cmd", "shift"], "action": "toggle_window_pin" }

@@ -107,7 +107,6 @@ export type SupportedShortcutAction =
   | 'open_settings'
   | 'new_terminal'
   | 'clear_terminal'
-  | 'accept_completion'
   | 'toggle_terminal_panel'
   | 'toggle_window_pin'
 

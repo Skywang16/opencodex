@@ -27,16 +27,6 @@ export class ShortcutActionsService {
     return true
   }
 
-  acceptCompletion = (): boolean => {
-    const activeTerminal = document.querySelector('.terminal-active')
-    if (activeTerminal) {
-      const event = new CustomEvent('accept-completion', { bubbles: true })
-      activeTerminal.dispatchEvent(event)
-      return true
-    }
-    return false
-  }
-
   openSettings = (): boolean => {
     this.layoutStore.openSettings()
     return true

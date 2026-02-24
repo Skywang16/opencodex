@@ -6,7 +6,6 @@ pub use error::{SetupError, SetupResult};
 
 use crate::ai::tool::shell::TerminalState;
 use crate::ai::AIManagerState;
-use crate::completion::commands::CompletionState;
 use crate::config::{ConfigManager, ShortcutManagerState};
 use crate::llm::commands::LLMManagerState;
 use crate::settings::SettingsManager;
@@ -122,20 +121,6 @@ pub fn initialize_app_states<R: tauri::Runtime>(app: &tauri::App<R>) -> SetupRes
         ThemeService::new(paths, ThemeManagerOptions::default(), cache).await
     })?;
     app.manage(Arc::new(theme_service));
-
-    let completion_state = CompletionState::new();
-    app.manage(completion_state);
-
-    // Completion learning (SQLite-backed, offline)
-    {
-        use crate::completion::learning::{CompletionLearningConfig, CompletionLearningState};
-        let database = app
-            .state::<Arc<crate::storage::DatabaseManager>>()
-            .inner()
-            .clone();
-        let learning = CompletionLearningState::new(database, CompletionLearningConfig::default());
-        app.manage(learning);
-    }
 
     // Create Shell Integration and register Node version callback
     let shell_integration = Arc::new(crate::shell::ShellIntegrationManager::new());

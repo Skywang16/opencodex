@@ -7,7 +7,6 @@ use tauri::{AppHandle, Runtime};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
-use crate::completion::output_analyzer::OutputAnalyzer;
 use crate::events::ShellEvent;
 use crate::mux::singleton::get_mux;
 use crate::mux::{MuxSessionConfig, MuxShellConfig, PaneId, PtySize, TerminalMux};
@@ -296,9 +295,8 @@ impl AgentTerminalManager {
             .get_terminal(terminal_id)
             .ok_or_else(|| "terminal not found".to_string())?;
 
-        Ok(OutputAnalyzer::global()
+        Ok(TerminalScrollback::global()
             .get_last_command_output(terminal.pane_id)
-            .map_err(|e| format!("read last command output failed: {e}"))?
             .unwrap_or_default())
     }
 
@@ -496,7 +494,8 @@ impl AgentTerminalManager {
 
         // Ensure last-command output is recorded before we notify waiters.
         // TerminalEventHandler also processes these events, but it may run after this manager.
-        let _ = OutputAnalyzer::global().on_shell_command_event(pane_id.as_u32(), &command);
+        let output = TerminalScrollback::global().get_text_lossy(pane_id.as_u32());
+        TerminalScrollback::global().set_last_command_output(pane_id.as_u32(), output);
 
         let terminal_id = {
             let pane_index = match self.pane_index.read() {

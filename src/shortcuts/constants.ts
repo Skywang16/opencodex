@@ -45,7 +45,6 @@ export const SHORTCUT_ACTIONS = {
   // Terminal functions
   new_terminal: 'new_terminal',
   clear_terminal: 'clear_terminal',
-  accept_completion: 'accept_completion',
   toggle_terminal_panel: 'toggle_terminal_panel',
 
   // UI

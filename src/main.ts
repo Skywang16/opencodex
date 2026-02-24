@@ -1,5 +1,3 @@
-import { completionApi } from '@/api'
-
 import { useAIChatStore } from '@/components/AIChatSidebar/store'
 import { useAISettingsStore } from '@/components/settings/components/AI'
 import { useLayoutStore } from '@/stores/layout'
@@ -54,7 +52,6 @@ const initializeApplication = async () => {
       aiSettingsStore.loadSettings(),
       terminalStore.initializeTerminalStore(),
       fileWatcherStore.initialize(),
-      completionApi.initEngine(),
     ])
   } catch (error) {
     console.error('Error during app initialization:', error)
