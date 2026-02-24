@@ -21,11 +21,12 @@ pnpm-debug.log*
 src-tauri/target/
 src-tauri/gen/
 src-tauri/logs/
+src-tauri/tauri.dev.conf.json
 
 # Rust build outputs
 target/
 
-# Cargo local config (mirror source for China)                                    
+# Cargo local config (mirror source for China)
 .cargo/
 
 # Documentation

@@ -28,6 +28,8 @@
   ],
   "scripts": {
     "dev": "vite",
+    "dev:vite": "vite --port 1421",
+    "tauri:dev:self": "OPENCODEX_DATA_DIR=$HOME/Library/Application\\ Support/OpenCodex-Dev npm run tauri -- dev --config src-tauri/tauri.dev.conf.json",
     "build": "vue-tsc --noEmit && vite build",
     "build:analyze": "vue-tsc --noEmit && ANALYZE=true vite build",
     "preview": "vite preview",
