@@ -1,20 +1,80 @@
 <template>
-  <!-- todowrite special rendering: simple progress list -->
-  <div v-if="isTodoWrite" class="todo-block" :class="{ running: isRunning }">
-    <div class="todo-header">
-      <span class="todo-label">Todo</span>
-      <span v-if="isRunning" class="todo-progress todo-progress-running">{{ todoProgress || 'Processing…' }}</span>
-      <span v-else class="todo-progress">{{ todoProgress }}</span>
-    </div>
-    <div v-if="todoItems.length > 0" class="todo-list">
-      <div v-for="(item, idx) in todoItems" :key="idx" class="todo-item" :class="item.status">
-        <span class="todo-icon">
-          {{ item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '▶' : '○' }}
+  <!-- todowrite special rendering -->
+  <div v-if="isTodoWrite" class="todo-block">
+    <div class="todo-header" :class="{ clickable: todoItems.length > 0 }" @click="todoExpanded = !todoExpanded">
+      <span class="todo-summary">
+        <span v-if="isRunning" class="todo-summary-text todo-summary-running">
+          {{ todoProgress ? `${todoProgress} tasks done` : 'Processing…' }}
         </span>
-        <span class="todo-text">{{ item.content }}</span>
-      </div>
+        <span v-else class="todo-summary-text">{{ todoProgress }} tasks done</span>
+      </span>
+      <svg
+        v-if="todoItems.length > 0"
+        class="todo-chevron"
+        :class="{ expanded: todoExpanded }"
+        width="10"
+        height="10"
+        viewBox="0 0 10 10"
+      >
+        <path
+          d="M3.5 2.5L6 5L3.5 7.5"
+          stroke="currentColor"
+          stroke-width="1"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          fill="none"
+        />
+      </svg>
     </div>
-    <div v-else-if="isRunning" class="todo-empty">Waiting for task output…</div>
+    <transition name="todo-expand">
+      <div v-if="todoExpanded && todoItems.length > 0" class="todo-list">
+        <div v-for="(item, idx) in todoItems" :key="idx" class="todo-item" :class="item.status">
+          <span class="todo-icon">
+            <svg v-if="item.status === 'completed'" width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <circle
+                cx="7"
+                cy="7"
+                r="6.5"
+                stroke="var(--color-success)"
+                stroke-width="1"
+                fill="color-mix(in srgb, var(--color-success) 15%, transparent)"
+              />
+              <path
+                d="M4.5 7L6.5 9L9.5 5"
+                stroke="var(--color-success)"
+                stroke-width="1.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                fill="none"
+              />
+            </svg>
+            <svg
+              v-else-if="item.status === 'in_progress'"
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              class="todo-spinner"
+            >
+              <circle
+                cx="7"
+                cy="7"
+                r="6.5"
+                stroke="var(--color-info)"
+                stroke-width="1"
+                stroke-dasharray="4 3"
+                fill="none"
+              />
+              <circle cx="7" cy="7" r="2" fill="var(--color-info)" />
+            </svg>
+            <svg v-else width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <circle cx="7" cy="7" r="6.5" stroke="var(--text-500)" stroke-width="1" fill="none" />
+            </svg>
+          </span>
+          <span class="todo-text">{{ item.content }}</span>
+        </div>
+      </div>
+    </transition>
   </div>
 
   <!-- Shell tool: independent rendering -->
@@ -116,6 +176,7 @@
   }>()
 
   const isExpanded = ref(false)
+  const todoExpanded = ref(true)
   const resultTextRef = ref<HTMLPreElement | null>(null)
   const resultWrapperRef = ref<HTMLDivElement | null>(null)
   const hasScroll = ref(false)
@@ -267,6 +328,14 @@
         return 'Loaded skill '
       case 'apply_diff':
         return 'Applied diff to '
+      case 'glob':
+        return 'Glob '
+      case 'semantic_search':
+        return 'Searched '
+      case 'multi_edit_file':
+        return 'Edited '
+      case 'task':
+        return 'Task '
       default:
         return ''
     }
@@ -301,7 +370,8 @@
         }
         return path
       }
-      case 'read_terminal': {
+      case 'read_terminal':
+      case 'read_agent_terminal': {
         const maxLines = params?.maxLines as number | undefined
         const returnedLines = extInfo?.returnedLines as number | undefined
         const totalLines = extInfo?.totalLines as number | undefined
@@ -324,6 +394,21 @@
         break
       case 'shell':
         baseText = formatText(params?.command as string)
+        break
+      case 'grep':
+        baseText = formatText(params?.pattern as string)
+        break
+      case 'glob':
+        baseText = formatText(params?.pattern as string)
+        break
+      case 'semantic_search':
+        baseText = formatText(params?.query as string)
+        break
+      case 'multi_edit_file':
+        baseText = formatPath(params?.path as string)
+        break
+      case 'task':
+        baseText = formatText(params?.description as string)
         break
       case 'opencodex_search':
         baseText = formatText(params?.query as string)
@@ -456,30 +541,35 @@
   .todo-block {
     margin: 6px 0;
     font-size: 13px;
+    background: var(--bg-100);
+    border: 1px solid var(--border-200);
+    border-radius: var(--border-radius-lg);
+    overflow: hidden;
   }
 
   .todo-header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: space-between;
+    padding: 8px 12px;
     color: var(--text-400);
-    margin-bottom: 4px;
+    user-select: none;
   }
 
-  .todo-label {
-    font-weight: 500;
+  .todo-header.clickable {
+    cursor: pointer;
   }
 
-  .todo-progress {
-    color: var(--text-500);
-    font-size: 12px;
-  }
-
-  .todo-block.running .todo-label {
+  .todo-header.clickable:hover {
     color: var(--text-300);
   }
 
-  .todo-progress-running {
+  .todo-summary-text {
+    font-size: 13px;
+    color: var(--text-400);
+  }
+
+  .todo-summary-running {
     background: linear-gradient(
       90deg,
       var(--text-500) 0%,
@@ -495,28 +585,36 @@
     animation: scan 2s linear infinite;
   }
 
-  .todo-empty {
-    font-size: 12px;
+  .todo-chevron {
+    flex-shrink: 0;
     color: var(--text-500);
-    padding-left: 18px;
+    transition: transform 0.2s ease;
+    transform: rotate(90deg);
+  }
+
+  .todo-chevron.expanded {
+    transform: rotate(270deg);
   }
 
   .todo-list {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
+    padding: 0 12px 8px;
   }
 
   .todo-item {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 0;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 3px 0;
     color: var(--text-400);
+    font-size: 13px;
+    line-height: 1.4;
   }
 
   .todo-item.completed {
-    color: var(--text-500);
+    color: var(--text-400);
   }
 
   .todo-item.in_progress {
@@ -525,21 +623,50 @@
 
   .todo-icon {
     width: 14px;
-    text-align: center;
+    height: 14px;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 2px;
   }
 
-  .todo-item.completed .todo-icon {
-    color: var(--color-success);
+  .todo-spinner {
+    animation: spin 2s linear infinite;
   }
 
-  .todo-item.in_progress .todo-icon {
-    color: var(--color-info);
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .todo-text {
     flex: 1;
     min-width: 0;
+  }
+
+  .todo-expand-enter-active,
+  .todo-expand-leave-active {
+    transition: all 0.2s ease;
+    overflow: hidden;
+  }
+
+  .todo-expand-enter-from,
+  .todo-expand-leave-to {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .todo-expand-enter-to,
+  .todo-expand-leave-from {
+    max-height: 500px;
+    opacity: 1;
   }
 
   /* Tool block styles */

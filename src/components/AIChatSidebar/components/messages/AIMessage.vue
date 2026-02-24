@@ -1,7 +1,7 @@
 <script setup lang="ts">
   import type { Block, Message } from '@/types'
   import { renderMarkdown } from '@/utils/markdown'
-  import { computed } from 'vue'
+  import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
   import { useI18n } from 'vue-i18n'
   import { useAIChatStore } from '../../store'
   import AgentSwitchBlock from './blocks/AgentSwitchBlock.vue'
@@ -25,6 +25,50 @@
   }
 
   const blocks = computed<Block[]>(() => props.message.blocks.map(normalizeBlockType))
+
+  const STREAMING_HINTS = ['Thinking...', 'Analyzing code...', 'Reading files...', 'Working on it...', 'Processing...']
+  const HINT_DELAY_MS = 3000
+  const HINT_ROTATE_MS = 3000
+
+  const hintIndex = ref(0)
+  const showHint = ref(false)
+  let delayTimer: ReturnType<typeof setTimeout> | null = null
+  let rotateTimer: ReturnType<typeof setInterval> | null = null
+
+  const currentHint = computed(() => STREAMING_HINTS[hintIndex.value % STREAMING_HINTS.length])
+  const isStreaming = computed(() => props.message.status === 'streaming')
+
+  const resetHintDelay = () => {
+    showHint.value = false
+    hintIndex.value = 0
+    if (delayTimer) clearTimeout(delayTimer)
+    if (isStreaming.value) {
+      delayTimer = setTimeout(() => {
+        showHint.value = true
+      }, HINT_DELAY_MS)
+    }
+  }
+
+  watch(() => blocks.value.length, resetHintDelay)
+  watch(isStreaming, streaming => {
+    if (streaming) {
+      resetHintDelay()
+    } else {
+      showHint.value = false
+      if (delayTimer) clearTimeout(delayTimer)
+    }
+  })
+
+  onMounted(() => {
+    resetHintDelay()
+    rotateTimer = setInterval(() => {
+      hintIndex.value = (hintIndex.value + 1) % STREAMING_HINTS.length
+    }, HINT_ROTATE_MS)
+  })
+  onBeforeUnmount(() => {
+    if (delayTimer) clearTimeout(delayTimer)
+    if (rotateTimer) clearInterval(rotateTimer)
+  })
 
   const handleMessageClick = async (event: MouseEvent) => {
     const target = event.target as HTMLElement
@@ -64,9 +108,10 @@
     </div>
 
     <template v-else-if="blocks.length > 0">
-      <template
+      <div
         v-for="(block, index) in blocks"
         :key="('id' in block && block.id) || `${message.id}-${block.type}-${index}`"
+        :class="{ 'block-fade-in': isStreaming }"
       >
         <ThinkingBlock v-if="block.type === 'thinking'" :block="block" :disable-expand="disableToolExpand" />
 
@@ -105,26 +150,26 @@
             <span class="unknown-label">Unknown block type: {{ block.type }}</span>
           </div>
         </div>
-      </template>
+      </div>
     </template>
 
-    <div v-if="blocks.length === 0 && !message.isSummary" class="empty-message-status">
-      <template v-if="message.status === 'streaming' && aiChatStore.retryStatus">
-        <div class="retry-status">
-          <span class="retry-label">
-            {{ t('message.reconnecting', 'Reconnecting...') }} {{ aiChatStore.retryStatus.attempt }}/{{
-              aiChatStore.retryStatus.maxAttempts
-            }}
-          </span>
-          <span class="retry-error">{{ aiChatStore.retryStatus.errorMessage }}</span>
-        </div>
-      </template>
-      <template v-else-if="message.status === 'streaming'">
-        {{ t('message.generating') }}
-      </template>
-      <template v-else>
-        {{ t('message.empty_response', 'No response from model') }}
-      </template>
+    <div v-if="isStreaming && showHint" class="streaming-hint">
+      <span class="streaming-hint-text">{{ currentHint }}</span>
+    </div>
+
+    <div v-if="isStreaming && aiChatStore.retryStatus" class="empty-message-status">
+      <div class="retry-status">
+        <span class="retry-label">
+          {{ t('message.reconnecting', 'Reconnecting...') }} {{ aiChatStore.retryStatus.attempt }}/{{
+            aiChatStore.retryStatus.maxAttempts
+          }}
+        </span>
+        <span class="retry-error">{{ aiChatStore.retryStatus.errorMessage }}</span>
+      </div>
+    </div>
+
+    <div v-if="blocks.length === 0 && !message.isSummary && !isStreaming" class="empty-message-status">
+      {{ t('message.empty_response', 'No response from model') }}
     </div>
   </div>
 </template>
@@ -157,6 +202,21 @@
     color: var(--text-500);
   }
 
+  .block-fade-in {
+    animation: block-enter 0.3s ease-out;
+  }
+
+  @keyframes block-enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
   .step-block {
     margin-bottom: var(--spacing-sm);
   }
@@ -172,6 +232,37 @@
 
   .error-message {
     color: color-mix(in srgb, var(--color-error) 60%, var(--text-400));
+  }
+
+  .streaming-hint {
+    padding: 4px 0;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .streaming-hint-text {
+    background: linear-gradient(
+      90deg,
+      var(--text-500) 0%,
+      var(--text-500) 25%,
+      var(--text-200) 50%,
+      var(--text-500) 75%,
+      var(--text-500) 100%
+    );
+    background-size: 300% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: hint-scan 2s linear infinite;
+  }
+
+  @keyframes hint-scan {
+    0% {
+      background-position: 100% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
   }
 
   .empty-message-status {

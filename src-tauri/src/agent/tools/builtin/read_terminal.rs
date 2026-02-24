@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 
+use super::file_utils::lenient;
 use crate::agent::core::context::TaskContext;
 use crate::agent::error::{ToolExecutorError, ToolExecutorResult};
 use crate::agent::terminal::AgentTerminalManager;
@@ -16,6 +17,7 @@ use crate::terminal::TerminalScrollback;
 #[serde(rename_all = "camelCase")]
 struct ReadTerminalArgs {
     terminal_id: Option<String>,
+    #[serde(default, deserialize_with = "lenient::deserialize_opt_usize")]
     max_lines: Option<usize>,
 }
 

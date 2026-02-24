@@ -266,7 +266,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const createSession = async (workspacePath: string, title?: string) => {
     await workspaceApi.getOrCreate(workspacePath)
-    const session = await workspaceApi.createSession(workspacePath, title ?? 'New Chat')
+    const session = await workspaceApi.createSession(workspacePath, title ?? '')
     const node = tree.value.get(workspacePath)
     if (node) {
       tree.value = new Map(tree.value).set(workspacePath, {

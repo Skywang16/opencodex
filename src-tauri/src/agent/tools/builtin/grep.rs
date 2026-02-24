@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
 
-use super::file_utils::{ensure_absolute, normalize_path};
+use super::file_utils::{ensure_absolute, lenient, normalize_path};
 use crate::agent::context::FileOperationRecord;
 use crate::agent::context::FileRecordSource;
 use crate::agent::core::context::TaskContext;
@@ -53,20 +53,22 @@ const BUILTIN_SKIP_DIRS: &[&str] = &[
 #[serde(rename_all = "camelCase")]
 struct GrepArgs {
     pattern: String,
-    #[serde(alias = "max_results")]
+    #[serde(
+        alias = "max_results",
+        default,
+        deserialize_with = "lenient::deserialize_opt_usize"
+    )]
     max_results: Option<usize>,
     path: Option<String>,
-    /// Glob pattern to filter files (e.g. "*.js", "*.{ts,tsx}")
     include: Option<String>,
-    /// Number of context lines before and after each match
-    #[serde(alias = "context_lines")]
+    #[serde(
+        alias = "context_lines",
+        default,
+        deserialize_with = "lenient::deserialize_opt_usize"
+    )]
     context_lines: Option<usize>,
-    /// Case insensitive search
     #[serde(alias = "case_insensitive", default)]
     ignore_case: Option<bool>,
-    /// Output mode: "content" (default, matching lines with snippets),
-    /// "files_with_matches" (only file paths - much faster, saves tokens),
-    /// "count" (match counts per file)
     #[serde(alias = "output_mode")]
     output_mode: Option<String>,
 }
@@ -537,16 +539,15 @@ Examples:
 
         let started = Instant::now();
 
-        // Execute search — all modes produce (file_paths, summary, details, ext_info)
+        // Execute search — all modes produce (file_paths, details, ext_info)
         let outcome: Result<GrepOutcome, String> = match output_mode {
             "files_with_matches" => self
                 .grep_files_only(&search_path, pattern, max_results, args.include.as_deref(), ignore_case)
                 .await
                 .map(|files| {
-                    let summary = format!("Found {} files matching \"{}\"", files.len(), pattern);
                     let details = files.join("\n");
                     let ext = json!({ "files": &files, "totalFound": files.len(), "pattern": pattern });
-                    GrepOutcome { file_paths: files, summary, details, ext_info: ext }
+                    GrepOutcome { file_paths: files, details, ext_info: ext }
                 }),
             "count" => self
                 .grep_count(&search_path, pattern, max_results, args.include.as_deref(), ignore_case)
@@ -554,10 +555,9 @@ Examples:
                 .map(|entries| {
                     let total: usize = entries.iter().map(|e| e.count).sum();
                     let file_paths: Vec<String> = entries.iter().map(|e| e.file_path.clone()).collect();
-                    let summary = format!("Found {} total matches across {} files", total, entries.len());
                     let details = format_count_details(&entries);
                     let ext = json!({ "counts": entries, "totalMatches": total, "totalFiles": entries.len(), "pattern": pattern });
-                    GrepOutcome { file_paths, summary, details, ext_info: ext }
+                    GrepOutcome { file_paths, details, ext_info: ext }
                 }),
             _ => {
                 let context_lines = args.context_lines.unwrap_or(0).min(10);
@@ -565,10 +565,9 @@ Examples:
                     .await
                     .map(|entries| {
                         let file_paths: Vec<String> = entries.iter().map(|e| e.file_path.clone()).collect();
-                        let summary = format!("Found {} matches", entries.len());
                         let details = format_result_details(&entries);
                         let ext = json!({ "results": entries, "totalFound": entries.len(), "pattern": pattern });
-                        GrepOutcome { file_paths, summary, details, ext_info: ext }
+                        GrepOutcome { file_paths, details, ext_info: ext }
                     })
             }
         };
@@ -603,10 +602,7 @@ Examples:
                 }
 
                 Ok(ToolResult {
-                    content: vec![ToolResultContent::Success(format!(
-                        "{} ({}ms)\n\n{}",
-                        outcome.summary, elapsed_ms, outcome.details
-                    ))],
+                    content: vec![ToolResultContent::Success(outcome.details)],
                     status: ToolResultStatus::Success,
                     cancel_reason: None,
                     execution_time_ms: Some(elapsed_ms),
@@ -620,7 +616,6 @@ Examples:
 
 struct GrepOutcome {
     file_paths: Vec<String>,
-    summary: String,
     details: String,
     ext_info: serde_json::Value,
 }

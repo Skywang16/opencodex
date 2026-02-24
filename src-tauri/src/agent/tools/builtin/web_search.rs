@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
 
+use super::file_utils::lenient;
 use crate::agent::core::context::TaskContext;
 use crate::agent::error::{ToolExecutorError, ToolExecutorResult};
 use crate::agent::tools::{
@@ -21,12 +22,13 @@ static EXA_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
 
 #[derive(Debug, Deserialize)]
 struct WebSearchArgs {
-    /// Search query keywords
     query: String,
-    /// Optional: number of results (default 5, max 10)
-    #[serde(alias = "numResults")]
+    #[serde(
+        alias = "numResults",
+        default,
+        deserialize_with = "lenient::deserialize_opt_u8"
+    )]
     num_results: Option<u8>,
-    /// Optional: search type - "auto" (default), "fast", or "deep"
     #[serde(rename = "type")]
     search_type: Option<String>,
 }

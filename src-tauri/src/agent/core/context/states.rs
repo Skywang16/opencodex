@@ -4,7 +4,6 @@ use tauri::ipc::Channel;
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::core::context::AgentToolCallResult;
 use crate::agent::core::status::AgentTaskStatus;
 use crate::agent::react::runtime::ReactRuntime;
 use crate::agent::types::{Message, TaskEvent};
@@ -17,10 +16,9 @@ pub(crate) struct ExecutionState {
     pub(crate) runtime_status: AgentTaskStatus,
     pub(crate) system_prompt: Option<SystemPrompt>,
     pub(crate) system_prompt_overlay: Option<SystemPrompt>,
-    /// Simplified: use Vec instead of MessageRingBuffer
+    /// Used by subtask/lifecycle init only; orchestrator reloads from DB.
     pub(crate) messages: Vec<MessageParam>,
     pub(crate) message_sequence: i64,
-    pub(crate) tool_results: Vec<AgentToolCallResult>,
     pub(crate) current_iteration: u32,
     pub(crate) error_count: u32,
 }
@@ -33,16 +31,12 @@ impl ExecutionState {
             system_prompt_overlay: None,
             messages: Vec::new(),
             message_sequence: 0,
-            tool_results: Vec::new(),
             current_iteration: 0,
             error_count: 0,
         }
     }
 
-    pub fn messages_vec(&self) -> Vec<MessageParam>
-    where
-        MessageParam: Clone,
-    {
+    pub fn messages_vec(&self) -> Vec<MessageParam> {
         self.messages.clone()
     }
 }

@@ -33,7 +33,6 @@ use crate::agent::workspace_changes::WorkspaceChangeJournal;
 use crate::checkpoint::CheckpointService;
 use crate::llm::anthropic_types::{
     ContentBlock, MessageContent, MessageParam, MessageRole as AnthropicRole, SystemPrompt,
-    ToolResultContent,
 };
 use crate::storage::DatabaseManager;
 use tokio_util::sync::CancellationToken;
@@ -311,7 +310,6 @@ impl TaskContext {
             exec.current_iteration
         };
 
-        self.state_manager.increment_iteration().await;
         Ok(current)
     }
 
@@ -327,7 +325,6 @@ impl TaskContext {
             exec.error_count = exec.error_count.saturating_add(1);
             exec.error_count
         };
-        self.state_manager.increment_error_count().await;
         Ok(count)
     }
 
@@ -336,7 +333,6 @@ impl TaskContext {
             let mut exec = self.states.execution.write().await;
             exec.error_count = 0;
         };
-        self.state_manager.reset_error_count().await;
         Ok(())
     }
 
@@ -356,9 +352,7 @@ impl TaskContext {
         ) {
             return true;
         }
-        self.state_manager.should_halt().await
-            || iteration >= self.config.max_iterations
-            || errors >= self.config.max_errors
+        iteration >= self.config.max_iterations || errors >= self.config.max_errors
     }
 
     /// Access the execution configuration (zero-cost access).
@@ -369,10 +363,6 @@ impl TaskContext {
     /// Access repositories (used by LLM/tool bridges).
     pub fn repositories(&self) -> Arc<DatabaseManager> {
         self.session.repositories()
-    }
-
-    pub fn state_manager(&self) -> Arc<StateManager> {
-        Arc::clone(&self.state_manager)
     }
 
     /// Batch read state - reduce lock contention, acquire all needed data in one lock
@@ -434,72 +424,20 @@ impl TaskContext {
         self.states.abort_token.child_token()
     }
 
-    /// Add assistant message using Anthropic-native types (text and/or tool uses).
+    /// No-op: orchestrator reloads from DB each iteration.
     pub async fn add_assistant_message(
         &self,
-        text: Option<String>,
-        tool_calls: Option<Vec<ContentBlock>>,
+        _text: Option<String>,
+        _tool_calls: Option<Vec<ContentBlock>>,
     ) -> TaskExecutorResult<()> {
-        let content: MessageContent = match (text, tool_calls) {
-            (Some(t), Some(mut calls)) => {
-                // Put text as a Text block, then append tool_use blocks
-                calls.insert(
-                    0,
-                    ContentBlock::Text {
-                        text: t,
-                        cache_control: None,
-                    },
-                );
-                MessageContent::Blocks(calls)
-            }
-            (Some(t), None) => MessageContent::Text(t),
-            (None, Some(calls)) => MessageContent::Blocks(calls),
-            (None, None) => MessageContent::Text(String::new()),
-        };
-
-        {
-            let mut exec = self.states.execution.write().await;
-            exec.messages.push(MessageParam {
-                role: AnthropicRole::Assistant,
-                content: content.clone(),
-            });
-        }
         Ok(())
     }
 
-    /// Append tool results as a user message with ToolResult blocks; also persist tool rows.
+    /// No-op: tool results persisted via assistant_update_block; orchestrator reloads from DB.
     pub async fn add_tool_results(
         &self,
-        results: Vec<AgentToolCallResult>,
+        _results: Vec<AgentToolCallResult>,
     ) -> TaskExecutorResult<()> {
-        let blocks: Vec<ContentBlock> = results
-            .iter()
-            .map(|r| {
-                // r.result is now a JSON Value that contains the actual result content
-                // It could be a string, number, object, or array - convert to appropriate string representation
-                let result_text = if r.result.is_string() {
-                    r.result.as_str().unwrap_or("").to_string()
-                } else {
-                    // For non-string values, serialize to JSON string
-                    serde_json::to_string(&r.result).unwrap_or_else(|_| r.result.to_string())
-                };
-
-                ContentBlock::ToolResult {
-                    tool_use_id: r.call_id.clone(),
-                    content: Some(ToolResultContent::Text(result_text)),
-                    is_error: Some(r.status != crate::agent::tools::ToolResultStatus::Success),
-                }
-            })
-            .collect();
-
-        {
-            let mut exec = self.states.execution.write().await;
-            exec.tool_results.extend(results);
-            exec.messages.push(MessageParam {
-                role: AnthropicRole::User,
-                content: MessageContent::Blocks(blocks),
-            });
-        }
         Ok(())
     }
 

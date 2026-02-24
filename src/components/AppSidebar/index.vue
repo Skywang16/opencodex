@@ -5,6 +5,7 @@
   import { useWorkspaceStore } from '@/stores/workspace'
   import { confirmDanger } from '@/ui'
   import { formatRelativeTime } from '@/utils/dateFormatter'
+  import { onBeforeUnmount } from 'vue'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { open } from '@tauri-apps/plugin-dialog'
   import { storeToRefs } from 'pinia'
@@ -193,24 +194,53 @@
     await workspaceStore.createSession(workspacePath)
   }
 
+  const confirmingDeleteId = ref<number | null>(null)
+  const confirmingDeleteWorkspace = ref<string | null>(null)
+  let confirmingTimer: ReturnType<typeof setTimeout> | null = null
+
+  const clearConfirmingTimer = () => {
+    if (confirmingTimer) {
+      clearTimeout(confirmingTimer)
+      confirmingTimer = null
+    }
+  }
+
+  onBeforeUnmount(clearConfirmingTimer)
+
+  const resetConfirming = () => {
+    clearConfirmingTimer()
+    confirmingDeleteId.value = null
+    confirmingDeleteWorkspace.value = null
+  }
+
   const handleDeleteWorkspace = async (event: MouseEvent, workspacePath: string) => {
     event.stopPropagation()
-    const confirmed = await confirmDanger(
-      t('sidebar.delete_workspace_confirm') || 'Are you sure you want to delete this workspace?',
-      t('sidebar.delete_workspace') || 'Delete Workspace'
-    )
-    if (!confirmed) return
-    await workspaceStore.deleteWorkspace(workspacePath)
+    if (confirmingDeleteWorkspace.value === workspacePath) {
+      clearConfirmingTimer()
+      confirmingDeleteWorkspace.value = null
+      await workspaceStore.deleteWorkspace(workspacePath)
+    } else {
+      clearConfirmingTimer()
+      confirmingDeleteWorkspace.value = workspacePath
+      confirmingTimer = setTimeout(() => {
+        confirmingDeleteWorkspace.value = null
+      }, 2000)
+    }
   }
 
   const handleDeleteSession = async (event: MouseEvent, session: SessionRecord) => {
     event.stopPropagation()
-    const confirmed = await confirmDanger(
-      t('sidebar.delete_session_confirm') || 'Are you sure you want to delete this session?',
-      t('sidebar.delete_session') || 'Delete Session'
-    )
-    if (!confirmed) return
-    await workspaceStore.deleteSession(session.id, session.workspacePath)
+    if (confirmingDeleteId.value === session.id) {
+      clearConfirmingTimer()
+      confirmingDeleteId.value = null
+      await workspaceStore.deleteSession(session.id, session.workspacePath)
+    } else {
+      clearConfirmingTimer()
+      confirmingDeleteId.value = session.id
+      confirmingTimer = setTimeout(() => {
+        confirmingDeleteId.value = null
+      }, 2000)
+    }
   }
 
   defineExpose({ activeSettingsSection })
@@ -307,6 +337,7 @@
                 class="workspace-item"
                 :class="{ expanded: isExpanded(workspace.path), active: isWorkspaceActive(workspace.path) }"
                 @click="handleToggleWorkspace(workspace.path)"
+                @mouseleave="resetConfirming"
               >
                 <span class="workspace-icon-slot" :class="{ expanded: isExpanded(workspace.path) }">
                   <!-- Arrow (shown on hover or when expanded) -->
@@ -375,10 +406,25 @@
                   </button>
                   <button
                     class="action-btn delete-btn"
-                    :title="t('sidebar.delete_workspace')"
+                    :class="{ confirming: confirmingDeleteWorkspace === workspace.path }"
+                    :title="
+                      confirmingDeleteWorkspace === workspace.path ? t('common.confirm') : t('sidebar.delete_workspace')
+                    "
                     @click="handleDeleteWorkspace($event, workspace.path)"
                   >
                     <svg
+                      v-if="confirmingDeleteWorkspace === workspace.path"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                    <svg
+                      v-else
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
@@ -405,6 +451,7 @@
                     class="session-item"
                     :class="{ active: isSessionActive(session), loading: isSessionLoading(session) }"
                     @click.stop="handleSelectSession(session)"
+                    @mouseleave="resetConfirming"
                   >
                     <span v-if="isSessionLoading(session)" class="session-loading">
                       <svg viewBox="0 0 16 16" fill="none">
@@ -416,10 +463,23 @@
                       <span class="session-time">{{ formatRelativeTime(session.updatedAt * 1000) }}</span>
                       <button
                         class="delete-btn"
-                        :title="t('sidebar.delete_session')"
+                        :class="{ confirming: confirmingDeleteId === session.id }"
+                        :title="confirmingDeleteId === session.id ? t('common.confirm') : t('sidebar.delete_session')"
                         @click="handleDeleteSession($event, session)"
                       >
                         <svg
+                          v-if="confirmingDeleteId === session.id"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path d="M20 6L9 17l-5-5" />
+                        </svg>
+                        <svg
+                          v-else
                           viewBox="0 0 24 24"
                           fill="none"
                           stroke="currentColor"
@@ -837,6 +897,10 @@
     color: var(--color-error, #ef4444);
   }
 
+  .action-btn.delete-btn.confirming {
+    color: var(--text-400);
+  }
+
   /* Session-level delete button */
   .session-trailing .delete-btn {
     display: flex;
@@ -850,7 +914,7 @@
     background: transparent;
     border: none;
     border-radius: var(--border-radius-sm);
-    color: var(--text-500);
+    color: var(--text-400);
     cursor: pointer;
     opacity: 0;
     transition:
@@ -868,6 +932,11 @@
   .session-trailing .delete-btn:hover {
     background: var(--color-hover);
     color: var(--color-error, #ef4444);
+  }
+
+  .session-trailing .delete-btn.confirming {
+    opacity: 1;
+    color: var(--text-400);
   }
 
   .loading-indicator {
@@ -983,7 +1052,7 @@
 
   .session-time {
     font-size: 12px;
-    color: var(--text-500);
+    color: var(--text-400);
     white-space: nowrap;
   }
 

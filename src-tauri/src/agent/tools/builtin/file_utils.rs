@@ -2,6 +2,66 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::agent::error::ToolExecutorError;
 
+/// Lenient deserializers: accept both number and string (e.g. `15` or `"15"`).
+/// LLMs sometimes quote numeric arguments — these helpers make serde tolerant.
+pub(crate) mod lenient {
+    use serde::{Deserialize, Deserializer};
+
+    pub fn deserialize_opt_usize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<usize>, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Val {
+            Num(usize),
+            Str(String),
+            Null,
+        }
+        match Val::deserialize(deserializer)? {
+            Val::Num(n) => Ok(Some(n)),
+            Val::Str(s) if s.is_empty() => Ok(None),
+            Val::Str(s) => s.parse().map(Some).map_err(serde::de::Error::custom),
+            Val::Null => Ok(None),
+        }
+    }
+
+    pub fn deserialize_opt_u8<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<u8>, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Val {
+            Num(u8),
+            Str(String),
+            Null,
+        }
+        match Val::deserialize(deserializer)? {
+            Val::Num(n) => Ok(Some(n)),
+            Val::Str(s) if s.is_empty() => Ok(None),
+            Val::Str(s) => s.parse().map(Some).map_err(serde::de::Error::custom),
+            Val::Null => Ok(None),
+        }
+    }
+
+    pub fn deserialize_opt_u64<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<u64>, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Val {
+            Num(u64),
+            Str(String),
+            Null,
+        }
+        match Val::deserialize(deserializer)? {
+            Val::Num(n) => Ok(Some(n)),
+            Val::Str(s) if s.is_empty() => Ok(None),
+            Val::Str(s) => s.parse().map(Some).map_err(serde::de::Error::custom),
+            Val::Null => Ok(None),
+        }
+    }
+}
+
 /// List of extensions treated as binary to mirror front-end safeguards.
 fn binary_extension(ext: &str) -> bool {
     matches!(

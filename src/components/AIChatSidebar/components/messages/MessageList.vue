@@ -206,11 +206,6 @@
             <span class="quick-card-time">{{ formatRelativeTime(session.updatedAt * 1000) }}</span>
           </div>
         </div>
-
-        <!-- Explore more link -->
-        <button v-if="recentSessions.length > 0" class="explore-more" @click="handleWorkspaceDropdown">
-          {{ t('message_list.explore_more') }}
-        </button>
       </div>
     </div>
 
@@ -389,21 +384,6 @@
   .quick-card-time {
     font-size: 11px;
     color: var(--text-500);
-  }
-
-  .explore-more {
-    margin-top: 16px;
-    padding: 4px 8px;
-    background: none;
-    border: none;
-    color: var(--text-400);
-    font-size: 13px;
-    cursor: pointer;
-    transition: color 0.15s ease;
-  }
-
-  .explore-more:hover {
-    color: var(--text-200);
   }
 
   .message-container {

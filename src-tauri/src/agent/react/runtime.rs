@@ -134,16 +134,6 @@ impl ReactRuntime {
         }
     }
 
-    pub fn should_halt(&self) -> bool {
-        if self.iterations.len() as u32 >= self.config.max_iterations {
-            return true;
-        }
-        if self.consecutive_errors >= self.config.max_consecutive_errors {
-            return true;
-        }
-        false
-    }
-
     pub fn config(&self) -> &ReactRuntimeConfig {
         &self.config
     }

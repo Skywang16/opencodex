@@ -1,9 +1,13 @@
 use std::sync::Arc;
 
+use serde_json::Value as JsonValue;
+
 use crate::agent::error::AgentResult;
 use crate::agent::persistence::AgentPersistence;
-use crate::agent::types::{Block, MessageRole, ToolStatus};
-use crate::llm::anthropic_types::{MessageContent, MessageParam, MessageRole as AnthropicRole};
+use crate::agent::types::{Block, MessageRole, MessageStatus, ToolStatus};
+use crate::llm::anthropic_types::{
+    ContentBlock, MessageContent, MessageParam, MessageRole as AnthropicRole, ToolResultContent,
+};
 
 pub struct SessionMessageLoader {
     persistence: Arc<AgentPersistence>,
@@ -14,13 +18,15 @@ impl SessionMessageLoader {
         Self { persistence }
     }
 
+    /// Load persisted messages into Anthropic `MessageParam` format.
+    /// Guarantees strict User/Assistant alternation with User first.
     pub async fn load_for_llm(&self, session_id: i64) -> AgentResult<Vec<MessageParam>> {
         let messages = self
             .persistence
             .messages()
             .list_by_session(session_id)
             .await?;
-        let mut out = Vec::new();
+        let mut out: Vec<MessageParam> = Vec::new();
 
         let start_idx = messages
             .iter()
@@ -30,71 +36,91 @@ impl SessionMessageLoader {
             .unwrap_or(0);
 
         for msg in messages.into_iter().skip(start_idx) {
-            let Some(text) = extract_plain_text(&msg.blocks, &msg.role) else {
-                continue;
-            };
+            match msg.role {
+                MessageRole::User => {
+                    let text = extract_user_text(&msg.blocks).unwrap_or_else(|| ".".to_string());
+                    push_msg(&mut out, AnthropicRole::User, MessageContent::Text(text));
+                }
+                MessageRole::Assistant => {
+                    if matches!(msg.status, MessageStatus::Error) {
+                        continue;
+                    }
 
-            let role = match msg.role {
-                MessageRole::User => AnthropicRole::User,
-                MessageRole::Assistant => AnthropicRole::Assistant,
-            };
+                    let (assistant_blocks, tool_results) = build_assistant_blocks(&msg.blocks);
 
-            out.push(MessageParam {
-                role,
-                content: MessageContent::Text(text),
-            });
+                    if assistant_blocks.is_empty() {
+                        continue;
+                    }
+
+                    push_msg(
+                        &mut out,
+                        AnthropicRole::Assistant,
+                        MessageContent::Blocks(assistant_blocks),
+                    );
+
+                    if !tool_results.is_empty() {
+                        push_msg(
+                            &mut out,
+                            AnthropicRole::User,
+                            MessageContent::Blocks(tool_results),
+                        );
+                    }
+                }
+            }
+        }
+
+        if out
+            .first()
+            .is_some_and(|m| m.role == AnthropicRole::Assistant)
+        {
+            out.insert(
+                0,
+                MessageParam {
+                    role: AnthropicRole::User,
+                    content: MessageContent::Text(".".to_string()),
+                },
+            );
         }
 
         Ok(out)
     }
 }
 
-fn extract_plain_text(blocks: &[Block], role: &MessageRole) -> Option<String> {
-    let mut parts = Vec::new();
-
-    match role {
-        MessageRole::User => {
-            for block in blocks {
-                if let Block::UserText(b) = block {
-                    if !b.content.trim().is_empty() {
-                        parts.push(b.content.trim().to_string());
-                    }
-                }
-            }
+/// Push a message, merging into the previous one if same role.
+fn push_msg(out: &mut Vec<MessageParam>, role: AnthropicRole, content: MessageContent) {
+    if let Some(last) = out.last_mut() {
+        if last.role == role {
+            let existing =
+                std::mem::replace(&mut last.content, MessageContent::Text(String::new()));
+            let mut blocks = to_blocks(existing);
+            blocks.extend(to_blocks(content));
+            last.content = MessageContent::Blocks(blocks);
+            return;
         }
-        MessageRole::Assistant => {
-            for block in blocks {
-                match block {
-                    Block::Text(b) => {
-                        if !b.content.trim().is_empty() {
-                            parts.push(b.content.trim().to_string());
-                        }
-                    }
-                    Block::Tool(b) => {
-                        if matches!(
-                            b.status,
-                            ToolStatus::Completed | ToolStatus::Error | ToolStatus::Cancelled
-                        ) {
-                            if let Some(preview) = tool_block_preview(b) {
-                                parts.push(preview);
-                            }
-                        }
-                    }
-                    Block::Subtask(b) => {
-                        if let Some(summary) = &b.summary {
-                            if !summary.trim().is_empty() {
-                                parts.push(summary.trim().to_string());
-                            }
-                        }
-                    }
-                    _ => {}
-                }
+    }
+    out.push(MessageParam { role, content });
+}
+
+fn to_blocks(content: MessageContent) -> Vec<ContentBlock> {
+    match content {
+        MessageContent::Blocks(b) => b,
+        MessageContent::Text(t) => vec![ContentBlock::Text {
+            text: t,
+            cache_control: None,
+        }],
+    }
+}
+
+fn extract_user_text(blocks: &[Block]) -> Option<String> {
+    let mut parts = Vec::new();
+    for block in blocks {
+        if let Block::UserText(b) = block {
+            if !b.content.trim().is_empty() {
+                parts.push(b.content.trim().to_string());
             }
         }
     }
-
     let out = parts.join("\n");
-
     if out.trim().is_empty() {
         None
     } else {
@@ -102,43 +128,117 @@ fn extract_plain_text(blocks: &[Block], role: &MessageRole) -> Option<String> {
     }
 }
 
-fn tool_block_preview(block: &crate::agent::types::ToolBlock) -> Option<String> {
-    // Keep tool context small; we only need enough to prevent pointless re-runs.
-    let mut out = String::new();
-    out.push_str("Tool ");
-    out.push_str(block.name.as_str());
+/// Split assistant blocks into (assistant content, tool_result) pair.
+fn build_assistant_blocks(blocks: &[Block]) -> (Vec<ContentBlock>, Vec<ContentBlock>) {
+    let mut assistant_blocks: Vec<ContentBlock> = Vec::new();
+    let mut tool_results: Vec<ContentBlock> = Vec::new();
 
-    match block.status {
-        ToolStatus::Completed => out.push_str(" completed."),
-        ToolStatus::Error => out.push_str(" errored."),
-        ToolStatus::Cancelled => out.push_str(" cancelled."),
-        _ => {}
+    for block in blocks {
+        match block {
+            Block::Text(b) => {
+                if !b.content.trim().is_empty() {
+                    assistant_blocks.push(ContentBlock::Text {
+                        text: b.content.clone(),
+                        cache_control: None,
+                    });
+                }
+            }
+            Block::Tool(b) => {
+                assistant_blocks.push(ContentBlock::ToolUse {
+                    id: b.call_id.clone(),
+                    name: b.name.clone(),
+                    input: b.input.clone(),
+                });
+
+                match b.status {
+                    ToolStatus::Completed => {
+                        let result_text = tool_output_text(b);
+                        tool_results.push(ContentBlock::ToolResult {
+                            tool_use_id: b.call_id.clone(),
+                            content: Some(ToolResultContent::Text(result_text)),
+                            is_error: Some(false),
+                        });
+                    }
+                    ToolStatus::Error => {
+                        tool_results.push(ContentBlock::ToolResult {
+                            tool_use_id: b.call_id.clone(),
+                            content: Some(ToolResultContent::Text(tool_output_text(b))),
+                            is_error: Some(true),
+                        });
+                    }
+                    ToolStatus::Cancelled => {
+                        let reason = b
+                            .output
+                            .as_ref()
+                            .and_then(|o| o.cancel_reason.clone())
+                            .unwrap_or_else(|| "Tool execution was cancelled".to_string());
+                        tool_results.push(ContentBlock::ToolResult {
+                            tool_use_id: b.call_id.clone(),
+                            content: Some(ToolResultContent::Text(reason)),
+                            is_error: Some(true),
+                        });
+                    }
+                    ToolStatus::Pending | ToolStatus::Running => {
+                        tool_results.push(ContentBlock::ToolResult {
+                            tool_use_id: b.call_id.clone(),
+                            content: Some(ToolResultContent::Text(
+                                "[Tool execution was interrupted]".to_string(),
+                            )),
+                            is_error: Some(true),
+                        });
+                    }
+                }
+            }
+            Block::Thinking(b) => {
+                if !b.content.trim().is_empty() {
+                    let signature = b.metadata.as_ref().and_then(|m| m.signature.clone());
+                    assistant_blocks.push(ContentBlock::Thinking {
+                        thinking: b.content.clone(),
+                        signature,
+                        reasoning_metadata: b.metadata.clone(),
+                    });
+                }
+            }
+            Block::Subtask(b) => {
+                if let Some(summary) = &b.summary {
+                    if !summary.trim().is_empty() {
+                        assistant_blocks.push(ContentBlock::Text {
+                            text: summary.trim().to_string(),
+                            cache_control: None,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
+    (assistant_blocks, tool_results)
+}
+
+fn tool_output_text(block: &crate::agent::types::ToolBlock) -> String {
     let Some(output) = block.output.as_ref() else {
-        return Some(out);
+        return "(no output)".to_string();
     };
 
-    let rendered = if let Some(s) = output.content.as_str() {
-        s.to_string()
-    } else {
-        // Compact JSON to reduce token cost.
-        serde_json::to_string(&output.content).unwrap_or_default()
+    if block.compacted_at.is_some() {
+        return "[Old tool result content cleared]".to_string();
+    }
+
+    let rendered = match &output.content {
+        JsonValue::String(s) => s.clone(),
+        other => serde_json::to_string(other).unwrap_or_default(),
     };
 
-    let rendered = rendered.trim();
+    let rendered = rendered.trim().to_string();
     if rendered.is_empty() {
-        return Some(out);
+        return "(empty result)".to_string();
     }
 
     const MAX: usize = 10000;
-    out.push('\n');
     if rendered.len() > MAX {
-        out.push_str(&rendered[..MAX]);
-        out.push_str("\n\n[...content too long, truncated]");
+        format!("{}...\n[content truncated]", &rendered[..MAX])
     } else {
-        out.push_str(rendered);
+        rendered
     }
-
-    Some(out)
 }

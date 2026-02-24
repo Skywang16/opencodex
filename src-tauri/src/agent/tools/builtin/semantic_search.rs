@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::json;
 use tokio::fs;
 
-use super::file_utils::{ensure_absolute, normalize_path};
+use super::file_utils::{ensure_absolute, lenient, normalize_path};
 use crate::agent::context::FileOperationRecord;
 use crate::agent::context::FileRecordSource;
 use crate::agent::core::context::TaskContext;
@@ -27,6 +27,7 @@ const SNIPPET_MAX_LEN: usize = 200;
 #[serde(rename_all = "camelCase")]
 struct SemanticSearchArgs {
     query: String,
+    #[serde(default, deserialize_with = "lenient::deserialize_opt_usize")]
     max_results: Option<usize>,
     path: Option<String>,
 }
@@ -221,13 +222,10 @@ Examples:
                     });
                 }
 
-                let summary = format!("Found {} results ({}ms)", entries.len(), elapsed_ms);
                 let details = format_result_details(&entries);
 
                 Ok(ToolResult {
-                    content: vec![ToolResultContent::Success(format!(
-                        "{summary}\n\n{details}"
-                    ))],
+                    content: vec![ToolResultContent::Success(details)],
                     status: ToolResultStatus::Success,
                     cancel_reason: None,
                     execution_time_ms: Some(elapsed_ms),

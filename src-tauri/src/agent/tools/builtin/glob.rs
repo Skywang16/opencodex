@@ -6,7 +6,7 @@ use ignore::WalkBuilder;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::file_utils::{ensure_absolute, normalize_path};
+use super::file_utils::{ensure_absolute, lenient, normalize_path};
 use crate::agent::context::FileOperationRecord;
 use crate::agent::context::FileRecordSource;
 use crate::agent::core::context::TaskContext;
@@ -46,12 +46,13 @@ const BUILTIN_SKIP_DIRS: &[&str] = &[
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GlobArgs {
-    /// Glob pattern to match files against (e.g. "**/*.ts", "src/**/*.vue")
     pattern: String,
-    /// Optional directory to search in (default: workspace root)
     path: Option<String>,
-    /// Max number of results (default: 100, max: 500)
-    #[serde(alias = "max_results")]
+    #[serde(
+        alias = "max_results",
+        default,
+        deserialize_with = "lenient::deserialize_opt_usize"
+    )]
     max_results: Option<usize>,
 }
 
@@ -211,18 +212,10 @@ Examples:
                     });
                 }
 
-                let summary = format!(
-                    "Found {} files matching \"{}\" ({}ms)",
-                    paths.len(),
-                    effective_pattern,
-                    elapsed_ms
-                );
                 let listing = paths.join("\n");
 
                 Ok(ToolResult {
-                    content: vec![ToolResultContent::Success(format!(
-                        "{summary}\n\n{listing}"
-                    ))],
+                    content: vec![ToolResultContent::Success(listing)],
                     status: ToolResultStatus::Success,
                     cancel_reason: None,
                     execution_time_ms: Some(elapsed_ms),

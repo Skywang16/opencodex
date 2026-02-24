@@ -378,6 +378,7 @@ impl ReactOrchestrator {
                                             id: id.clone(),
                                             content: thinking.clone(),
                                             is_streaming: true,
+                                            metadata: None,
                                         });
                                         if thinking_created {
                                             context.assistant_update_block(id, block).await?;
@@ -485,13 +486,12 @@ impl ReactOrchestrator {
                                                 id: id.clone(),
                                                 content: thinking.clone(),
                                                 is_streaming: false,
+                                                metadata: metadata.clone(),
                                             });
                                             let _ = context.assistant_update_block(id, block).await;
                                         }
                                     }
 
-                                    // Add thinking block to message history with full metadata
-                                    // so reasoning traces can be round-tripped to the provider.
                                     let signature =
                                         metadata.as_ref().and_then(|m| m.signature.clone());
 

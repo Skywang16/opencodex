@@ -2,12 +2,16 @@
   <div class="edit-result">
     <div class="edit-header" @click="toggleCollapsed">
       <div class="header-left">
-        <img
-          :src="`https://cdn.jsdelivr.net/gh/vscode-icons/vscode-icons@master/icons/${fileIconName}`"
-          class="file-icon"
-          width="14"
-          height="14"
-        />
+        <img v-if="!iconError" :src="fileIconUrl" class="file-icon" width="14" height="14" @error="iconError = true" />
+        <svg v-else class="file-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <path
+            d="M3 1h6.5L13 4.5V14a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z"
+            stroke="var(--text-500)"
+            stroke-width="1"
+            fill="var(--bg-200)"
+          />
+          <path d="M9.5 1v3.5H13" stroke="var(--text-500)" stroke-width="1" fill="none" />
+        </svg>
         <span class="file-path">{{ editData.file }}</span>
       </div>
       <div class="header-right">
@@ -70,9 +74,12 @@
   const oldLines = computed(() => (props.editData.old || '').split('\n'))
   const newLines = computed(() => (props.editData.new || '').split('\n'))
 
-  const fileIconName = computed(() => {
+  const iconError = ref(false)
+
+  const fileIconUrl = computed(() => {
     const filename = props.editData.file.split('/').pop() || ''
-    return getIconForFile(filename)
+    const iconName = getIconForFile(filename) || 'default_file.svg'
+    return `/icons/files/${iconName}`
   })
 
   const diffStats = computed(() => {

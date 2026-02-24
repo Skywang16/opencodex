@@ -545,42 +545,15 @@ impl TaskExecutor {
         &self,
         ctx: &TaskContext,
         session_id: i64,
-        exclude_message_id: Option<i64>,
+        _exclude_message_id: Option<i64>,
     ) -> TaskExecutorResult<()> {
-        use crate::llm::anthropic_types::{
-            MessageContent, MessageParam, MessageRole as AnthropicRole,
-        };
+        use crate::agent::compaction::SessionMessageLoader;
 
-        let stored = self
-            .agent_persistence()
-            .messages()
-            .list_by_session(session_id)
+        let loader = SessionMessageLoader::new(self.agent_persistence());
+        let restored = loader
+            .load_for_llm(session_id)
             .await
             .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
-
-        if stored.is_empty() {
-            return Ok(());
-        }
-
-        let mut restored = Vec::new();
-        for msg in stored {
-            if exclude_message_id.is_some_and(|id| id == msg.id) {
-                continue;
-            }
-            let Some(text) = extract_prompt_text(&msg.blocks, &msg.role) else {
-                continue;
-            };
-
-            let role = match msg.role {
-                crate::agent::types::MessageRole::User => AnthropicRole::User,
-                crate::agent::types::MessageRole::Assistant => AnthropicRole::Assistant,
-            };
-
-            restored.push(MessageParam {
-                role,
-                content: MessageContent::Text(text),
-            });
-        }
 
         if !restored.is_empty() {
             ctx.restore_messages(restored).await?;

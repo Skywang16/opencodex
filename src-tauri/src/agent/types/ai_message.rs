@@ -94,6 +94,8 @@ pub struct ThinkingBlock {
     pub id: String,
     pub content: String,
     pub is_streaming: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<crate::llm::anthropic_types::ReasoningBlockMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

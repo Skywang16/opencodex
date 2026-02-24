@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 
+use super::file_utils::lenient;
 use crate::agent::common::TruncationPolicy;
 use crate::agent::core::context::TaskContext;
 use crate::agent::error::ToolExecutorResult;
@@ -69,13 +70,10 @@ fn validate_git_command(command: &str) -> Result<(), String> {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ShellArgs {
-    /// Command to execute
     command: String,
-    /// Working directory (optional)
     cwd: Option<String>,
-    /// Whether to run in background (optional)
     background: Option<bool>,
-    /// Timeout in milliseconds (optional)
+    #[serde(default, deserialize_with = "lenient::deserialize_opt_u64")]
     timeout_ms: Option<u64>,
 }
 
