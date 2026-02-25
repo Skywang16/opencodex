@@ -39,7 +39,7 @@ static PROVIDER_METADATA: Lazy<Vec<ProviderMetadata>> = Lazy::new(|| {
             provider_type: "openai_compatible",
             display_name: "OpenAI Compatible",
             default_api_url: "",
-            preset_models: vec![],
+            preset_models: OPENAI_COMPATIBLE_SUGGESTIONS.clone(),
         },
         ProviderMetadata {
             provider_type: "gemini",

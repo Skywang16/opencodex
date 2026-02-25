@@ -84,6 +84,7 @@ fn build_openai_responses_body(
     req: &crate::llm::anthropic_types::CreateMessageRequest,
     stream: bool,
     enable_deep_thinking: bool,
+    reasoning_effort: Option<&str>,
 ) -> Value {
     use crate::llm::anthropic_types::SystemPrompt;
 
@@ -140,7 +141,8 @@ fn build_openai_responses_body(
 
     // Add reasoning configuration when deep thinking is enabled
     if enable_deep_thinking {
-        body["reasoning"] = json!({"effort": "medium"});
+        let effort = reasoning_effort.unwrap_or("medium");
+        body["reasoning"] = json!({"effort": effort});
     }
 
     body
@@ -170,6 +172,20 @@ impl OpenAIProvider {
             .and_then(|opts| opts.get("enableDeepThinking"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
+    }
+
+    fn reasoning_effort(&self) -> Option<String> {
+        let effort = self
+            .config
+            .options
+            .as_ref()
+            .and_then(|opts| opts.get("reasoningEffort"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_ascii_lowercase())?;
+        match effort.as_str() {
+            "minimal" | "low" | "medium" | "high" | "xhigh" => Some(effort),
+            _ => None,
+        }
     }
 
     /// Get Chat Completions endpoint
@@ -923,8 +939,14 @@ impl LLMProvider for OpenAIProvider {
             self.get_chat_endpoint()
         };
         let headers = self.get_headers();
+        let reasoning_effort = self.reasoning_effort();
         let body = if use_responses {
-            build_openai_responses_body(&request, false, enable_deep_thinking)
+            build_openai_responses_body(
+                &request,
+                false,
+                enable_deep_thinking,
+                reasoning_effort.as_deref(),
+            )
         } else {
             build_openai_chat_body(&request, false)
         };
@@ -1030,8 +1052,14 @@ impl LLMProvider for OpenAIProvider {
             self.get_chat_endpoint()
         };
         let headers = self.get_headers();
+        let reasoning_effort = self.reasoning_effort();
         let body = if use_responses {
-            build_openai_responses_body(&request, true, enable_deep_thinking)
+            build_openai_responses_body(
+                &request,
+                true,
+                enable_deep_thinking,
+                reasoning_effort.as_deref(),
+            )
         } else {
             build_openai_chat_body(&request, true)
         };

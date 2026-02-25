@@ -17,6 +17,11 @@ pub enum AIServiceError {
     },
     #[error("Model not found: {model_id}")]
     ModelNotFound { model_id: String },
+    #[error("Model already exists: {provider}/{model}")]
+    ModelAlreadyExists {
+        provider: String,
+        model: String,
+    },
     #[error("Invalid update payload: {0}")]
     InvalidUpdatePayload(#[from] serde_json::Error),
     #[error("Failed to build HTTP client: {0}")]

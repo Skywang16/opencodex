@@ -6,27 +6,29 @@ import type { Message } from './aiMessage'
 export type AIProvider = string
 
 // ============================================================================
-// Models.dev API types
+// Provider registry types (backend hardcoded providers)
 // ============================================================================
 
-/** Model info from models.dev */
-export interface ModelsDevModelInfo {
-  id: string
-  name: string
+export interface ModelCapabilities {
   reasoning: boolean
   toolCall: boolean
   attachment: boolean
-  contextWindow: number
-  maxOutput: number
 }
 
-/** Provider info from models.dev */
-export interface ModelsDevProviderInfo {
+export interface PresetModel {
   id: string
   name: string
-  apiUrl?: string
-  envVars: string[]
-  models: ModelsDevModelInfo[]
+  maxTokens?: number
+  contextWindow: number
+  description?: string
+  capabilities: ModelCapabilities
+}
+
+export interface ProviderMetadata {
+  providerType: string
+  displayName: string
+  defaultApiUrl: string
+  presetModels: PresetModel[]
 }
 
 export type ModelType = 'chat' | 'embedding'
@@ -38,6 +40,7 @@ export interface AIModelConfig {
   apiUrl?: string
   apiKey?: string
   model: string
+  displayName?: string
   modelType: ModelType
   options?: {
     maxContextTokens?: number
@@ -47,6 +50,7 @@ export interface AIModelConfig {
     contextWindow?: number
     maxTokens?: number
     enableDeepThinking?: boolean // Enable deep thinking (Anthropic Extended Thinking / OpenAI Reasoning)
+    reasoningEffort?: string // OpenAI Responses API effort: minimal/low/medium/high/xhigh
   }
   oauthConfig?: OAuthConfig
   useCustomBaseUrl?: boolean

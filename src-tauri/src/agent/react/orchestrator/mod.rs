@@ -144,6 +144,95 @@ impl ReactOrchestrator {
                 final_messages.push(file_msg);
             }
 
+            // ===== DEBUG: dump full message context sent to LLM =====
+            {
+                use crate::llm::anthropic_types::{
+                    ContentBlock, MessageContent, ToolResultContent,
+                };
+                tracing::warn!(
+                    "===== [DEBUG] LLM context for iteration {} | total messages: {} =====",
+                    iteration,
+                    final_messages.len()
+                );
+                for (i, msg) in final_messages.iter().enumerate() {
+                    match &msg.content {
+                        MessageContent::Text(t) => {
+                            let preview: String = t.chars().take(200).collect();
+                            tracing::warn!(
+                                "  [MSG {i}] role={:?} | Text({} chars): {}{}",
+                                msg.role,
+                                t.len(),
+                                preview,
+                                if t.len() > 200 { "..." } else { "" }
+                            );
+                        }
+                        MessageContent::Blocks(blocks) => {
+                            tracing::warn!(
+                                "  [MSG {i}] role={:?} | Blocks({})",
+                                msg.role,
+                                blocks.len()
+                            );
+                            for (j, block) in blocks.iter().enumerate() {
+                                match block {
+                                    ContentBlock::Text { text, .. } => {
+                                        let preview: String = text.chars().take(150).collect();
+                                        tracing::warn!(
+                                            "    [BLK {j}] Text({} chars): {}{}",
+                                            text.len(),
+                                            preview,
+                                            if text.len() > 150 { "..." } else { "" }
+                                        );
+                                    }
+                                    ContentBlock::ToolUse { id, name, input } => {
+                                        let input_str = input.to_string();
+                                        let preview: String = input_str.chars().take(150).collect();
+                                        tracing::warn!(
+                                            "    [BLK {j}] ToolUse id={} name={} input({} chars): {}{}",
+                                            id,
+                                            name,
+                                            input_str.len(),
+                                            preview,
+                                            if input_str.len() > 150 { "..." } else { "" }
+                                        );
+                                    }
+                                    ContentBlock::ToolResult {
+                                        tool_use_id,
+                                        content,
+                                        is_error,
+                                    } => {
+                                        let content_preview = match content {
+                                            Some(ToolResultContent::Text(t)) => {
+                                                let preview: String = t.chars().take(200).collect();
+                                                format!(
+                                                    "Text({} chars): {}{}",
+                                                    t.len(),
+                                                    preview,
+                                                    if t.len() > 200 { "..." } else { "" }
+                                                )
+                                            }
+                                            Some(ToolResultContent::Blocks(bs)) => {
+                                                format!("Blocks({})", bs.len())
+                                            }
+                                            None => "None".to_string(),
+                                        };
+                                        tracing::warn!(
+                                            "    [BLK {j}] ToolResult use_id={} is_error={:?} content={}",
+                                            tool_use_id,
+                                            is_error,
+                                            content_preview
+                                        );
+                                    }
+                                    _ => {
+                                        tracing::warn!("    [BLK {j}] Other block type");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                tracing::warn!("===== [DEBUG] end of LLM context dump =====");
+            }
+
             let llm_request = handler
                 .build_llm_request(
                     context,

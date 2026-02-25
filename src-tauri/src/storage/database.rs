@@ -172,6 +172,7 @@ impl DatabaseManager {
         }
 
         self.execute_sql_scripts().await?;
+        self.ensure_ai_models_schema().await?;
         self.ensure_messages_schema().await?;
         self.ensure_workspaces_schema().await?;
         self.insert_default_data().await?;
@@ -276,6 +277,187 @@ impl DatabaseManager {
                 DatabaseError::internal(format!("Failed to commit transaction: {err}"))
             })?;
         }
+
+        Ok(())
+    }
+
+    async fn ensure_ai_models_schema(&self) -> DatabaseResult<()> {
+        let indexes = sqlx::query("PRAGMA index_list(ai_models)")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|err| {
+                DatabaseError::internal(format!("Failed to inspect ai_models schema: {err}"))
+            })?;
+
+        let mut has_provider_model_unique = false;
+        for row in indexes {
+            let is_unique: i64 = row.try_get("unique").unwrap_or(0);
+            if is_unique == 0 {
+                continue;
+            }
+            let name: String = row.try_get("name").unwrap_or_default();
+            if name.is_empty() {
+                continue;
+            }
+            let columns = sqlx::query(format!("PRAGMA index_info({})", name).as_str())
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|err| {
+                    DatabaseError::internal(format!(
+                        "Failed to inspect ai_models index {name}: {err}"
+                    ))
+                })?;
+            let mut column_names = Vec::new();
+            for col in columns {
+                let col_name: String = col.try_get("name").unwrap_or_default();
+                if !col_name.is_empty() {
+                    column_names.push(col_name);
+                }
+            }
+            if column_names.len() == 2
+                && column_names.contains(&"provider".to_string())
+                && column_names.contains(&"model_name".to_string())
+            {
+                has_provider_model_unique = true;
+                break;
+            }
+        }
+
+        let columns = sqlx::query("PRAGMA table_info(ai_models)")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|err| {
+                DatabaseError::internal(format!("Failed to inspect ai_models columns: {err}"))
+            })?;
+
+        let has_display_name = columns.iter().any(|row| {
+            row.try_get::<String, _>("name")
+                .unwrap_or_default()
+                == "display_name"
+        });
+
+        if !has_display_name {
+            sqlx::query("ALTER TABLE ai_models ADD COLUMN display_name TEXT")
+                .execute(&self.pool)
+                .await
+                .map_err(|err| {
+                    DatabaseError::internal(format!(
+                        "Failed to migrate ai_models schema (add display_name): {err}"
+                    ))
+                })?;
+
+            sqlx::query("UPDATE ai_models SET display_name = model_name WHERE display_name IS NULL OR display_name = ''")
+                .execute(&self.pool)
+                .await
+                .map_err(|err| {
+                    DatabaseError::internal(format!(
+                        "Failed to backfill ai_models display_name: {err}"
+                    ))
+                })?;
+        }
+
+        if !has_provider_model_unique {
+            return Ok(());
+        }
+
+        let mut tx = self.pool.begin().await.map_err(|err| {
+            DatabaseError::internal(format!("Failed to begin transaction: {err}"))
+        })?;
+
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| {
+                DatabaseError::internal(format!(
+                    "Failed to disable foreign_keys during ai_models migration: {err}"
+                ))
+            })?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE ai_models_new (
+                id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                api_url TEXT,
+                api_key_encrypted TEXT,
+                model_name TEXT NOT NULL,
+                display_name TEXT,
+                model_type TEXT DEFAULT 'chat' CHECK (model_type IN ('chat', 'embedding')),
+                config_json TEXT,
+                use_custom_base_url INTEGER DEFAULT 0,
+                auth_type TEXT NOT NULL DEFAULT 'api_key' CHECK (auth_type IN ('api_key', 'oauth')),
+                oauth_provider TEXT CHECK (oauth_provider IN ('openai_codex', 'claude_pro', 'gemini_advanced') OR oauth_provider IS NULL),
+                oauth_refresh_token_encrypted TEXT,
+                oauth_access_token_encrypted TEXT,
+                oauth_token_expires_at INTEGER,
+                oauth_metadata TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            DatabaseError::internal(format!(
+                "Failed to migrate ai_models schema (create ai_models_new): {err}"
+            ))
+        })?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO ai_models_new (
+                id, provider, api_url, api_key_encrypted, model_name, display_name, model_type,
+                config_json, use_custom_base_url, created_at, updated_at,
+                auth_type, oauth_provider, oauth_refresh_token_encrypted,
+                oauth_access_token_encrypted, oauth_token_expires_at, oauth_metadata
+            )
+            SELECT
+                id, provider, api_url, api_key_encrypted, model_name, model_name, model_type,
+                config_json, use_custom_base_url, created_at, updated_at,
+                auth_type, oauth_provider, oauth_refresh_token_encrypted,
+                oauth_access_token_encrypted, oauth_token_expires_at, oauth_metadata
+            FROM ai_models
+            "#,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            DatabaseError::internal(format!(
+                "Failed to migrate ai_models schema (copy data): {err}"
+            ))
+        })?;
+
+        sqlx::query("DROP TABLE ai_models")
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| {
+                DatabaseError::internal(format!(
+                    "Failed to migrate ai_models schema (drop old table): {err}"
+                ))
+            })?;
+
+        sqlx::query("ALTER TABLE ai_models_new RENAME TO ai_models")
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| {
+                DatabaseError::internal(format!(
+                    "Failed to migrate ai_models schema (rename table): {err}"
+                ))
+            })?;
+
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| {
+                DatabaseError::internal(format!(
+                    "Failed to re-enable foreign_keys during ai_models migration: {err}"
+                ))
+            })?;
+
+        tx.commit().await.map_err(|err| {
+            DatabaseError::internal(format!("Failed to commit transaction: {err}"))
+        })?;
 
         Ok(())
     }

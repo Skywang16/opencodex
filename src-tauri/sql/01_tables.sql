@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS ai_models (
     api_url TEXT,
     api_key_encrypted TEXT,
     model_name TEXT NOT NULL,
+    display_name TEXT,
     model_type TEXT DEFAULT 'chat' CHECK (model_type IN ('chat', 'embedding')),
     config_json TEXT,
     use_custom_base_url INTEGER DEFAULT 0,
@@ -21,8 +22,7 @@ CREATE TABLE IF NOT EXISTS ai_models (
     oauth_metadata TEXT,  -- JSON: {"account_id": "...", "subscription_tier": "..."}
 
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(provider, model_name)
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- AI功能配置表

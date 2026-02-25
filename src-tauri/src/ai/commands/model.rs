@@ -1,7 +1,9 @@
 //! AI model management commands
 
 use super::AIManagerState;
+use crate::ai::error::AIServiceError;
 use crate::ai::types::AIModelConfig;
+use crate::storage::error::RepositoryError;
 use crate::utils::{EmptyData, TauriApiResult};
 use crate::{api_error, api_success, validate_not_empty};
 
@@ -26,6 +28,14 @@ pub async fn ai_models_add(
     config: AIModelConfig,
     state: State<'_, AIManagerState>,
 ) -> TauriApiResult<AIModelConfig> {
+    if config
+        .display_name
+        .as_ref()
+        .map_or(true, |name| name.trim().is_empty())
+    {
+        return Ok(api_error!("ai.display_name_empty"));
+    }
+
     match state.ai_service.add_model(config.clone()).await {
         Ok(_) => {
             let mut sanitized = config.clone();
@@ -34,7 +44,25 @@ pub async fn ai_models_add(
         }
         Err(error) => {
             warn!(error = %error, "Failed to add AI model");
-            Ok(api_error!("ai.add_model_failed"))
+            match error {
+                AIServiceError::ModelAlreadyExists { provider, model } => Ok(api_error!(
+                    "ai.model_already_exists",
+                    "provider" => provider,
+                    "model" => model
+                )),
+                AIServiceError::Repository {
+                    source: RepositoryError::AiModelAlreadyExists { provider, model },
+                    ..
+                } => Ok(api_error!(
+                    "ai.model_already_exists",
+                    "provider" => provider,
+                    "model" => model
+                )),
+                AIServiceError::Configuration { message } if message == "display_name_empty" => {
+                    Ok(api_error!("ai.display_name_empty"))
+                }
+                _ => Ok(api_error!("ai.add_model_failed")),
+            }
         }
     }
 }
@@ -69,7 +97,17 @@ pub async fn ai_models_update(
         Ok(_) => Ok(api_success!(EmptyData, "ai.update_model_success")),
         Err(error) => {
             warn!(error = %error, model_id = %model_id, "Failed to update AI model");
-            Ok(api_error!("ai.update_model_failed"))
+            match error {
+                AIServiceError::ModelAlreadyExists { provider, model } => Ok(api_error!(
+                    "ai.model_already_exists",
+                    "provider" => provider,
+                    "model" => model
+                )),
+                AIServiceError::Configuration { message } if message == "display_name_empty" => {
+                    Ok(api_error!("ai.display_name_empty"))
+                }
+                _ => Ok(api_error!("ai.update_model_failed")),
+            }
         }
     }
 }

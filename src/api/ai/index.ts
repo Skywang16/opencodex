@@ -16,6 +16,7 @@ export class AiApi {
       apiUrl: model.apiUrl,
       apiKey: model.apiKey,
       model: model.model,
+      displayName: model.displayName,
       modelType: model.modelType,
       options: model.options,
       oauthConfig: model.oauthConfig,

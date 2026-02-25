@@ -138,6 +138,8 @@ pub struct AIModelConfig {
     pub id: String,
     pub provider: AIProvider,
     pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     #[serde(default)]
     pub model_type: ModelType,
 
@@ -173,7 +175,8 @@ impl AIModelConfig {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             provider,
-            model,
+            model: model.clone(),
+            display_name: Some(model),
             model_type: ModelType::Chat,
             auth_type: AuthType::ApiKey,
             api_url: Some(api_url),
@@ -201,7 +204,7 @@ impl<'a> AIModels<'a> {
     pub async fn find_all(&self) -> RepositoryResult<Vec<AIModelConfig>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, provider, api_url, api_key_encrypted, model_name, model_type,
+            SELECT id, provider, api_url, api_key_encrypted, model_name, display_name, model_type,
                    config_json, use_custom_base_url, created_at, updated_at,
                    auth_type, oauth_provider, oauth_refresh_token_encrypted,
                    oauth_access_token_encrypted, oauth_token_expires_at, oauth_metadata
@@ -350,6 +353,7 @@ impl<'a> AIModels<'a> {
                     Some(api_key)
                 },
                 model: row.try_get("model_name")?,
+                display_name: row.try_get("display_name")?,
                 model_type,
                 oauth_config,
                 options,
@@ -433,16 +437,17 @@ impl<'a> AIModels<'a> {
         let result = sqlx::query(
             r#"
             INSERT INTO ai_models
-            (id, provider, api_url, api_key_encrypted, model_name, model_type,
+            (id, provider, api_url, api_key_encrypted, model_name, display_name, model_type,
              config_json, use_custom_base_url, created_at, updated_at,
              auth_type, oauth_provider, oauth_refresh_token_encrypted,
              oauth_access_token_encrypted, oauth_token_expires_at, oauth_metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 provider = excluded.provider,
                 api_url = excluded.api_url,
                 api_key_encrypted = excluded.api_key_encrypted,
                 model_name = excluded.model_name,
+                display_name = excluded.display_name,
                 model_type = excluded.model_type,
                 config_json = excluded.config_json,
                 use_custom_base_url = excluded.use_custom_base_url,
@@ -460,6 +465,7 @@ impl<'a> AIModels<'a> {
         .bind(&model.api_url)
         .bind(encrypted_key)
         .bind(&model.model)
+        .bind(&model.display_name)
         .bind(model.model_type.to_string())
         .bind(config_json)
         .bind(model.use_custom_base_url.map(|v| v as i64))

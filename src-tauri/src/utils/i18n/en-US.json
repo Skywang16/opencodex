@@ -46,6 +46,8 @@
     "update_model_failed": "Failed to update model",
     "update_model_success": "Model updated successfully",
     "get_models_failed": "Failed to load model configuration",
+    "model_already_exists": "Model already exists with same URL and API key: {provider}/{model}",
+    "display_name_empty": "Configuration name cannot be empty",
     "test_connection_error": "Connection test failed: {error}",
     "test_connection_success": "Connection test successful",
     "api_url_empty": "API URL cannot be empty",

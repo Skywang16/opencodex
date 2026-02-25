@@ -1,5 +1,5 @@
 import { aiApi, llmApi } from '@/api'
-import type { AIModelConfig, ModelsDevModelInfo, ModelsDevProviderInfo } from '@/types'
+import type { AIModelConfig, PresetModel, ProviderMetadata } from '@/types'
 import { computed, onMounted, ref } from 'vue'
 
 export interface ProviderOption {
@@ -17,7 +17,7 @@ export interface ModelOption {
 }
 
 export const useLLMRegistry = () => {
-  const providers = ref<ModelsDevProviderInfo[]>([])
+  const providers = ref<ProviderMetadata[]>([])
   const userModels = ref<AIModelConfig[]>([])
   const isLoading = ref(false)
   const error = ref<string | null>(null)
@@ -25,23 +25,23 @@ export const useLLMRegistry = () => {
   // Convert backend data to format used by frontend forms
   const providerOptions = computed<ProviderOption[]>(() => {
     return providers.value.map(provider => ({
-      value: provider.id,
-      label: provider.name,
-      apiUrl: provider.apiUrl,
+      value: provider.providerType,
+      label: provider.displayName,
+      apiUrl: provider.defaultApiUrl || undefined,
     }))
   })
 
   // Get model options by provider type
   const getModelOptions = (providerId: string): ModelOption[] => {
-    const provider = providers.value.find(p => p.id === providerId)
+    const provider = providers.value.find(p => p.providerType === providerId)
     if (!provider) return []
 
-    return provider.models.map(model => ({
+    return provider.presetModels.map(model => ({
       value: model.id,
       label: model.name,
-      reasoning: model.reasoning,
-      toolCall: model.toolCall,
-      attachment: model.attachment,
+      reasoning: model.capabilities.reasoning,
+      toolCall: model.capabilities.toolCall,
+      attachment: model.capabilities.attachment,
     }))
   }
 
@@ -51,24 +51,24 @@ export const useLLMRegistry = () => {
   }
 
   // Get model info by provider and model ID
-  const getModelInfo = (providerId: string, modelId: string): ModelsDevModelInfo | null => {
-    const provider = providers.value.find(p => p.id === providerId)
+  const getModelInfo = (providerId: string, modelId: string): PresetModel | null => {
+    const provider = providers.value.find(p => p.providerType === providerId)
     if (!provider) return null
-    return provider.models.find(m => m.id === modelId) || null
+    return provider.presetModels.find(m => m.id === modelId) || null
   }
 
   // Get provider info by provider ID
-  const getProviderInfo = (providerId: string): ModelsDevProviderInfo | null => {
-    return providers.value.find(p => p.id === providerId) || null
+  const getProviderInfo = (providerId: string): ProviderMetadata | null => {
+    return providers.value.find(p => p.providerType === providerId) || null
   }
 
   // Check if selected model supports reasoning
   const modelSupportsReasoning = (providerId: string, modelId: string): boolean => {
     const model = getModelInfo(providerId, modelId)
-    return model?.reasoning ?? false
+    return model?.capabilities.reasoning ?? false
   }
 
-  // Load provider and model data from models.dev API
+  // Load provider and model data from backend registry
   const loadProviders = async () => {
     if (isLoading.value) return
 
@@ -76,7 +76,7 @@ export const useLLMRegistry = () => {
     error.value = null
 
     try {
-      const [providersData, modelsData] = await Promise.all([llmApi.getModelsDevProviders(), aiApi.getModels()])
+      const [providersData, modelsData] = await Promise.all([llmApi.getProviders(), aiApi.getModels()])
 
       providers.value = providersData
       userModels.value = modelsData
@@ -88,13 +88,12 @@ export const useLLMRegistry = () => {
     }
   }
 
-  // Refresh providers from models.dev API
+  // Refresh providers from backend registry
   const refreshProviders = async () => {
     isLoading.value = true
     error.value = null
 
     try {
-      await llmApi.refreshModelsDev()
       await loadProviders()
     } catch (err) {
       console.error('Failed to refresh providers:', err)

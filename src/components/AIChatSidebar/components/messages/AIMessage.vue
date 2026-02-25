@@ -26,21 +26,31 @@
 
   const blocks = computed<Block[]>(() => props.message.blocks.map(normalizeBlockType))
 
-  const STREAMING_HINTS = ['Thinking...', 'Analyzing code...', 'Reading files...', 'Working on it...', 'Processing...']
+  const STREAMING_HINTS = [
+    'Thinking...',
+    'Reasoning...',
+    'Working on it...',
+    'Planning next step...',
+    'Figuring it out...',
+    'Putting it together...',
+    'Drafting a response...',
+    'Almost there...',
+  ]
   const HINT_DELAY_MS = 3000
-  const HINT_ROTATE_MS = 3000
+  const HINT_ROTATE_MIN_MS = 4000
+  const HINT_ROTATE_MAX_MS = 8000
 
   const hintIndex = ref(0)
   const showHint = ref(false)
   let delayTimer: ReturnType<typeof setTimeout> | null = null
-  let rotateTimer: ReturnType<typeof setInterval> | null = null
+  let rotateTimer: ReturnType<typeof setTimeout> | null = null
 
   const currentHint = computed(() => STREAMING_HINTS[hintIndex.value % STREAMING_HINTS.length])
   const isStreaming = computed(() => props.message.status === 'streaming')
 
   const resetHintDelay = () => {
     showHint.value = false
-    hintIndex.value = 0
+    hintIndex.value = Math.floor(Math.random() * STREAMING_HINTS.length)
     if (delayTimer) clearTimeout(delayTimer)
     if (isStreaming.value) {
       delayTimer = setTimeout(() => {
@@ -59,15 +69,21 @@
     }
   })
 
+  const scheduleNextRotation = () => {
+    const delay = HINT_ROTATE_MIN_MS + Math.random() * (HINT_ROTATE_MAX_MS - HINT_ROTATE_MIN_MS)
+    rotateTimer = setTimeout(() => {
+      hintIndex.value = (hintIndex.value + 1) % STREAMING_HINTS.length
+      scheduleNextRotation()
+    }, delay)
+  }
+
   onMounted(() => {
     resetHintDelay()
-    rotateTimer = setInterval(() => {
-      hintIndex.value = (hintIndex.value + 1) % STREAMING_HINTS.length
-    }, HINT_ROTATE_MS)
+    scheduleNextRotation()
   })
   onBeforeUnmount(() => {
     if (delayTimer) clearTimeout(delayTimer)
-    if (rotateTimer) clearInterval(rotateTimer)
+    if (rotateTimer) clearTimeout(rotateTimer)
   })
 
   const handleMessageClick = async (event: MouseEvent) => {
@@ -153,7 +169,7 @@
       </div>
     </template>
 
-    <div v-if="isStreaming && showHint" class="streaming-hint">
+    <div v-if="isStreaming && showHint && !aiChatStore.retryStatus" class="streaming-hint">
       <span class="streaming-hint-text">{{ currentHint }}</span>
     </div>
 

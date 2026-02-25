@@ -105,6 +105,7 @@ export const useAISettingsStore = defineStore('ai-settings', () => {
         apiUrl: updatedModel.apiUrl,
         apiKey: updatedModel.apiKey,
         model: updatedModel.model,
+        displayName: updatedModel.displayName,
         modelType: updatedModel.modelType,
         options: updatedModel.options,
         oauthConfig: updatedModel.authType === AuthType.OAuth ? (updatedModel.oauthConfig ?? null) : null,

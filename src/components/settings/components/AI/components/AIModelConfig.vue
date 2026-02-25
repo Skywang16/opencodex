@@ -33,6 +33,7 @@
     apiUrl: '',
     apiKey: '',
     model: '',
+    displayName: '',
     useCustomBaseUrl: false,
     useCustomModel: false,
     oauthProvider: '' as string,
@@ -43,6 +44,7 @@
       timeoutSeconds: 300,
       maxTokens: -1,
       enableDeepThinking: false,
+      reasoningEffort: 'medium',
     },
   })
 
@@ -60,7 +62,7 @@
 
   const providerInfo = computed(() => {
     if (formData.authType === 'oauth') return null
-    return providers.value.find(p => p.id === formData.provider) || null
+    return providers.value.find(p => p.providerType === formData.provider) || null
   })
 
   const hasPresetModels = computed(() => availableModels.value.length > 0)
@@ -80,8 +82,8 @@
       const model = availableModels.value.find(m => m.value === formData.model)
       return model?.reasoning ?? false
     }
-    // For API key models, check from models.dev data
-    return selectedModelInfo.value?.reasoning ?? false
+    // For API key models, check from preset capabilities
+    return selectedModelInfo.value?.capabilities?.reasoning ?? false
   })
 
   onMounted(async () => {
@@ -98,6 +100,7 @@
     formData.apiUrl = ''
     formData.apiKey = ''
     formData.model = ''
+    formData.displayName = ''
     formData.useCustomBaseUrl = false
     formData.useCustomModel = false
     formData.oauthProvider = ''
@@ -108,6 +111,7 @@
       timeoutSeconds: 300,
       maxTokens: -1,
       enableDeepThinking: false,
+      reasoningEffort: 'medium',
     }
     showAdvancedOptions.value = false
     editingId.value = null
@@ -127,6 +131,7 @@
       formData.oauthProvider = model.oauthConfig?.provider || OAuthProvider.OpenAiCodex
       formData.oauthConfig = model.oauthConfig
       formData.model = model.model
+      formData.displayName = model.displayName || model.model
       formData.provider = ''
     } else {
       formData.authType = 'apikey'
@@ -134,6 +139,7 @@
       formData.apiUrl = model.apiUrl || ''
       formData.apiKey = model.apiKey || ''
       formData.model = model.model
+      formData.displayName = model.displayName || model.model
       formData.useCustomBaseUrl = model.useCustomBaseUrl || false
       formData.useCustomModel = !getChatModelOptions(model.provider).some(m => m.value === model.model)
       formData.oauthProvider = ''
@@ -144,6 +150,7 @@
       timeoutSeconds: model.options?.timeoutSeconds ?? 300,
       maxTokens: model.options?.maxTokens ?? -1,
       enableDeepThinking: model.options?.enableDeepThinking ?? false,
+      reasoningEffort: model.options?.reasoningEffort ?? 'medium',
     }
   }
 
@@ -166,7 +173,7 @@
     formData.provider = value
     const info = providerInfo.value
     if (info) {
-      formData.apiUrl = info.apiUrl || ''
+      formData.apiUrl = info.defaultApiUrl || ''
       const models = getChatModelOptions(value)
       formData.model = models.length > 0 ? models[0].value : ''
       // Auto-set deep thinking based on first model's capability
@@ -179,7 +186,7 @@
   }
 
   const handleCustomUrlToggle = () => {
-    formData.apiUrl = formData.useCustomBaseUrl ? '' : providerInfo.value?.apiUrl || ''
+    formData.apiUrl = formData.useCustomBaseUrl ? '' : providerInfo.value?.defaultApiUrl || ''
   }
 
   const handleStartAuth = async () => {
@@ -225,6 +232,7 @@
               apiUrl: '',
               apiKey: '',
               model: formData.model,
+              displayName: formData.displayName.trim() || formData.model.trim(),
               modelType: 'chat' as const,
               options: formData.options,
               oauthConfig: formData.oauthConfig,
@@ -236,6 +244,7 @@
               apiUrl: formData.apiUrl,
               apiKey: formData.apiKey,
               model: formData.model,
+              displayName: formData.displayName.trim() || formData.model.trim(),
               modelType: 'chat' as const,
               options: formData.options,
               oauthConfig: undefined,
@@ -264,9 +273,19 @@
 
   const isFormValid = computed(() => {
     if (formData.authType === 'oauth') {
-      return !!formData.oauthConfig && !!formData.model && !!formData.oauthProvider
+      return (
+        !!formData.oauthConfig &&
+        !!formData.model &&
+        !!formData.oauthProvider &&
+        !!formData.displayName.trim()
+      )
     }
-    return !!formData.provider && !!formData.model && !!formData.apiKey?.trim()
+    return (
+      !!formData.provider &&
+      !!formData.model &&
+      !!formData.apiKey?.trim() &&
+      !!formData.displayName.trim()
+    )
   })
 </script>
 
@@ -333,9 +352,10 @@
               </svg>
             </div>
             <div class="model-info">
-              <span class="model-name">{{ model.model }}</span>
+              <span class="model-name">{{ model.displayName || model.model }}</span>
               <div class="model-meta">
                 <span class="provider-name">{{ model.provider }}</span>
+                <span class="model-id">{{ model.model }}</span>
                 <span class="model-badge" :class="model.authType === AuthType.OAuth ? 'oauth' : 'apikey'">
                   {{ model.authType === AuthType.OAuth ? 'OAuth' : 'API Key' }}
                 </span>
@@ -453,6 +473,10 @@
               <XInput v-model="formData.model" :placeholder="t('ai_model.model_name_placeholder')" />
             </XFormGroup>
 
+            <XFormGroup v-if="formData.provider" :label="t('ai_model.config_name')" required>
+              <XInput v-model="formData.displayName" :placeholder="t('ai_model.config_name_placeholder')" />
+            </XFormGroup>
+
             <div v-if="formData.provider && hasPresetModels" class="form-group inline">
               <label class="form-label">{{ t('ai_model.use_custom_base_url') }}</label>
               <x-switch
@@ -482,6 +506,19 @@
               </div>
               <x-switch v-model="formData.options.enableDeepThinking" />
             </div>
+
+            <XFormGroup
+              v-if="formData.model && supportsDeepThinking && formData.options.enableDeepThinking"
+              label="Reasoning Effort"
+            >
+              <select v-model="formData.options.reasoningEffort" class="form-select">
+                <option value="minimal">Minimal</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">X-High</option>
+              </select>
+            </XFormGroup>
           </div>
 
           <!-- OAuth Form -->
@@ -560,6 +597,10 @@
                 <option value="" disabled>{{ t('ai_model.select_model') }}</option>
                 <option v-for="m in availableModels" :key="m.value" :value="m.value">{{ m.label }}</option>
               </select>
+            </XFormGroup>
+
+            <XFormGroup v-if="formData.oauthConfig" :label="t('ai_model.config_name')" required>
+              <XInput v-model="formData.displayName" :placeholder="t('ai_model.config_name_placeholder')" />
             </XFormGroup>
           </div>
 
@@ -788,6 +829,11 @@
   .provider-name {
     color: var(--text-400);
     text-transform: capitalize;
+  }
+
+  .model-id {
+    color: var(--text-300);
+    font-family: var(--font-family-mono);
   }
 
   .model-badge {

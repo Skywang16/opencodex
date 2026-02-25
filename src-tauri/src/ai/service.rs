@@ -24,6 +24,7 @@ struct AIModelUpdatePayload {
     api_url: Option<String>,
     api_key: Option<String>,
     model: Option<String>,
+    display_name: Option<String>,
     model_type: Option<ModelType>,
     oauth_config: Option<Option<OAuthConfig>>,
     options: Option<Value>,
@@ -62,9 +63,38 @@ impl AIService {
             })
     }
 
-    pub async fn add_model(&self, config: AIModelConfig) -> AIServiceResult<()> {
-        AIModels::new(&self.database)
-            .save(&config)
+    pub async fn add_model(&self, mut config: AIModelConfig) -> AIServiceResult<()> {
+        let repo = AIModels::new(&self.database);
+
+        if config.auth_type == AuthType::ApiKey {
+            let existing = repo
+                .find_all()
+                .await
+                .map_err(|err| AIServiceError::Repository {
+                    operation: "ai_models.find_all",
+                    source: err,
+                })?;
+            let candidate_url = normalize_url(config.api_url.as_deref());
+            let candidate_key = normalize_key(config.api_key.as_deref());
+            let candidate_model = config.model.trim();
+
+            let duplicate = existing.iter().any(|model| {
+                model.id != config.id
+                    && model.auth_type == AuthType::ApiKey
+                    && model.model.trim() == candidate_model
+                    && normalize_url(model.api_url.as_deref()) == candidate_url
+                    && normalize_key(model.api_key.as_deref()) == candidate_key
+            });
+
+            if duplicate {
+                return Err(AIServiceError::ModelAlreadyExists {
+                    provider: config.provider.clone(),
+                    model: config.model.clone(),
+                });
+            }
+        }
+
+        repo.save(&config)
             .await
             .map(|_| ())
             .map_err(|err| AIServiceError::Repository {
@@ -114,6 +144,9 @@ impl AIService {
         if let Some(model) = update_payload.model.and_then(trimmed) {
             existing.model = model;
         }
+        if let Some(display_name) = update_payload.display_name.and_then(trimmed) {
+            existing.display_name = Some(display_name);
+        }
         if let Some(model_type) = update_payload.model_type {
             existing.model_type = model_type;
         }
@@ -138,6 +171,45 @@ impl AIService {
         }
 
         existing.updated_at = Utc::now();
+
+        if existing
+            .display_name
+            .as_ref()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+        {
+            return Err(AIServiceError::Configuration {
+                message: "display_name_empty".to_string(),
+            });
+        }
+
+        if existing.auth_type == AuthType::ApiKey {
+            let all_models = repo
+                .find_all()
+                .await
+                .map_err(|err| AIServiceError::Repository {
+                    operation: "ai_models.find_all",
+                    source: err,
+                })?;
+            let candidate_url = normalize_url(existing.api_url.as_deref());
+            let candidate_key = normalize_key(existing.api_key.as_deref());
+            let candidate_model = existing.model.trim();
+
+            let duplicate = all_models.iter().any(|model| {
+                model.id != existing.id
+                    && model.auth_type == AuthType::ApiKey
+                    && model.model.trim() == candidate_model
+                    && normalize_url(model.api_url.as_deref()) == candidate_url
+                    && normalize_key(model.api_key.as_deref()) == candidate_key
+            });
+
+            if duplicate {
+                return Err(AIServiceError::ModelAlreadyExists {
+                    provider: existing.provider.clone(),
+                    model: existing.model.clone(),
+                });
+            }
+        }
 
         repo.save(&existing)
             .await
@@ -378,6 +450,14 @@ impl AIService {
 
         Duration::from_secs(12)
     }
+}
+
+fn normalize_url(url: Option<&str>) -> String {
+    url.unwrap_or_default().trim().trim_end_matches('/').to_string()
+}
+
+fn normalize_key(key: Option<&str>) -> String {
+    key.unwrap_or_default().trim().to_string()
 }
 
 fn header_map(entries: &[(&'static str, String)]) -> AIServiceResult<HeaderMap> {

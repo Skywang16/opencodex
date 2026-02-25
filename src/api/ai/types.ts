@@ -9,6 +9,7 @@ export interface AIModelCreateInput {
   apiUrl?: string
   apiKey?: string
   model: string
+  displayName?: string
   modelType: AIModelConfig['modelType']
   options?: AIModelConfig['options']
   oauthConfig?: OAuthConfig
@@ -24,6 +25,7 @@ export type AIModelUpdateChanges = Partial<
       | 'apiUrl'
       | 'apiKey'
       | 'model'
+      | 'displayName'
       | 'modelType'
       | 'options'
       | 'oauthConfig'

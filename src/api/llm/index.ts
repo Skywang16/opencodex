@@ -10,7 +10,7 @@
 
 import { invoke } from '@/utils/request'
 import { llmChannelApi } from '@/api/channel/llm'
-import type { ModelsDevProviderInfo, ModelsDevModelInfo } from '@/types/domain/ai'
+import type { ProviderMetadata, PresetModel } from '@/types/domain/ai'
 
 export interface NativeLLMRequest extends Record<string, unknown> {
   abortSignal?: AbortSignal
@@ -65,32 +65,20 @@ export class LLMApi {
     return llmChannelApi.cancelStream()
   }
 
-  // ============================================================================
-  // Models.dev API
-  // ============================================================================
-
   /**
-   * Get providers from models.dev API
+   * Get providers (hardcoded registry)
    */
-  getModelsDevProviders = async (): Promise<ModelsDevProviderInfo[]> => {
-    return await invoke<ModelsDevProviderInfo[]>('llm_get_models_dev_providers')
+  getProviders = async (): Promise<ProviderMetadata[]> => {
+    return await invoke<ProviderMetadata[]>('llm_get_providers')
   }
 
   /**
-   * Refresh models from models.dev API
+   * Get model info by provider and model ID (from hardcoded registry)
    */
-  refreshModelsDev = async (): Promise<void> => {
-    return await invoke<void>('llm_refresh_models_dev')
-  }
-
-  /**
-   * Get model info by provider and model ID
-   */
-  getModelInfo = async (providerId: string, modelId: string): Promise<ModelsDevModelInfo | null> => {
-    return await invoke<ModelsDevModelInfo | null>('llm_get_model_info', {
-      providerId,
-      modelId,
-    })
+  getModelInfo = async (providerId: string, modelId: string): Promise<PresetModel | null> => {
+    const providers = await this.getProviders()
+    const provider = providers.find(p => p.providerType === providerId)
+    return provider?.presetModels.find(m => m.id === modelId) ?? null
   }
 }
 

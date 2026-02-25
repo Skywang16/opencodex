@@ -46,6 +46,8 @@
     "update_model_failed": "更新模型失败",
     "update_model_success": "模型更新成功",
     "get_models_failed": "获取模型配置失败",
+    "model_already_exists": "相同 URL 与 API Key 的模型已存在：{provider}/{model}",
+    "display_name_empty": "配置名称不能为空",
     "test_connection_error": "连接测试失败: {error}",
     "test_connection_success": "连接测试成功",
     "api_url_empty": "API URL不能为空",
