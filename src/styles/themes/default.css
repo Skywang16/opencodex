@@ -79,10 +79,9 @@
   --syntax-type: #db2777;
   --syntax-operator: #374151;
 
-  /* Compatibility aliases */
+  /* Compatibility aliases (still referenced by components) */
   --bg-50: var(--bg-100);
   --accent-500: var(--color-warning);
-  --font-mono: var(--font-family-mono);
 }
 
 /* ========================================

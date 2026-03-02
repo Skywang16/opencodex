@@ -197,26 +197,17 @@ export const useThemeStore = defineStore('theme', () => {
       const [status, themes] = await Promise.all([themeAPI.getThemeConfigStatus(), themeAPI.getAvailableThemes()])
       configStatus.value = status
       availableThemes.value = themes
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
-      throw err
     } finally {
       operationState.value = ThemeOperationState.IDLE
     }
   }
 
   const loadCurrentTheme = async (): Promise<void> => {
-    try {
-      const theme = await themeAPI.getCurrentTheme()
-      currentTheme.value = theme
+    const theme = await themeAPI.getCurrentTheme()
+    currentTheme.value = theme
 
-      // Apply theme to UI
-      if (theme) {
-        applyThemeToUI(theme)
-      }
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
-      throw err
+    if (theme) {
+      applyThemeToUI(theme)
     }
   }
 

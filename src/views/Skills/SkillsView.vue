@@ -74,11 +74,9 @@
         }
       }
 
-      // Load global + current workspace skills
       const currentPath = workspaceStore.currentWorkspacePath || ''
       addSkills(await agentApi.listSkills(currentPath), currentPath)
 
-      // Load skills from all other workspaces
       for (const ws of workspaceStore.workspaces) {
         if (ws.path === currentPath) continue
         try {
@@ -89,9 +87,6 @@
       }
 
       installedSkills.value = Array.from(seen.values())
-    } catch (error) {
-      console.warn('Failed to load installed skills:', error)
-      installedSkills.value = []
     } finally {
       installedLoading.value = false
     }

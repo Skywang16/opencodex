@@ -433,15 +433,9 @@ export const useTerminalStore = defineStore('Terminal', () => {
   const loadAvailableShells = async () => {
     shellManager.value.isLoading = true
     shellManager.value.error = null
-    try {
-      const shells = await shellApi.getAvailableShells()
-      shellManager.value.availableShells = shells as ShellInfo[]
-    } catch (error) {
-      shellManager.value.error = error instanceof Error ? error.message : String(error)
-      console.error('Failed to load available shells:', error)
-    } finally {
-      shellManager.value.isLoading = false
-    }
+    const shells = await shellApi.getAvailableShells()
+    shellManager.value.availableShells = shells as ShellInfo[]
+    shellManager.value.isLoading = false
   }
 
   const initializeShellManager = async () => {

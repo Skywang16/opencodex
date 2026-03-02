@@ -71,18 +71,17 @@ export interface AIModelConfig {
   // ── model selection ─────────────────────────────────────────────
   model: string
   modelType: ModelType
-  options?: {
-    maxContextTokens?: number
-    temperature?: number
-    timeoutSeconds?: number
-    dimension?: number
-    contextWindow?: number
-    maxTokens?: number
-    enableDeepThinking?: boolean
-    reasoningEffort?: string
-  }
-  createdAt?: string
-  updatedAt?: string
+  options?: Record<string, unknown>
+  // ── model capabilities (synced from models.dev / backend) ──────
+  contextWindow?: number
+  maxOutput?: number
+  reasoning: boolean
+  toolCall: boolean
+  attachment: boolean
+  cost?: Record<string, unknown>
+  // ── timestamps ────────────────────────────────────────────────
+  createdAt: string
+  updatedAt: string
 }
 
 // ============================================================================

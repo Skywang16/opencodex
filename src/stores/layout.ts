@@ -20,30 +20,26 @@ export const useLayoutStore = defineStore('layout', () => {
   // Initialize: batch read from app_preferences
   const initialize = async () => {
     if (initialized.value) return
-    try {
-      const prefs = await workspaceApi.getPreferences([
-        'ui.sidebar_visible',
-        'ui.sidebar_width',
-        'ui.terminal_visible',
-        'ui.terminal_height',
-        'ui.ai_sidebar_visible',
-        'ui.ai_sidebar_width',
-        'ui.selected_model_id',
-      ])
+    const prefs = await workspaceApi.getPreferences([
+      'ui.sidebar_visible',
+      'ui.sidebar_width',
+      'ui.terminal_visible',
+      'ui.terminal_height',
+      'ui.ai_sidebar_visible',
+      'ui.ai_sidebar_width',
+      'ui.selected_model_id',
+    ])
 
-      if (prefs['ui.sidebar_visible'] !== undefined) sidebarVisible.value = prefs['ui.sidebar_visible'] === 'true'
-      if (prefs['ui.sidebar_width'] !== undefined) sidebarWidth.value = Number(prefs['ui.sidebar_width']) || 260
-      if (prefs['ui.terminal_visible'] !== undefined)
-        terminalPanelVisible.value = prefs['ui.terminal_visible'] === 'true'
-      if (prefs['ui.terminal_height'] !== undefined)
-        terminalPanelHeight.value = Number(prefs['ui.terminal_height']) || 200
-      if (prefs['ui.ai_sidebar_visible'] !== undefined)
-        aiSidebarVisible.value = prefs['ui.ai_sidebar_visible'] === 'true'
-      if (prefs['ui.ai_sidebar_width'] !== undefined) aiSidebarWidth.value = Number(prefs['ui.ai_sidebar_width']) || 350
-      if (prefs['ui.selected_model_id'] !== undefined) selectedModelId.value = prefs['ui.selected_model_id'] || null
-    } catch (e) {
-      console.warn('Failed to load layout preferences:', e)
-    }
+    if (prefs['ui.sidebar_visible'] !== undefined) sidebarVisible.value = prefs['ui.sidebar_visible'] === 'true'
+    if (prefs['ui.sidebar_width'] !== undefined) sidebarWidth.value = Number(prefs['ui.sidebar_width']) || 260
+    if (prefs['ui.terminal_visible'] !== undefined)
+      terminalPanelVisible.value = prefs['ui.terminal_visible'] === 'true'
+    if (prefs['ui.terminal_height'] !== undefined)
+      terminalPanelHeight.value = Number(prefs['ui.terminal_height']) || 200
+    if (prefs['ui.ai_sidebar_visible'] !== undefined)
+      aiSidebarVisible.value = prefs['ui.ai_sidebar_visible'] === 'true'
+    if (prefs['ui.ai_sidebar_width'] !== undefined) aiSidebarWidth.value = Number(prefs['ui.ai_sidebar_width']) || 350
+    if (prefs['ui.selected_model_id'] !== undefined) selectedModelId.value = prefs['ui.selected_model_id'] || null
     initialized.value = true
   }
 

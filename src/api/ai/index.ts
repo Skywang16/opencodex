@@ -55,6 +55,9 @@ export class AiApi {
       oauthExpiresAt: params.oauthExpiresAt,
       oauthMetadata: params.oauthMetadata,
       options: params.options,
+      reasoning: false,
+      toolCall: false,
+      attachment: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }

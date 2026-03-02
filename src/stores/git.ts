@@ -95,11 +95,7 @@ export const useGitStore = defineStore('git', () => {
     const path = currentPath.value
     if (!path || path === '~' || !isRepository.value) return
 
-    try {
-      branches.value = await gitApi.getBranches(path)
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
-    }
+    branches.value = await gitApi.getBranches(path)
   }
 
   const loadCommits = async (limit = 50) => {

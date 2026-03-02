@@ -16,24 +16,18 @@
       const settings = await settingsApi.getGlobal()
       globalSettings.value = settings
       globalRules.value = settings.rules?.content || ''
-    } catch (error) {
-      // Error handled silently
     } finally {
       isLoadingRules.value = false
     }
   }
 
   const saveGlobalRules = async (value: string) => {
-    try {
-      const rulesToSave = value.trim()
-      const settings = globalSettings.value || (await settingsApi.getGlobal())
-      settings.rules = settings.rules || { content: '', rulesFiles: [] }
-      settings.rules.content = rulesToSave
-      await settingsApi.updateGlobal(settings)
-      globalSettings.value = settings
-    } catch (error) {
-      // Error handled silently
-    }
+    const rulesToSave = value.trim()
+    const settings = globalSettings.value || (await settingsApi.getGlobal())
+    settings.rules = settings.rules || { content: '', rulesFiles: [] }
+    settings.rules.content = rulesToSave
+    await settingsApi.updateGlobal(settings)
+    globalSettings.value = settings
   }
 
   const debouncedSaveGlobalRules = debounce((newValue: string) => {

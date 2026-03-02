@@ -200,14 +200,8 @@
     mcpServers.value = settings.mcpServers || {}
     jsonContent.value = JSON.stringify(mcpServers.value, null, 2)
 
-    // 获取服务器状态
     if (currentWorkspace.value) {
-      try {
-        serverStatuses.value = await mcpApi.listServers(currentWorkspace.value)
-      } catch (e) {
-        console.error('Failed to load server statuses:', e)
-        serverStatuses.value = []
-      }
+      serverStatuses.value = await mcpApi.listServers(currentWorkspace.value)
     }
     isLoading.value = false
   }

@@ -23,12 +23,6 @@
   --titlebar-height: 36px;
   --titlebar-element-height: 28px;
 
-  --split-divider-size: 4px;
-  --split-panel-min-width: 100px;
-  --split-panel-min-height: 60px;
-
-  --window-opacity: 1;
-
   /* Sidebar glass effect - light theme defaults */
   --sidebar-glass-bg: rgba(255, 255, 255, 0.35);
   --sidebar-glass-border: rgba(0, 0, 0, 0.1);

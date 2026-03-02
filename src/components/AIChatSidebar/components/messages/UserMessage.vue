@@ -18,6 +18,7 @@
   const lightboxStore = useImageLightboxStore()
 
   const COMMAND_MARKER_RE = /^<!--\s*command:(\S+)\s*-->\n?/
+  // Kept for rendering historical messages stored before the marker format migration
   const LEGACY_PREFIX_RE = /^\/(code-review|skill-creator|skill-installer|plan-mode)\n/
 
   const parsedContent = computed(() => {

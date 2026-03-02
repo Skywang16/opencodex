@@ -43,7 +43,18 @@ export interface Message {
 export type Block =
   | { type: 'user_text'; content: string }
   | { type: 'user_image'; dataUrl: string; mimeType: string; fileName?: string; fileSize?: number }
-  | { type: 'thinking'; id: string; content: string; isStreaming: boolean }
+  | {
+      type: 'thinking'
+      id: string
+      content: string
+      isStreaming: boolean
+      metadata?: {
+        itemId?: string
+        encryptedContent?: string
+        signature?: string
+        provider?: string
+      }
+    }
   | { type: 'text'; id: string; content: string; isStreaming: boolean }
   | {
       type: 'tool'

@@ -123,12 +123,8 @@
   })
 
   const loadSkills = async () => {
-    try {
-      const skills = await agentApi.listSkills(workspaceStore.currentWorkspacePath || '')
-      skillCommands.value = skills.map(skillToCommand)
-    } catch {
-      skillCommands.value = []
-    }
+    const skills = await agentApi.listSkills(workspaceStore.currentWorkspacePath || '')
+    skillCommands.value = skills.map(skillToCommand)
   }
 
   onMounted(async () => {
