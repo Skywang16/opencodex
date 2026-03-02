@@ -12,8 +12,6 @@ pub mod app_preferences;
 pub mod audit_logs;
 
 // ==================== Repository structs ====================
-pub use ai_models::{
-    AIModelConfig, AIModels, AIProvider, AuthType, ModelType, OAuthConfig, OAuthProvider,
-};
+pub use ai_models::{AIModelConfig, AIModels, AIProvider, AuthType, ModelType};
 pub use app_preferences::AppPreferences;
 pub use audit_logs::AuditLogs;

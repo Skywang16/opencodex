@@ -1,8 +1,5 @@
-import type { BaseConfig } from '../core'
-import type { AuthType, OAuthConfig } from '../oauth'
-import type { Message } from './aiMessage'
+import type { AuthType } from '../oauth'
 
-/** AI Provider identifier (dynamic, from models.dev) */
 export type AIProvider = string
 
 // ============================================================================
@@ -31,127 +28,72 @@ export interface ProviderMetadata {
   presetModels: PresetModel[]
 }
 
+// ============================================================================
+// Models.dev dynamic provider types
+// ============================================================================
+
+export interface ModelsDevModel {
+  id: string
+  name: string
+  reasoning: boolean
+  toolCall: boolean
+  attachment: boolean
+  contextWindow: number
+  maxOutput: number
+}
+
+export interface ModelsDevProvider {
+  id: string
+  name: string
+  apiUrl?: string
+  envVars: string[]
+  models: ModelsDevModel[]
+}
+
 export type ModelType = 'chat' | 'embedding'
+
+// ============================================================================
+// AI model config — unified single-row design (auth + model + metadata)
+// ============================================================================
 
 export interface AIModelConfig {
   id: string
-  provider: AIProvider
+  // ── provider & auth ─────────────────────────────────────────────
+  providerId: string
   authType: AuthType
+  displayName: string
   apiUrl?: string
   apiKey?: string
+  oauthRefreshToken?: string
+  oauthAccessToken?: string
+  oauthExpiresAt?: number
+  oauthMetadata?: Record<string, unknown>
+  // ── model selection ─────────────────────────────────────────────
   model: string
-  displayName?: string
   modelType: ModelType
   options?: {
     maxContextTokens?: number
     temperature?: number
     timeoutSeconds?: number
-    dimension?: number // Dimension of the vector model
+    dimension?: number
     contextWindow?: number
     maxTokens?: number
-    enableDeepThinking?: boolean // Enable deep thinking (Anthropic Extended Thinking / OpenAI Reasoning)
-    reasoningEffort?: string // OpenAI Responses API effort: minimal/low/medium/high/xhigh
+    enableDeepThinking?: boolean
+    reasoningEffort?: string
   }
-  oauthConfig?: OAuthConfig
-  useCustomBaseUrl?: boolean
-  createdAt?: Date
-  updatedAt?: Date
+  createdAt?: string
+  updatedAt?: string
 }
 
-export interface AIResponse {
-  content: string
-  responseType: 'text' | 'code' | 'command'
-  suggestions?: string[]
-  metadata?: {
-    model?: string
-    tokensUsed?: number
-    responseTime?: number
-  }
-  error?: {
-    message: string
-    code?: string
-    details?: Record<string, unknown>
-    providerResponse?: Record<string, unknown>
-  }
-}
+// ============================================================================
+// OAuth token result — returned by OAuth flow, merged into AIModelConfig
+// ============================================================================
 
-export interface AISettings {
-  models: AIModelConfig[]
-  features: {
-    chat: {
-      enabled: boolean
-      model?: string
-      explanation?: boolean
-      maxHistoryLength: number
-      autoSaveHistory: boolean
-      contextWindowSize: number
-    }
-  }
-  performance: {
-    requestTimeout: number
-    maxConcurrentRequests: number
-    cacheEnabled: boolean
-    cacheTtl: number
-  }
-}
-
-export enum AIErrorType {
-  CONFIGURATION_ERROR = 'CONFIGURATION_ERROR',
-  AUTHENTICATION_ERROR = 'AUTHENTICATION_ERROR',
-  NETWORK_ERROR = 'NETWORK_ERROR',
-  RATE_LIMIT_ERROR = 'RATE_LIMIT_ERROR',
-  MODEL_ERROR = 'MODEL_ERROR',
-  TIMEOUT_ERROR = 'TIMEOUT_ERROR',
-  VALIDATION_ERROR = 'VALIDATION_ERROR',
-  UNKNOWN_ERROR = 'UNKNOWN_ERROR',
-}
-
-export class AIError extends Error {
-  constructor(
-    public type: AIErrorType,
-    message: string,
-    public modelId?: string,
-    public details?: Record<string, unknown>
-  ) {
-    super(message)
-    this.name = 'AIError'
-  }
-}
-
-export interface Conversation {
-  id: number
-  title: string
-  workspacePath?: string | null
-  messageCount?: number
-  createdAt: Date
-  updatedAt: Date
-}
-
-export type ChatStatus = 'idle' | 'loading' | 'streaming' | 'error'
-
-export interface ChatInputState {
-  value: string
-  isComposing: boolean
-  placeholder: string
-  disabled: boolean
-}
-
-export interface ConversationState {
-  currentSessionId: number | null | -1
-  sessions: Conversation[]
-  messages: Message[]
-  isLoading: boolean
-  error: string | null
-}
-
-export interface SendMessageRequest {
-  sessionId: number
-  content: string
-  modelId?: string
-}
-
-export interface AIConfig extends BaseConfig {
-  maxContextTokens: number
-  modelName: string
-  enableSemanticCompression: boolean
+export interface OAuthTokenResult {
+  providerId: string
+  apiUrl?: string
+  oauthRefreshToken: string
+  oauthAccessToken: string
+  oauthExpiresAt?: number
+  oauthMetadata?: Record<string, unknown>
 }

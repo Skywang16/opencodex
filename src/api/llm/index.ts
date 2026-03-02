@@ -8,9 +8,9 @@
  * - Models.dev API integration
  */
 
-import { invoke } from '@/utils/request'
 import { llmChannelApi } from '@/api/channel/llm'
-import type { ProviderMetadata, PresetModel } from '@/types/domain/ai'
+import type { ModelsDevProvider, PresetModel, ProviderMetadata } from '@/types/domain/ai'
+import { invoke } from '@/utils/request'
 
 export interface NativeLLMRequest extends Record<string, unknown> {
   abortSignal?: AbortSignal
@@ -26,22 +26,22 @@ export class LLMApi {
    * Regular LLM call
    */
   call = async (request: NativeLLMRequest): Promise<NativeLLMResponse> => {
-    return await invoke<NativeLLMResponse>('llm_call', { request })
+    const { abortSignal: _, ...serializableRequest } = request
+    return await invoke<NativeLLMResponse>('llm_call', { request: serializableRequest })
   }
 
   /**
    * Streaming LLM call
    */
   callStream = async (request: NativeLLMRequest): Promise<ReadableStream<NativeLLMStreamChunk>> => {
-    // Handle abort signal if provided
     if (request.abortSignal) {
       request.abortSignal.addEventListener('abort', () => {
         this.cancelStream().catch(console.warn)
-      })
+      }, { once: true })
     }
 
-    // Use unified Channel API
-    return llmChannelApi.createStream({ request })
+    const { abortSignal: _, ...serializableRequest } = request
+    return llmChannelApi.createStream({ request: serializableRequest })
   }
 
   /**
@@ -79,6 +79,20 @@ export class LLMApi {
     const providers = await this.getProviders()
     const provider = providers.find(p => p.providerType === providerId)
     return provider?.presetModels.find(m => m.id === modelId) ?? null
+  }
+
+  /**
+   * Get providers from models.dev (dynamic, up-to-date)
+   */
+  getModelsDevProviders = async (): Promise<ModelsDevProvider[]> => {
+    return await invoke<ModelsDevProvider[]>('llm_get_models_dev_providers')
+  }
+
+  /**
+   * Force refresh models from models.dev API
+   */
+  refreshModelsDev = async (): Promise<void> => {
+    await invoke<void>('llm_refresh_models_dev')
   }
 }
 

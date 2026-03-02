@@ -1,40 +1,27 @@
-import type { OAuthConfig, OAuthFlowInfo, OAuthProvider, OAuthStatus } from '@/types/oauth'
+import type { AIModelConfig, OAuthTokenResult } from '@/types/domain/ai'
+import type { OAuthFlowInfo, OAuthProvider, OAuthStatus } from '@/types/oauth'
 import { invoke } from '@/utils/request'
 
 export class OAuthApi {
-  /**
-   * Start OAuth flow
-   */
   startFlow = async (provider: OAuthProvider): Promise<OAuthFlowInfo> => {
     return await invoke<OAuthFlowInfo>('start_oauth_flow', { provider })
   }
 
-  /**
-   * Wait for OAuth callback
-   */
-  waitForCallback = async (flowId: string, provider: OAuthProvider): Promise<OAuthConfig> => {
-    return await invoke<OAuthConfig>('wait_oauth_callback', { flowId, provider })
+  /** Returns token bundle — caller merges into AIModelConfig when saving */
+  waitForCallback = async (flowId: string, provider: OAuthProvider): Promise<OAuthTokenResult> => {
+    return await invoke<OAuthTokenResult>('wait_oauth_callback', { flowId, provider })
   }
 
-  /**
-   * Cancel OAuth flow
-   */
   cancelFlow = async (flowId: string): Promise<void> => {
     return await invoke<void>('cancel_oauth_flow', { flowId })
   }
 
-  /**
-   * Refresh OAuth token
-   */
-  refreshToken = async (oauthConfig: OAuthConfig): Promise<OAuthConfig> => {
-    return await invoke<OAuthConfig>('refresh_oauth_token', { oauthConfig })
+  refreshToken = async (model: AIModelConfig): Promise<AIModelConfig> => {
+    return await invoke<AIModelConfig>('refresh_oauth_token', { model })
   }
 
-  /**
-   * Check OAuth status
-   */
-  checkStatus = async (oauthConfig: OAuthConfig): Promise<OAuthStatus> => {
-    const status = await invoke<string>('check_oauth_status', { oauthConfig })
+  checkStatus = async (model: AIModelConfig): Promise<OAuthStatus> => {
+    const status = await invoke<string>('check_oauth_status', { model })
     return status as OAuthStatus
   }
 }

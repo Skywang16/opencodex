@@ -3,7 +3,6 @@
   import { useAIChatStore } from '@/components/AIChatSidebar'
   import { useLayoutStore } from '@/stores/layout'
   import { useWorkspaceStore } from '@/stores/workspace'
-  import { confirmDanger } from '@/ui'
   import { formatRelativeTime } from '@/utils/dateFormatter'
   import { onBeforeUnmount } from 'vue'
   import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -705,7 +704,7 @@
   .section-title {
     font-size: 11px;
     font-weight: 600;
-    color: var(--text-500);
+    color: var(--text-400);
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
@@ -719,7 +718,7 @@
     background: transparent;
     border: none;
     border-radius: var(--border-radius-sm);
-    color: var(--text-500);
+    color: var(--text-400);
     cursor: pointer;
   }
 

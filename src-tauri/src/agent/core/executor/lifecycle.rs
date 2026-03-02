@@ -138,6 +138,31 @@ impl TaskExecutor {
             // Initialize MCP tools for this workspace (network I/O), then build prompts using
             // the final tool registry (builtin + MCP) before starting the loop.
             let workspace_root = std::path::PathBuf::from(ctx_for_spawn.cwd.as_ref());
+            macro_rules! fail_early {
+                ($ctx:expr, $executor:expr, $code:expr, $err:expr) => {{
+                    let error_block = ErrorBlock {
+                        code: $code.to_string(),
+                        message: $err.to_string(),
+                        details: None,
+                    };
+                    $ctx.abort();
+                    let _ = $ctx.set_status(AgentTaskStatus::Error).await;
+                    let _ = $ctx.fail_assistant_message(error_block.clone()).await;
+                    if $ctx.emits_task_events() {
+                        let _ = $ctx
+                            .emit_event(TaskEvent::TaskError {
+                                task_id: $ctx.task_id.to_string(),
+                                error: error_block,
+                            })
+                            .await;
+                    }
+                    $executor
+                        .active_tasks()
+                        .remove($ctx.task_id.as_ref());
+                    return;
+                }};
+            }
+
             let effective = match executor
                 .settings_manager()
                 .get_effective_settings(Some(workspace_root.clone()))
@@ -146,7 +171,7 @@ impl TaskExecutor {
                 Ok(v) => v,
                 Err(e) => {
                     error!("Failed to load effective settings: {}", e);
-                    return;
+                    fail_early!(ctx_for_spawn, executor, "task.settings_load_failed", e);
                 }
             };
 
@@ -158,7 +183,7 @@ impl TaskExecutor {
                 Ok(v) => v,
                 Err(e) => {
                     error!("Failed to load workspace settings: {}", e);
-                    return;
+                    fail_early!(ctx_for_spawn, executor, "task.settings_load_failed", e);
                 }
             };
 
@@ -187,7 +212,7 @@ impl TaskExecutor {
                 .await
             {
                 error!("Failed to restore session history: {}", e);
-                return;
+                fail_early!(ctx_for_spawn, executor, "task.history_restore_failed", e);
             }
 
             let availability_ctx = ToolAvailabilityContext {
@@ -296,7 +321,12 @@ impl TaskExecutor {
 
                     if syntax_ok {
                         ctx.set_status(AgentTaskStatus::Completed).await?;
-                        let context_usage = ctx.calculate_context_usage(&model_id).await;
+                        let cw = crate::agent::utils::get_model_context_window(
+                            &self.database(),
+                            &model_id,
+                        )
+                        .await;
+                        let context_usage = ctx.calculate_context_usage(cw).await;
                         ctx.finish_assistant_message(
                             crate::agent::types::MessageStatus::Completed,
                             None,
@@ -817,15 +847,16 @@ fn build_subtask_transcript(messages: &[Message]) -> String {
 }
 
 fn truncate_transcript(transcript: String, max_chars: usize) -> String {
-    if transcript.len() <= max_chars {
+    let char_count = transcript.chars().count();
+    if char_count <= max_chars {
         return transcript;
     }
-    // Keep the end (most recent actions) while preserving a small header.
     let head = transcript.chars().take(800).collect::<String>();
+    let head_len = head.chars().count();
     let tail = transcript
         .chars()
         .rev()
-        .take(max_chars.saturating_sub(head.len()).saturating_sub(50))
+        .take(max_chars.saturating_sub(head_len).saturating_sub(50))
         .collect::<String>()
         .chars()
         .rev()

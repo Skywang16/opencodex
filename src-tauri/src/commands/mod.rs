@@ -40,9 +40,19 @@ pub async fn open_in_editor(path: String) -> TauriApiResult<()> {
         return Ok(api_error!("common.not_found"));
     }
 
-    // Detect system default code editor via file extension association
-    let extensions = ["rs", "ts", "js", "py", "md", "txt"];
-    for ext in &extensions {
+    let file_ext = path_buf
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("txt");
+
+    if let Some(editor) = open_in_editor::Editor::new_for_file_extension(file_ext) {
+        if editor.open_paths([&path_buf]).is_ok() {
+            return Ok(api_success!(()));
+        }
+    }
+
+    // Fallback: try common code editor extensions
+    for ext in &["rs", "ts", "js", "py"] {
         if let Some(editor) = open_in_editor::Editor::new_for_file_extension(ext) {
             if editor.open_paths([&path_buf]).is_ok() {
                 return Ok(api_success!(()));
@@ -50,10 +60,12 @@ pub async fn open_in_editor(path: String) -> TauriApiResult<()> {
         }
     }
 
-    // Fallback: open with system default handler
     #[cfg(target_os = "macos")]
     {
-        let _ = std::process::Command::new("open").arg(&path).spawn();
+        if let Err(e) = std::process::Command::new("open").arg(&path).spawn() {
+            warn!("Failed to open file with system handler: {}", e);
+            return Ok(api_error!("common.operation_failed"));
+        }
     }
 
     Ok(api_success!(()))
@@ -191,7 +203,7 @@ pub fn register_all_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> t
         crate::ai::commands::ai_models_add,
         crate::ai::commands::ai_models_update,
         crate::ai::commands::ai_models_remove,
-        crate::ai::commands::ai_models_test_connection,
+        crate::ai::commands::ai_models_test,
         // New Agent dual-track context commands provided by agent::core::commands
         // LLM call commands
         crate::llm::commands::llm_call,

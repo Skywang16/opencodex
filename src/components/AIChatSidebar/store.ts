@@ -32,6 +32,7 @@ export const useAIChatStore = defineStore('ai-chat', () => {
   const contextUsage = ref<{ tokensUsed: number; contextWindow: number } | null>(null)
   const retryStatus = ref<RetryStatus | null>(null)
   const pendingCommandId = ref<string | null>(null)
+  const pendingSlashCommandId = ref<string | null>(null)
 
   // Message queue: per-session, memory-only (no persistence)
   const messageQueueMap = ref<Map<number, QueuedMessage[]>>(new Map())
@@ -87,6 +88,7 @@ export const useAIChatStore = defineStore('ai-chat', () => {
     const [msg] = q.splice(i, 1)
     if (isSending.value) {
       stopCurrentTask()
+      await new Promise(resolve => setTimeout(resolve, 200))
     }
     await sendMessage(msg.content, msg.images)
   }
@@ -443,6 +445,7 @@ export const useAIChatStore = defineStore('ai-chat', () => {
     clearError,
     initialize,
     pendingCommandId,
+    pendingSlashCommandId,
 
     // Message queue
     currentSessionQueue,

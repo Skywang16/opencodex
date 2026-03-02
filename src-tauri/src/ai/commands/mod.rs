@@ -22,7 +22,6 @@ impl AIManagerState {
         terminal_context_service: Arc<TerminalContextService>,
     ) -> Result<Self, String> {
         let ai_service = Arc::new(AIService::new(database.clone()));
-
         Ok(Self {
             ai_service,
             database,

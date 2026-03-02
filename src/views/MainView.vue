@@ -1,5 +1,6 @@
 <script setup lang="ts">
   import { windowApi } from '@/api'
+  import { useAIChatStore } from '@/components/AIChatSidebar'
   import AppSidebar from '@/components/AppSidebar/index.vue'
   import MainChatArea from '@/components/MainChatArea/index.vue'
   import TerminalPanel from '@/components/TerminalPanel/index.vue'
@@ -45,6 +46,13 @@
 
   const handleUpdateShowSkills = (show: boolean) => {
     showSkills.value = show
+  }
+
+  const aiChatStore = useAIChatStore()
+
+  const handleCreateSkill = () => {
+    showSkills.value = false
+    aiChatStore.pendingSlashCommandId = 'skill-creator'
   }
 
   const handleSidebarDragStart = () => {
@@ -162,7 +170,7 @@
 
           <!-- Skills Content -->
           <template v-else-if="showSkills">
-            <SkillsView />
+            <SkillsView @create-skill="handleCreateSkill" />
           </template>
 
           <!-- Main App Content -->

@@ -1,7 +1,8 @@
 use super::types::{OAuthError, OAuthResult, PkceCodes};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::{oneshot, Mutex};
+use std::sync::{Arc, Mutex};
+use tiny_http::Header;
+use tokio::sync::oneshot;
 use tracing::{debug, error, info, warn};
 use url::form_urlencoded;
 
@@ -33,23 +34,30 @@ impl OAuthCallbackServer {
 
     /// Ensure server is started
     pub async fn ensure_started(server: Arc<Mutex<Self>>) {
-        let mut guard = server.lock().await;
+        let mut guard = match server.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                warn!("OAuth server mutex was poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
         if guard.started {
             return;
         }
         guard.started = true;
-        drop(guard);
+        let flows = guard.pending_flows.clone();
 
-        let server_clone = server.clone();
-        tokio::spawn(async move {
-            if let Err(e) = Self::start_server(server_clone).await {
+        let handle = tokio::task::spawn_blocking(move || {
+            if let Err(e) = Self::run_server(flows) {
                 error!("Failed to start OAuth callback server: {}", e);
             }
         });
+        guard.server_handle = Some(handle);
+        drop(guard);
     }
 
-    /// Start HTTP server
-    async fn start_server(server: Arc<Mutex<Self>>) -> OAuthResult<()> {
+    /// Run HTTP server (synchronous, must be called from spawn_blocking)
+    fn run_server(flows: Arc<Mutex<HashMap<String, PendingOAuthFlow>>>) -> OAuthResult<()> {
         use tiny_http::{Response, Server};
 
         let http_server = Server::http(format!("127.0.0.1:{OAUTH_PORT}"))
@@ -57,7 +65,8 @@ impl OAuthCallbackServer {
 
         info!("OAuth callback server started on port {}", OAUTH_PORT);
 
-        let server_ref = server.clone();
+        let html_content_type =
+            Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap();
 
         for request in http_server.incoming_requests() {
             let url_str = request.url();
@@ -71,45 +80,53 @@ impl OAuthCallbackServer {
                         .into_owned()
                         .collect();
 
-                    let state = params.get("state").map(|s| s.as_str());
-                    let code = params.get("code").map(|s| s.as_str());
-                    let error = params.get("error").map(|s| s.as_str());
-
-                    let server_lock = server_ref.lock().await;
-                    let mut flows = server_lock.pending_flows.lock().await;
+                    let state = params.get("state").cloned();
+                    let code = params.get("code").cloned();
+                    let error = params.get("error").cloned();
 
                     if let Some(state_val) = state {
-                        if let Some(pending) = flows.remove(state_val) {
+                        let pending = match flows.lock() {
+                            Ok(mut f) => f.remove(&state_val),
+                            Err(poisoned) => poisoned.into_inner().remove(&state_val),
+                        };
+                        if let Some(pending) = pending {
                             if let Some(err) = error {
                                 let _ = pending
                                     .sender
                                     .send(Err(OAuthError::Other(format!("OAuth error: {}", err))));
-                                let _ =
-                                    request.respond(Response::from_string(Self::html_error(err)));
+                                let _ = request.respond(
+                                    Response::from_string(Self::html_error(&err))
+                                        .with_header(html_content_type.clone()),
+                                );
                             } else if let Some(code_val) = code {
-                                let _ = pending
-                                    .sender
-                                    .send(Ok((code_val.to_string(), pending.pkce)));
-                                let _ =
-                                    request.respond(Response::from_string(Self::html_success()));
+                                let _ = pending.sender.send(Ok((code_val, pending.pkce)));
+                                let _ = request.respond(
+                                    Response::from_string(Self::html_success())
+                                        .with_header(html_content_type.clone()),
+                                );
                             } else {
                                 let _ = pending
                                     .sender
                                     .send(Err(OAuthError::Other("Missing code".to_string())));
-                                let _ = request.respond(Response::from_string(Self::html_error(
-                                    "Missing code",
-                                )));
+                                let _ = request.respond(
+                                    Response::from_string(Self::html_error("Missing code"))
+                                        .with_header(html_content_type.clone()),
+                                );
                             }
                             continue;
                         }
                     }
 
                     warn!("OAuth callback with invalid or missing state");
-                    let _ =
-                        request.respond(Response::from_string(Self::html_error("Invalid state")));
+                    let _ = request.respond(
+                        Response::from_string(Self::html_error("Invalid state"))
+                            .with_header(html_content_type.clone()),
+                    );
                 } else {
-                    let _ =
-                        request.respond(Response::from_string(Self::html_error("Invalid request")));
+                    let _ = request.respond(
+                        Response::from_string(Self::html_error("Invalid request"))
+                            .with_header(html_content_type.clone()),
+                    );
                 }
             } else {
                 let _ = request.respond(Response::from_string("Not found").with_status_code(404));
@@ -120,7 +137,7 @@ impl OAuthCallbackServer {
     }
 
     /// Register callback waiter
-    pub async fn register_flow(
+    pub fn register_flow(
         &mut self,
         state: String,
         pkce: PkceCodes,
@@ -129,14 +146,20 @@ impl OAuthCallbackServer {
 
         let pending = PendingOAuthFlow { pkce, sender };
 
-        self.pending_flows.lock().await.insert(state, pending);
+        match self.pending_flows.lock() {
+            Ok(mut flows) => { flows.insert(state, pending); }
+            Err(poisoned) => { poisoned.into_inner().insert(state, pending); }
+        }
 
         receiver
     }
 
     /// Cancel flow
-    pub async fn cancel_flow(&mut self, state: &str) {
-        self.pending_flows.lock().await.remove(state);
+    pub fn cancel_flow(&mut self, state: &str) {
+        match self.pending_flows.lock() {
+            Ok(mut flows) => { flows.remove(state); }
+            Err(poisoned) => { poisoned.into_inner().remove(state); }
+        }
     }
 
     /// Success page HTML
@@ -164,6 +187,12 @@ impl OAuthCallbackServer {
 
     /// Error page HTML
     fn html_error(error: &str) -> String {
+        let escaped = error
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&#x27;");
         format!(
             r#"<!DOCTYPE html>
 <html>
@@ -185,7 +214,7 @@ impl OAuthCallbackServer {
     </div>
 </body>
 </html>"#,
-            error
+            escaped
         )
     }
 

@@ -1,9 +1,10 @@
 /*!
- * AI model data access
+ * AI model configuration data access — unified single-table design.
+ * Each row is a complete model config: auth + model selection + metadata.
  */
 
 use crate::storage::database::DatabaseManager;
-use crate::storage::error::RepositoryResult;
+use crate::storage::error::{RepositoryError, RepositoryResult};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use chrono::{DateTime, Utc};
@@ -16,17 +17,8 @@ fn default_timestamp() -> DateTime<Utc> {
     Utc::now()
 }
 
-/// AI Provider identifier (dynamic, from models.dev)
+/// AI Provider identifier (matches models.dev provider id)
 pub type AIProvider = String;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub enum ModelType {
-    #[serde(rename = "chat")]
-    #[default]
-    Chat,
-    #[serde(rename = "embedding")]
-    Embedding,
-}
 
 /// Authentication type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -34,6 +26,7 @@ pub enum ModelType {
 pub enum AuthType {
     #[default]
     ApiKey,
+    #[serde(rename = "oauth")]
     OAuth,
 }
 
@@ -48,7 +41,6 @@ impl std::fmt::Display for AuthType {
 
 impl std::str::FromStr for AuthType {
     type Err = crate::storage::error::RepositoryError;
-
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "api_key" => Ok(AuthType::ApiKey),
@@ -60,53 +52,13 @@ impl std::str::FromStr for AuthType {
     }
 }
 
-/// OAuth Provider type
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum OAuthProvider {
-    OpenAiCodex,    // OpenAI ChatGPT Plus/Pro
-    ClaudePro,      // Claude Pro subscription
-    GeminiAdvanced, // Google Gemini Advanced
-}
-
-impl std::fmt::Display for OAuthProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OAuthProvider::OpenAiCodex => write!(f, "openai_codex"),
-            OAuthProvider::ClaudePro => write!(f, "claude_pro"),
-            OAuthProvider::GeminiAdvanced => write!(f, "gemini_advanced"),
-        }
-    }
-}
-
-impl std::str::FromStr for OAuthProvider {
-    type Err = crate::storage::error::RepositoryError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "openai_codex" => Ok(OAuthProvider::OpenAiCodex),
-            "claude_pro" => Ok(OAuthProvider::ClaudePro),
-            "gemini_advanced" => Ok(OAuthProvider::GeminiAdvanced),
-            _ => Err(crate::storage::error::RepositoryError::Validation {
-                reason: format!("Unknown OAuth provider: {s}"),
-            }),
-        }
-    }
-}
-
-/// OAuth configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OAuthConfig {
-    pub provider: OAuthProvider,
-    pub refresh_token: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub access_token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<i64>,
-    /// Provider-specific data (OpenAI's account_id, Claude's organization_id, etc.)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<Value>,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub enum ModelType {
+    #[serde(rename = "chat")]
+    #[default]
+    Chat,
+    #[serde(rename = "embedding")]
+    Embedding,
 }
 
 impl std::fmt::Display for ModelType {
@@ -120,7 +72,6 @@ impl std::fmt::Display for ModelType {
 
 impl std::str::FromStr for ModelType {
     type Err = crate::storage::error::RepositoryError;
-
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "chat" => Ok(ModelType::Chat),
@@ -132,62 +83,51 @@ impl std::str::FromStr for ModelType {
     }
 }
 
+/// A complete model configuration entry: auth + model + metadata in one row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AIModelConfig {
     pub id: String,
-    pub provider: AIProvider,
-    pub model: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub display_name: Option<String>,
-    #[serde(default)]
-    pub model_type: ModelType,
-
-    // Authentication configuration
-    #[serde(default)]
+    // ── provider & auth ─────────────────────────────────────────────
+    pub provider_id: String,
     pub auth_type: AuthType,
-
-    // API Key authentication
+    pub display_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
-
-    // OAuth authentication
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub oauth_config: Option<OAuthConfig>,
-
-    // General configuration
+    pub oauth_refresh_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_access_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_expires_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_metadata: Option<Value>,
+    // ── model selection ─────────────────────────────────────────────
+    pub model: String,
     #[serde(default)]
+    pub model_type: ModelType,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub options: Option<Value>,
+    // ── models.dev metadata ─────────────────────────────────────────
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output: Option<u32>,
     #[serde(default)]
-    pub use_custom_base_url: Option<bool>,
+    pub reasoning: bool,
+    #[serde(default)]
+    pub tool_call: bool,
+    #[serde(default)]
+    pub attachment: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Value>,
+
     #[serde(default = "default_timestamp")]
     pub created_at: DateTime<Utc>,
     #[serde(default = "default_timestamp")]
     pub updated_at: DateTime<Utc>,
-}
-
-impl AIModelConfig {
-    /// Create API Key authenticated model
-    pub fn new(provider: AIProvider, api_url: String, api_key: String, model: String) -> Self {
-        let now = Utc::now();
-        Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            provider,
-            model: model.clone(),
-            display_name: Some(model),
-            model_type: ModelType::Chat,
-            auth_type: AuthType::ApiKey,
-            api_url: Some(api_url),
-            api_key: Some(api_key),
-            oauth_config: None,
-            options: None,
-            use_custom_base_url: None,
-            created_at: now,
-            updated_at: now,
-        }
-    }
 }
 
 /// AI model data access struct
@@ -195,310 +135,241 @@ pub struct AIModels<'a> {
     db: &'a DatabaseManager,
 }
 
+const SELECT_COLS: &str = r#"
+    id, provider_id, auth_type, display_name, api_url,
+    api_key_encrypted, oauth_refresh_token_encrypted,
+    oauth_access_token_encrypted, oauth_expires_at, oauth_metadata,
+    model_name, model_type, options_json,
+    context_window, max_output, reasoning, tool_call, attachment, cost_json,
+    created_at, updated_at
+"#;
+
 impl<'a> AIModels<'a> {
     pub fn new(db: &'a DatabaseManager) -> Self {
         Self { db }
     }
 
-    /// Query all models (including decrypted keys)
     pub async fn find_all(&self) -> RepositoryResult<Vec<AIModelConfig>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT id, provider, api_url, api_key_encrypted, model_name, display_name, model_type,
-                   config_json, use_custom_base_url, created_at, updated_at,
-                   auth_type, oauth_provider, oauth_refresh_token_encrypted,
-                   oauth_access_token_encrypted, oauth_token_expires_at, oauth_metadata
-            FROM ai_models
-            ORDER BY created_at ASC
-            "#,
-        )
-        .fetch_all(self.db.pool())
-        .await?;
-
-        let mut models = Vec::new();
+        let sql = format!("SELECT {SELECT_COLS} FROM ai_models ORDER BY created_at ASC");
+        let rows = sqlx::query(&sql).fetch_all(self.db.pool()).await?;
+        let mut out = Vec::with_capacity(rows.len());
         for row in rows {
-            let id: String = row.try_get("id")?;
-            let provider: String = row.try_get("provider")?;
-            let model_type_str: String = row.try_get("model_type")?;
-            let model_type = model_type_str.parse()?;
-
-            let auth_type_str: String = row.try_get("auth_type")?;
-            let auth_type = auth_type_str.parse()?;
-
-            let options = row
-                .try_get::<Option<String>, _>("config_json")?
-                .and_then(|s| serde_json::from_str(&s).ok());
-
-            let use_custom_base_url = row
-                .try_get::<Option<i64>, _>("use_custom_base_url")?
-                .map(|v| v != 0);
-
-            // Decrypt API key
-            let api_key = if let Some(encrypted_base64) =
-                row.try_get::<Option<String>, _>("api_key_encrypted")?
-            {
-                if !encrypted_base64.is_empty() {
-                    match BASE64.decode(&encrypted_base64) {
-                        Ok(encrypted_bytes) => self
-                            .db
-                            .decrypt_data(&encrypted_bytes)
-                            .await
-                            .unwrap_or_else(|e| {
-                                error!("Failed to decrypt API key ({}): {}", id, e);
-                                String::new()
-                            }),
-                        Err(e) => {
-                            error!("Base64 decode failed ({}): {}", id, e);
-                            String::new()
-                        }
-                    }
-                } else {
-                    String::new()
-                }
-            } else {
-                String::new()
-            };
-
-            // Decrypt OAuth tokens
-            let oauth_config = if auth_type == AuthType::OAuth {
-                let provider_str: Option<String> = row.try_get("oauth_provider")?;
-                if let Some(provider_str) = provider_str {
-                    let oauth_provider: OAuthProvider = provider_str.parse()?;
-
-                    // Decrypt refresh token
-                    let refresh_token = if let Some(encrypted_base64) =
-                        row.try_get::<Option<String>, _>("oauth_refresh_token_encrypted")?
-                    {
-                        if !encrypted_base64.is_empty() {
-                            match BASE64.decode(&encrypted_base64) {
-                                Ok(encrypted_bytes) => {
-                                    self.db.decrypt_data(&encrypted_bytes).await.unwrap_or_else(
-                                        |e| {
-                                            error!(
-                                                "Failed to decrypt OAuth refresh token ({}): {}",
-                                                id, e
-                                            );
-                                            String::new()
-                                        },
-                                    )
-                                }
-                                Err(e) => {
-                                    error!("Base64 decode failed ({}): {}", id, e);
-                                    String::new()
-                                }
-                            }
-                        } else {
-                            String::new()
-                        }
-                    } else {
-                        String::new()
-                    };
-
-                    // Decrypt access token
-                    let access_token = if let Some(encrypted_base64) =
-                        row.try_get::<Option<String>, _>("oauth_access_token_encrypted")?
-                    {
-                        if !encrypted_base64.is_empty() {
-                            match BASE64.decode(&encrypted_base64) {
-                                Ok(encrypted_bytes) => Some(
-                                    self.db.decrypt_data(&encrypted_bytes).await.unwrap_or_else(
-                                        |e| {
-                                            error!(
-                                                "Failed to decrypt OAuth access token ({}): {}",
-                                                id, e
-                                            );
-                                            String::new()
-                                        },
-                                    ),
-                                ),
-                                Err(e) => {
-                                    error!("Base64 decode failed ({}): {}", id, e);
-                                    None
-                                }
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    let expires_at = row.try_get("oauth_token_expires_at")?;
-                    let metadata = row
-                        .try_get::<Option<String>, _>("oauth_metadata")?
-                        .and_then(|s| serde_json::from_str(&s).ok());
-
-                    Some(OAuthConfig {
-                        provider: oauth_provider,
-                        refresh_token,
-                        access_token,
-                        expires_at,
-                        metadata,
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            models.push(AIModelConfig {
-                id,
-                provider,
-                auth_type,
-                api_url: row.try_get("api_url")?,
-                api_key: if api_key.is_empty() {
-                    None
-                } else {
-                    Some(api_key)
-                },
-                model: row.try_get("model_name")?,
-                display_name: row.try_get("display_name")?,
-                model_type,
-                oauth_config,
-                options,
-                use_custom_base_url,
-                created_at: row.try_get("created_at")?,
-                updated_at: row.try_get("updated_at")?,
-            });
+            out.push(self.row_to_model(row).await?);
         }
-
-        Ok(models)
+        Ok(out)
     }
 
-    /// Save model (automatically encrypt keys)
-    ///
-    /// UPSERT based on primary key (id):
-    /// - If id doesn't exist, insert new record
-    /// - If id exists, update existing record
-    pub async fn save(&self, model: &AIModelConfig) -> RepositoryResult<()> {
-        use crate::storage::error::RepositoryError;
+    pub async fn find_by_id(&self, id: &str) -> RepositoryResult<Option<AIModelConfig>> {
+        let sql = format!("SELECT {SELECT_COLS} FROM ai_models WHERE id = ?");
+        let row = sqlx::query(&sql)
+            .bind(id)
+            .fetch_optional(self.db.pool())
+            .await?;
+        match row {
+            Some(r) => Ok(Some(self.row_to_model(r).await?)),
+            None => Ok(None),
+        }
+    }
 
-        // Encrypt API key
-        let encrypted_key = if let Some(api_key) = &model.api_key {
-            if !api_key.is_empty() {
-                let encrypted_bytes = self.db.encrypt_data(api_key).await?;
-                Some(BASE64.encode(&encrypted_bytes))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+    pub async fn find_by_model_type(
+        &self,
+        model_type: &ModelType,
+    ) -> RepositoryResult<Vec<AIModelConfig>> {
+        let sql = format!(
+            "SELECT {SELECT_COLS} FROM ai_models WHERE model_type = ? ORDER BY created_at ASC"
+        );
+        let rows = sqlx::query(&sql)
+            .bind(model_type.to_string())
+            .fetch_all(self.db.pool())
+            .await?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            out.push(self.row_to_model(row).await?);
+        }
+        Ok(out)
+    }
 
-        // Encrypt OAuth tokens
-        let (
-            oauth_provider,
-            oauth_refresh_token_encrypted,
-            oauth_access_token_encrypted,
-            oauth_expires_at,
+    async fn row_to_model(&self, row: sqlx::sqlite::SqliteRow) -> RepositoryResult<AIModelConfig> {
+        let id: String = row.try_get("id")?;
+        let auth_type: AuthType = row.try_get::<String, _>("auth_type")?.parse()?;
+        let model_type: ModelType = row.try_get::<String, _>("model_type")?.parse()?;
+
+        let api_key = self
+            .decrypt_optional(&row, "api_key_encrypted", &id, "api_key")
+            .await;
+        let oauth_refresh_token = self
+            .decrypt_optional(&row, "oauth_refresh_token_encrypted", &id, "refresh_token")
+            .await;
+        let oauth_access_token = self
+            .decrypt_optional(&row, "oauth_access_token_encrypted", &id, "access_token")
+            .await;
+
+        let oauth_metadata = row
+            .try_get::<Option<String>, _>("oauth_metadata")?
+            .and_then(|s| serde_json::from_str(&s).ok());
+        let options = row
+            .try_get::<Option<String>, _>("options_json")?
+            .and_then(|s| serde_json::from_str(&s).ok());
+        let cost = row
+            .try_get::<Option<String>, _>("cost_json")
+            .unwrap_or(None)
+            .and_then(|s| serde_json::from_str(&s).ok());
+
+        Ok(AIModelConfig {
+            id,
+            provider_id: row.try_get("provider_id")?,
+            auth_type,
+            display_name: row.try_get("display_name")?,
+            api_url: row.try_get("api_url")?,
+            api_key,
+            oauth_refresh_token,
+            oauth_access_token,
+            oauth_expires_at: row.try_get("oauth_expires_at")?,
             oauth_metadata,
-        ) = if let Some(oauth_config) = &model.oauth_config {
-            let refresh_token_encrypted = if !oauth_config.refresh_token.is_empty() {
-                let encrypted_bytes = self.db.encrypt_data(&oauth_config.refresh_token).await?;
-                Some(BASE64.encode(&encrypted_bytes))
-            } else {
-                None
-            };
+            model: row.try_get("model_name")?,
+            model_type,
+            options,
+            context_window: row
+                .try_get::<Option<i32>, _>("context_window")
+                .unwrap_or(None)
+                .map(|v| v as u32),
+            max_output: row
+                .try_get::<Option<i32>, _>("max_output")
+                .unwrap_or(None)
+                .map(|v| v as u32),
+            reasoning: row.try_get::<bool, _>("reasoning").unwrap_or(false),
+            tool_call: row.try_get::<bool, _>("tool_call").unwrap_or(false),
+            attachment: row.try_get::<bool, _>("attachment").unwrap_or(false),
+            cost,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
 
-            let access_token_encrypted = if let Some(access_token) = &oauth_config.access_token {
-                if !access_token.is_empty() {
-                    let encrypted_bytes = self.db.encrypt_data(access_token).await?;
-                    Some(BASE64.encode(&encrypted_bytes))
-                } else {
+    async fn decrypt_optional(
+        &self,
+        row: &sqlx::sqlite::SqliteRow,
+        col: &str,
+        id: &str,
+        label: &str,
+    ) -> Option<String> {
+        let encrypted_b64: Option<String> = row.try_get(col).ok()?;
+        let b64 = encrypted_b64.filter(|s| !s.is_empty())?;
+        match BASE64.decode(&b64) {
+            Ok(bytes) => match self.db.decrypt_data(&bytes).await {
+                Ok(s) if !s.is_empty() => Some(s),
+                Ok(_) => None,
+                Err(e) => {
+                    error!(
+                        "Decryption failed for {} (model {}): {}. Data may be corrupted or key rotated.",
+                        label, id, e
+                    );
                     None
                 }
-            } else {
+            },
+            Err(e) => {
+                error!("Base64 decode failed for {} (model {}): {}", label, id, e);
                 None
-            };
+            }
+        }
+    }
 
-            let metadata_json = oauth_config
-                .metadata
-                .as_ref()
-                .map(|m| serde_json::to_string(m).unwrap_or_default());
+    async fn encrypt_optional(&self, value: Option<&str>) -> RepositoryResult<Option<String>> {
+        match value {
+            Some(v) if !v.is_empty() => {
+                let bytes = self.db.encrypt_data(v).await?;
+                Ok(Some(BASE64.encode(&bytes)))
+            }
+            _ => Ok(None),
+        }
+    }
 
-            (
-                Some(oauth_config.provider.to_string()),
-                refresh_token_encrypted,
-                access_token_encrypted,
-                oauth_config.expires_at,
-                metadata_json,
-            )
-        } else {
-            (None, None, None, None, None)
-        };
-
-        let config_json = model
+    pub async fn save(&self, model: &AIModelConfig) -> RepositoryResult<()> {
+        let api_key_enc = self.encrypt_optional(model.api_key.as_deref()).await?;
+        let refresh_enc = self
+            .encrypt_optional(model.oauth_refresh_token.as_deref())
+            .await?;
+        let access_enc = self
+            .encrypt_optional(model.oauth_access_token.as_deref())
+            .await?;
+        let metadata_json = model
+            .oauth_metadata
+            .as_ref()
+            .map(|m| serde_json::to_string(m))
+            .transpose()
+            .map_err(|e| RepositoryError::internal(format!("Failed to serialize oauth_metadata: {e}")))?;
+        let options_json = model
             .options
             .as_ref()
-            .map(|opts| serde_json::to_string(opts).unwrap_or_default());
+            .map(|o| serde_json::to_string(o))
+            .transpose()
+            .map_err(|e| RepositoryError::internal(format!("Failed to serialize options: {e}")))?;
+        let cost_json = model
+            .cost
+            .as_ref()
+            .map(|c| serde_json::to_string(c))
+            .transpose()
+            .map_err(|e| RepositoryError::internal(format!("Failed to serialize cost: {e}")))?;
 
-        // UPSERT based on primary key (id)
-        let result = sqlx::query(
+        sqlx::query(
             r#"
             INSERT INTO ai_models
-            (id, provider, api_url, api_key_encrypted, model_name, display_name, model_type,
-             config_json, use_custom_base_url, created_at, updated_at,
-             auth_type, oauth_provider, oauth_refresh_token_encrypted,
-             oauth_access_token_encrypted, oauth_token_expires_at, oauth_metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (id, provider_id, auth_type, display_name, api_url,
+               api_key_encrypted, oauth_refresh_token_encrypted,
+               oauth_access_token_encrypted, oauth_expires_at, oauth_metadata,
+               model_name, model_type, options_json,
+               context_window, max_output, reasoning, tool_call, attachment, cost_json,
+               created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
-                provider = excluded.provider,
-                api_url = excluded.api_url,
-                api_key_encrypted = excluded.api_key_encrypted,
-                model_name = excluded.model_name,
-                display_name = excluded.display_name,
-                model_type = excluded.model_type,
-                config_json = excluded.config_json,
-                use_custom_base_url = excluded.use_custom_base_url,
-                auth_type = excluded.auth_type,
-                oauth_provider = excluded.oauth_provider,
-                oauth_refresh_token_encrypted = excluded.oauth_refresh_token_encrypted,
-                oauth_access_token_encrypted = excluded.oauth_access_token_encrypted,
-                oauth_token_expires_at = excluded.oauth_token_expires_at,
-                oauth_metadata = excluded.oauth_metadata,
-                updated_at = excluded.updated_at
+              provider_id   = excluded.provider_id,
+              auth_type     = excluded.auth_type,
+              display_name  = excluded.display_name,
+              api_url       = excluded.api_url,
+              api_key_encrypted = excluded.api_key_encrypted,
+              oauth_refresh_token_encrypted = excluded.oauth_refresh_token_encrypted,
+              oauth_access_token_encrypted  = excluded.oauth_access_token_encrypted,
+              oauth_expires_at  = excluded.oauth_expires_at,
+              oauth_metadata    = excluded.oauth_metadata,
+              model_name    = excluded.model_name,
+              model_type    = excluded.model_type,
+              options_json  = excluded.options_json,
+              context_window = excluded.context_window,
+              max_output    = excluded.max_output,
+              reasoning     = excluded.reasoning,
+              tool_call     = excluded.tool_call,
+              attachment    = excluded.attachment,
+              cost_json     = excluded.cost_json,
+              updated_at    = excluded.updated_at
             "#,
         )
         .bind(&model.id)
-        .bind(model.provider.to_string())
-        .bind(&model.api_url)
-        .bind(encrypted_key)
-        .bind(&model.model)
+        .bind(&model.provider_id)
+        .bind(model.auth_type.to_string())
         .bind(&model.display_name)
+        .bind(&model.api_url)
+        .bind(api_key_enc)
+        .bind(refresh_enc)
+        .bind(access_enc)
+        .bind(model.oauth_expires_at)
+        .bind(metadata_json)
+        .bind(&model.model)
         .bind(model.model_type.to_string())
-        .bind(config_json)
-        .bind(model.use_custom_base_url.map(|v| v as i64))
+        .bind(options_json)
+        .bind(model.context_window.map(|v| v as i32))
+        .bind(model.max_output.map(|v| v as i32))
+        .bind(model.reasoning)
+        .bind(model.tool_call)
+        .bind(model.attachment)
+        .bind(cost_json)
         .bind(model.created_at)
         .bind(model.updated_at)
-        .bind(model.auth_type.to_string())
-        .bind(oauth_provider)
-        .bind(oauth_refresh_token_encrypted)
-        .bind(oauth_access_token_encrypted)
-        .bind(oauth_expires_at)
-        .bind(oauth_metadata)
         .execute(self.db.pool())
-        .await;
+        .await?;
 
-        match result {
-            Ok(_) => Ok(()),
-            Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
-                Err(RepositoryError::AiModelAlreadyExists {
-                    provider: model.provider.to_string(),
-                    model: model.model.clone(),
-                })
-            }
-            Err(e) => Err(e.into()),
-        }
+        Ok(())
     }
 
-    /// Find model by ID
-    pub async fn find_by_id(&self, id: &str) -> RepositoryResult<Option<AIModelConfig>> {
-        let models = self.find_all().await?;
-        Ok(models.into_iter().find(|m| m.id == id))
-    }
-
-    /// Delete model
     pub async fn delete(&self, id: &str) -> RepositoryResult<()> {
         let result = sqlx::query("DELETE FROM ai_models WHERE id = ?")
             .bind(id)
@@ -510,7 +381,6 @@ impl<'a> AIModels<'a> {
                 id: id.to_string(),
             });
         }
-
         Ok(())
     }
 }

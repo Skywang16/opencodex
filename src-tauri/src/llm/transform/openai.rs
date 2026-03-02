@@ -151,34 +151,13 @@ fn handle_user_message(blocks: &[ContentBlock], output: &mut Vec<JsonValue>) {
 // Assistant Message Handling
 // ============================================================
 
-/// Handle assistant messages (may contain tool_use and thinking/reasoning blocks).
+/// Handle assistant messages for Chat Completions API.
 ///
-/// ## Reasoning trace handling
-///
-/// Thinking blocks carry provider-specific metadata (`signature` for Anthropic,
-/// `item_id` + `encrypted_content` for OpenAI).  Dropping or flattening them
-/// into plain text causes significant performance regressions (up to 30% on
-/// Codex models).  We therefore emit them as structured `item_reference` objects
-/// (for Responses API) or keep signature-bearing `thinking` blocks (for
-/// Anthropic) rather than mixing them into the text content.
-///
-/// For the Chat Completions API path (non-Responses), thinking text is still
-/// appended to the content field as a safe fallback because that API has no
-/// first-class reasoning representation.
-/// Handle assistant messages (may contain tool_use and thinking/reasoning).
-///
-/// Reasoning traces carry provider metadata (`item_id` for OpenAI,
-/// `signature` for Anthropic).  Dropping them into plain text causes up to 30%
-/// performance regression on Codex models.  We emit `item_reference` objects
-/// when metadata is available, falling back to text inclusion otherwise.
+/// Chat Completions has no first-class reasoning representation, so thinking
+/// text is included in the content field as a fallback.
 fn handle_assistant_message(blocks: &[ContentBlock], output: &mut Vec<JsonValue>) {
     let mut text_parts: Vec<&str> = Vec::new();
     let mut tool_calls = Vec::new();
-    let mut reasoning_refs: Vec<JsonValue> = Vec::new();
-    // Track whether any thinking block had structured metadata.  If not, we
-    // fall back to including thinking text in the content field.
-    let mut thinking_texts: Vec<&str> = Vec::new();
-    let mut has_structured_reasoning = false;
 
     for block in blocks {
         match block {
@@ -192,37 +171,13 @@ fn handle_assistant_message(blocks: &[ContentBlock], output: &mut Vec<JsonValue>
                     "function": { "name": name, "arguments": input.to_string() },
                 }));
             }
-            ContentBlock::Thinking {
-                thinking,
-                reasoning_metadata,
-                ..
-            } => {
-                // Try structured item_reference first (OpenAI Responses API).
-                if let Some(item_id) = reasoning_metadata
-                    .as_ref()
-                    .and_then(|m| m.item_id.as_deref())
-                {
-                    reasoning_refs.push(json!({
-                        "type": "item_reference",
-                        "id": item_id
-                    }));
-                    has_structured_reasoning = true;
-                }
+            ContentBlock::Thinking { thinking, .. } => {
                 if !thinking.is_empty() {
-                    thinking_texts.push(thinking.as_str());
+                    text_parts.push(thinking.as_str());
                 }
             }
             ContentBlock::Image { .. } | ContentBlock::ToolResult { .. } => {}
         }
-    }
-
-    // Emit item_reference objects before the assistant message.
-    output.extend(reasoning_refs);
-
-    // Fallback: if no structured metadata, include thinking as text so the
-    // model retains access to its previous reasoning via Chat Completions.
-    if !has_structured_reasoning {
-        text_parts.extend(thinking_texts);
     }
 
     let mut msg = json!({ "role": "assistant" });

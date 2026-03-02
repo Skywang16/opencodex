@@ -35,7 +35,7 @@ impl LLMService {
                 model_id: model_id.to_string(),
             })?;
 
-        let provider_type = model.provider.as_str().to_string();
+        let provider_type = model.provider_id.clone();
 
         if !ProviderRegistry::global().supports(&provider_type) {
             return Err(LlmError::UnsupportedProvider {
@@ -53,20 +53,17 @@ impl LLMService {
             None => None,
         };
 
-        // Build config based on authentication type
         let (api_key, oauth_config) = match model.auth_type {
             AuthType::OAuth => {
-                // OAuth authentication: use access_token as Bearer token
-                let oauth = model.oauth_config.ok_or_else(|| LlmError::Configuration {
-                    message: "OAuth configuration is required for OAuth models".to_string(),
-                })?;
+                let access_token =
+                    model
+                        .oauth_access_token
+                        .ok_or_else(|| LlmError::Configuration {
+                            message: "OAuth access token is missing. Please re-authorize."
+                                .to_string(),
+                        })?;
 
-                let access_token = oauth.access_token.ok_or_else(|| LlmError::Configuration {
-                    message: "OAuth access token is missing. Please re-authorize.".to_string(),
-                })?;
-
-                // Check if token has expired
-                if let Some(expires_at) = oauth.expires_at {
+                if let Some(expires_at) = model.oauth_expires_at {
                     let now = chrono::Utc::now().timestamp();
                     if now >= expires_at {
                         return Err(LlmError::Configuration {
@@ -78,16 +75,15 @@ impl LLMService {
                 }
 
                 let runtime_config = OAuthRuntimeConfig {
-                    provider: oauth.provider.to_string(),
+                    provider: model.provider_id.clone(),
                     access_token: access_token.clone(),
-                    refresh_token: oauth.refresh_token,
-                    expires_at: oauth.expires_at,
+                    refresh_token: model.oauth_refresh_token.unwrap_or_default(),
+                    expires_at: model.oauth_expires_at,
                 };
 
                 (access_token, Some(runtime_config))
             }
             AuthType::ApiKey => {
-                // API Key authentication
                 let api_key = model.api_key.ok_or_else(|| LlmError::Configuration {
                     message: "API key is required".to_string(),
                 })?;

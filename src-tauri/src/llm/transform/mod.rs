@@ -15,8 +15,8 @@
 //! | `reasoning` | Reasoning/Thinking context | opencode-dev: transform.ts |
 
 pub mod openai;
+pub mod openai_responses;
 pub mod reasoning;
-// pub mod gemini;  // TODO: Phase 2
 
 pub use openai::*;
 pub use reasoning::*;

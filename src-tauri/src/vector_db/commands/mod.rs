@@ -28,17 +28,22 @@ impl VectorDbState {
     }
 
     pub fn current_search_engine(&self) -> Option<Arc<SemanticSearchEngine>> {
-        self.search_engine
-            .read()
-            .expect("vector search engine lock poisoned")
-            .clone()
+        match self.search_engine.read() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => {
+                tracing::error!("vector search engine RwLock poisoned, recovering");
+                poisoned.into_inner().clone()
+            }
+        }
     }
 
     pub fn replace_search_engine(&self, search_engine: Arc<SemanticSearchEngine>) {
-        let mut guard = self
-            .search_engine
-            .write()
-            .expect("vector search engine lock poisoned");
-        *guard = Some(search_engine);
+        match self.search_engine.write() {
+            Ok(mut guard) => *guard = Some(search_engine),
+            Err(poisoned) => {
+                tracing::error!("vector search engine RwLock poisoned, recovering");
+                *poisoned.into_inner() = Some(search_engine);
+            }
+        }
     }
 }

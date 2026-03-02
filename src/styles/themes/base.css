@@ -30,9 +30,9 @@
   --window-opacity: 1;
 
   /* Sidebar glass effect - light theme defaults */
-  --sidebar-glass-bg: rgba(255, 255, 255, 0.15);
-  --sidebar-glass-border: rgba(0, 0, 0, 0.06);
-  --sidebar-item-active-bg: rgba(0, 0, 0, 0.08);
+  --sidebar-glass-bg: rgba(255, 255, 255, 0.35);
+  --sidebar-glass-border: rgba(0, 0, 0, 0.1);
+  --sidebar-item-active-bg: rgba(0, 0, 0, 0.12);
 }
 
 /* Dark theme sidebar glass */
@@ -45,9 +45,9 @@
 :root[data-theme='gruvbox-dark'],
 :root[data-theme='material-dark'],
 :root[data-theme='github-dark'] {
-  --sidebar-glass-bg: rgba(24, 24, 27, 0.15);
-  --sidebar-glass-border: rgba(255, 255, 255, 0.06);
-  --sidebar-item-active-bg: rgba(255, 255, 255, 0.1);
+  --sidebar-glass-bg: rgba(24, 24, 27, 0.35);
+  --sidebar-glass-border: rgba(255, 255, 255, 0.1);
+  --sidebar-item-active-bg: rgba(255, 255, 255, 0.14);
 }
 
 /* Global default colors and fonts */

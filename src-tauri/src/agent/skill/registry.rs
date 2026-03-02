@@ -114,7 +114,10 @@ impl SkillRegistry {
             drop(entry);
             self.clear_content_cache(name);
 
-            let skill_dir = self.get_metadata(name).unwrap().skill_dir;
+            let skill_dir = self
+                .get_metadata(name)
+                .ok_or_else(|| AgentError::SkillNotFound(name.to_string()))?
+                .skill_dir;
             let new_metadata = SkillLoader::load_metadata(&skill_dir).await?;
             self.register(new_metadata)?;
 

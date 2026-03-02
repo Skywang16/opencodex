@@ -88,8 +88,9 @@ fn build_openai_responses_body(
 ) -> Value {
     use crate::llm::anthropic_types::SystemPrompt;
 
-    // Responses API accepts the same message format as Chat Completions
-    let input_items = crate::llm::transform::openai::convert_to_openai_messages(&req.messages);
+    // Responses API requires its own input format (function_call, function_call_output, etc.)
+    let input_items =
+        crate::llm::transform::openai_responses::convert_to_openai_responses_input(&req.messages);
 
     // Build tools for Responses API
     let tools_val = req.tools.as_ref().map(|tools| {
@@ -160,7 +161,11 @@ impl OpenAIProvider {
 
     /// Check if Responses API should be used
     fn use_responses_api(&self) -> bool {
-        // Deep thinking implies Responses API for OpenAI
+        // OAuth (e.g. ChatGPT) always uses Responses API
+        if self.config.oauth_config.is_some() {
+            return true;
+        }
+        // Deep thinking implies Responses API for OpenAI API key
         self.enable_deep_thinking()
     }
 
@@ -200,6 +205,10 @@ impl OpenAIProvider {
 
     /// Get Responses API endpoint
     fn get_responses_endpoint(&self) -> String {
+        // OAuth (ChatGPT) uses a hardcoded endpoint
+        if self.config.oauth_config.is_some() {
+            return "https://chatgpt.com/backend-api/codex/responses".to_string();
+        }
         let base = self
             .config
             .api_url
@@ -274,7 +283,12 @@ impl OpenAIProvider {
                     field: "data[].embedding",
                 })?
                 .iter()
-                .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+                .map(|v| {
+                    v.as_f64().unwrap_or_else(|| {
+                        tracing::warn!("Non-numeric embedding value encountered: {}", v);
+                        0.0
+                    }) as f32
+                })
                 .collect::<Vec<f32>>();
 
             embedding_data.push(EmbeddingData {
@@ -713,7 +727,7 @@ impl OpenAIProvider {
                                         if let Some(delta) = value["delta"].as_str() {
                                             if !delta.is_empty() {
                                                 let index =
-                                                    state.active_reasoning_block_index.unwrap_or(1);
+                                                    state.active_reasoning_block_index.unwrap_or(0);
                                                 state.pending_events.push_back(
                                                     StreamEvent::ContentBlockDelta {
                                                         index,

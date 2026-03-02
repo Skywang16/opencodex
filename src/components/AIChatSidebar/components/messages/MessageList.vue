@@ -5,6 +5,7 @@
   import type { Message } from '@/types'
   import { showPopoverAt } from '@/ui'
   import { formatRelativeTime } from '@/utils/dateFormatter'
+  import { open } from '@tauri-apps/plugin-dialog'
   import { computed, nextTick, onMounted, ref, watch } from 'vue'
   import { useI18n } from 'vue-i18n'
   import { useAIChatStore } from '../../store'
@@ -51,7 +52,6 @@
       {
         label: t('header.open_folder'),
         onClick: async () => {
-          const { open } = await import('@tauri-apps/plugin-dialog')
           const selected = await open({
             directory: true,
             multiple: false,

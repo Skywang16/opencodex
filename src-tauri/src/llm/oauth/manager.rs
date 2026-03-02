@@ -2,86 +2,63 @@ use super::pkce::{generate_pkce, generate_state};
 use super::provider_trait::OAuthProvider;
 use super::providers::OpenAiCodexProvider;
 use super::server::OAuthCallbackServer;
-use super::types::{OAuthError, OAuthFlowInfo, OAuthResult, PkceCodes};
+use super::types::{OAuthError, OAuthFlowInfo, OAuthResult, OAuthTokenResult, PkceCodes};
 use crate::storage::database::DatabaseManager;
-use crate::storage::repositories::ai_models::{
-    OAuthConfig as StorageOAuthConfig, OAuthProvider as StorageOAuthProvider,
-};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::{oneshot, Mutex};
+use std::sync::{Arc, Mutex};
+use tokio::sync::{oneshot, Mutex as TokioMutex};
 use tracing::{debug, info};
 
-/// Pending OAuth flow
 struct PendingFlow {
     receiver: oneshot::Receiver<OAuthResult<(String, PkceCodes)>>,
 }
 
-/// OAuth Manager - manages multiple providers and coordinates authorization flows
 pub struct OAuthManager {
     providers: HashMap<String, Box<dyn OAuthProvider>>,
     callback_server: Arc<Mutex<OAuthCallbackServer>>,
-    pending_flows: Mutex<HashMap<String, PendingFlow>>,
-    #[allow(dead_code)]
+    pending_flows: TokioMutex<HashMap<String, PendingFlow>>,
     db: Arc<DatabaseManager>,
 }
 
 impl OAuthManager {
     pub fn new(db: Arc<DatabaseManager>) -> Self {
         let mut providers: HashMap<String, Box<dyn OAuthProvider>> = HashMap::new();
-
-        // Register OpenAI Codex Provider
         let openai_provider = OpenAiCodexProvider::new();
         providers.insert(
             openai_provider.provider_id().to_string(),
             Box::new(openai_provider),
         );
 
-        // More providers can be added here in the future:
-        // providers.insert("claude_pro".to_string(), Box::new(ClaudeProProvider::new()));
-        // providers.insert("gemini_advanced".to_string(), Box::new(GeminiProvider::new()));
-
-        let callback_server = OAuthCallbackServer::new();
-
         Self {
             providers,
-            callback_server,
-            pending_flows: Mutex::new(HashMap::new()),
+            callback_server: OAuthCallbackServer::new(),
+            pending_flows: TokioMutex::new(HashMap::new()),
             db,
         }
     }
 
-    /// Start OAuth flow
     pub async fn start_oauth_flow(&self, provider_type: &str) -> OAuthResult<OAuthFlowInfo> {
         let provider = self
             .providers
             .get(provider_type)
             .ok_or_else(|| OAuthError::InvalidProvider(provider_type.to_string()))?;
 
-        // Ensure callback server is started
         OAuthCallbackServer::ensure_started(self.callback_server.clone()).await;
 
-        // Generate PKCE and state
         let pkce = generate_pkce()?;
         let state = generate_state()?;
-
-        // Generate authorization URL
         let authorize_url = provider.generate_authorize_url(&pkce, &state)?;
 
-        // Register callback wait and get receiver
-        let mut server = self.callback_server.lock().await;
-        let receiver = server.register_flow(state.clone(), pkce.clone()).await;
-        drop(server);
-
-        // Save pending flow
-        let pending = PendingFlow { receiver };
+        let receiver = match self.callback_server.lock() {
+            Ok(mut srv) => srv.register_flow(state.clone(), pkce.clone()),
+            Err(poisoned) => poisoned.into_inner().register_flow(state.clone(), pkce.clone()),
+        };
         self.pending_flows
             .lock()
             .await
-            .insert(state.clone(), pending);
+            .insert(state.clone(), PendingFlow { receiver });
 
         info!("OAuth flow started for provider: {}", provider_type);
-
         Ok(OAuthFlowInfo {
             flow_id: state,
             authorize_url,
@@ -89,18 +66,17 @@ impl OAuthManager {
         })
     }
 
-    /// Wait for OAuth callback
+    /// Wait for OAuth callback; returns token bundle for the frontend to merge into a model config.
     pub async fn wait_for_callback(
         &self,
         flow_id: &str,
         provider_type: &str,
-    ) -> OAuthResult<StorageOAuthConfig> {
+    ) -> OAuthResult<OAuthTokenResult> {
         let provider = self
             .providers
             .get(provider_type)
             .ok_or_else(|| OAuthError::InvalidProvider(provider_type.to_string()))?;
 
-        // Retrieve pending flow
         let pending = self
             .pending_flows
             .lock()
@@ -108,109 +84,120 @@ impl OAuthManager {
             .remove(flow_id)
             .ok_or_else(|| OAuthError::FlowNotFound(flow_id.to_string()))?;
 
-        // Wait for callback (with timeout)
-        let timeout = tokio::time::Duration::from_secs(5 * 60); // 5 minute timeout
-
+        let timeout = tokio::time::Duration::from_secs(5 * 60);
         let result = tokio::time::timeout(timeout, pending.receiver)
             .await
             .map_err(|_| OAuthError::Timeout)?
             .map_err(|_| OAuthError::Other("Channel closed".to_string()))??;
 
         let (code, pkce) = result;
-
-        // Exchange authorization code for tokens
         debug!("Exchanging code for tokens");
         let tokens = provider.exchange_code_for_tokens(&code, &pkce).await?;
-
-        // Extract metadata
         let metadata = provider.extract_metadata(&tokens)?;
-
-        // Calculate expiration time
         let expires_at = tokens
             .expires_in
             .map(|secs| chrono::Utc::now().timestamp() + secs as i64);
 
-        // Convert to storage format
-        let storage_provider = match provider_type {
-            "openai_codex" => StorageOAuthProvider::OpenAiCodex,
-            "claude_pro" => StorageOAuthProvider::ClaudePro,
-            "gemini_advanced" => StorageOAuthProvider::GeminiAdvanced,
-            _ => return Err(OAuthError::InvalidProvider(provider_type.to_string())),
+        let provider_id = Self::oauth_to_provider_id(provider_type);
+
+        let api_url = match provider_type {
+            "openai_codex" => Some("https://chatgpt.com/backend-api/codex".to_string()),
+            _ => None,
         };
 
-        Ok(StorageOAuthConfig {
-            provider: storage_provider,
-            refresh_token: tokens.refresh_token,
-            access_token: Some(tokens.access_token),
-            expires_at,
-            metadata: Some(metadata),
+        Ok(OAuthTokenResult {
+            provider_id: provider_id.to_string(),
+            api_url,
+            oauth_refresh_token: tokens.refresh_token,
+            oauth_access_token: tokens.access_token,
+            oauth_expires_at: expires_at,
+            oauth_metadata: Some(metadata),
         })
     }
 
-    /// Cancel OAuth flow
     pub async fn cancel_flow(&self, flow_id: &str) -> OAuthResult<()> {
-        // Remove pending flow
         self.pending_flows.lock().await.remove(flow_id);
-
-        // Also remove from callback server
-        let mut server = self.callback_server.lock().await;
-        server.cancel_flow(flow_id).await;
-
+        match self.callback_server.lock() {
+            Ok(mut srv) => srv.cancel_flow(flow_id),
+            Err(poisoned) => poisoned.into_inner().cancel_flow(flow_id),
+        };
         info!("OAuth flow cancelled: {}", flow_id);
         Ok(())
     }
 
-    /// Refresh token
-    pub async fn refresh_token(&self, oauth_config: &mut StorageOAuthConfig) -> OAuthResult<()> {
-        let provider_id = oauth_config.provider.to_string();
-
+    /// Refresh token in-place on an AIModelConfig
+    pub async fn refresh_token(
+        &self,
+        model: &mut crate::storage::repositories::AIModelConfig,
+    ) -> OAuthResult<()> {
         let provider = self
             .providers
-            .get(&provider_id)
-            .ok_or_else(|| OAuthError::InvalidProvider(provider_id.clone()))?;
+            .get(&self.credential_to_provider_id(&model.provider_id))
+            .ok_or_else(|| OAuthError::InvalidProvider(model.provider_id.clone()))?;
 
-        debug!("Refreshing token for provider: {}", provider_id);
+        let refresh_token = model
+            .oauth_refresh_token
+            .as_deref()
+            .ok_or_else(|| OAuthError::Other("No refresh token".to_string()))?;
 
-        let tokens = provider
-            .refresh_access_token(&oauth_config.refresh_token)
-            .await?;
-
-        // Extract metadata first to avoid borrow issues
+        debug!("Refreshing token for provider: {}", model.provider_id);
+        let tokens = provider.refresh_access_token(refresh_token).await?;
         let metadata = provider.extract_metadata(&tokens)?;
 
-        // Update configuration
-        oauth_config.access_token = Some(tokens.access_token);
-        oauth_config.refresh_token = tokens.refresh_token;
-        oauth_config.expires_at = tokens
+        model.oauth_access_token = Some(tokens.access_token);
+        model.oauth_refresh_token = Some(tokens.refresh_token);
+        model.oauth_expires_at = tokens
             .expires_in
-            .map(|secs| chrono::Utc::now().timestamp() + secs as i64);
-        oauth_config.metadata = Some(metadata);
+            .map(|s| chrono::Utc::now().timestamp() + s as i64);
+        model.oauth_metadata = Some(metadata);
+        model.updated_at = chrono::Utc::now();
 
-        info!("Token refreshed for provider: {}", provider_id);
+        if let Err(e) = crate::storage::repositories::AIModels::new(&self.db)
+            .save(model)
+            .await
+        {
+            tracing::warn!("Failed to persist refreshed token to database: {}", e);
+        }
+
+        info!("Token refreshed for model: {}", model.id);
         Ok(())
     }
 
-    /// Get provider
-    pub fn get_provider(&self, provider_type: &str) -> Option<&dyn OAuthProvider> {
-        self.providers.get(provider_type).map(|p| p.as_ref())
-    }
-
-    /// Check if token needs refresh
-    pub fn should_refresh_token(&self, oauth_config: &StorageOAuthConfig) -> bool {
-        // If no access_token, refresh is needed
-        if oauth_config.access_token.is_none() {
+    pub fn should_refresh_token(
+        &self,
+        model: &crate::storage::repositories::AIModelConfig,
+    ) -> bool {
+        if model.oauth_access_token.is_none() {
             return true;
         }
-
-        // If expiration time exists, check if it's about to expire
-        if let Some(expires_at) = oauth_config.expires_at {
-            let provider_id = oauth_config.provider.to_string();
-            if let Some(provider) = self.providers.get(&provider_id) {
+        if let Some(expires_at) = model.oauth_expires_at {
+            let provider_key = self.credential_to_provider_id(&model.provider_id);
+            if let Some(provider) = self.providers.get(&provider_key) {
                 return provider.should_refresh_token(expires_at);
             }
         }
-
-        // If no expiration time info, conservatively don't refresh (use access_token if available)
         false
+    }
+
+    const PROVIDER_MAP: &[(&'static str, &'static str)] = &[
+        ("openai_codex", "openai"),
+        ("claude_pro", "anthropic"),
+        ("gemini_advanced", "gemini"),
+    ];
+
+    fn oauth_to_provider_id(oauth_type: &str) -> &str {
+        Self::PROVIDER_MAP
+            .iter()
+            .find(|(k, _)| *k == oauth_type)
+            .map(|(_, v)| *v)
+            .unwrap_or(oauth_type)
+    }
+
+    fn credential_to_provider_id(&self, provider_id: &str) -> String {
+        Self::PROVIDER_MAP
+            .iter()
+            .find(|(_, v)| *v == provider_id)
+            .map(|(k, _)| k.to_string())
+            .unwrap_or_else(|| provider_id.to_string())
     }
 }

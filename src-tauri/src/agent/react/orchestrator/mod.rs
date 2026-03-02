@@ -124,13 +124,7 @@ impl ReactOrchestrator {
             };
             let builder = handler.get_context_builder(context).await;
             let context_window =
-                crate::agent::utils::get_model_context_window(&self.database, model_id)
-                    .await
-                    .ok_or_else(|| {
-                        TaskExecutorError::ConfigurationError(
-                            "Missing model option `maxContextTokens` for compaction".to_string(),
-                        )
-                    })?;
+                crate::agent::utils::get_model_context_window(&self.database, model_id).await;
             self.maybe_compact_session(context, model_id, context_window)
                 .await?;
 
@@ -144,94 +138,11 @@ impl ReactOrchestrator {
                 final_messages.push(file_msg);
             }
 
-            // ===== DEBUG: dump full message context sent to LLM =====
-            {
-                use crate::llm::anthropic_types::{
-                    ContentBlock, MessageContent, ToolResultContent,
-                };
-                tracing::warn!(
-                    "===== [DEBUG] LLM context for iteration {} | total messages: {} =====",
-                    iteration,
-                    final_messages.len()
-                );
-                for (i, msg) in final_messages.iter().enumerate() {
-                    match &msg.content {
-                        MessageContent::Text(t) => {
-                            let preview: String = t.chars().take(200).collect();
-                            tracing::warn!(
-                                "  [MSG {i}] role={:?} | Text({} chars): {}{}",
-                                msg.role,
-                                t.len(),
-                                preview,
-                                if t.len() > 200 { "..." } else { "" }
-                            );
-                        }
-                        MessageContent::Blocks(blocks) => {
-                            tracing::warn!(
-                                "  [MSG {i}] role={:?} | Blocks({})",
-                                msg.role,
-                                blocks.len()
-                            );
-                            for (j, block) in blocks.iter().enumerate() {
-                                match block {
-                                    ContentBlock::Text { text, .. } => {
-                                        let preview: String = text.chars().take(150).collect();
-                                        tracing::warn!(
-                                            "    [BLK {j}] Text({} chars): {}{}",
-                                            text.len(),
-                                            preview,
-                                            if text.len() > 150 { "..." } else { "" }
-                                        );
-                                    }
-                                    ContentBlock::ToolUse { id, name, input } => {
-                                        let input_str = input.to_string();
-                                        let preview: String = input_str.chars().take(150).collect();
-                                        tracing::warn!(
-                                            "    [BLK {j}] ToolUse id={} name={} input({} chars): {}{}",
-                                            id,
-                                            name,
-                                            input_str.len(),
-                                            preview,
-                                            if input_str.len() > 150 { "..." } else { "" }
-                                        );
-                                    }
-                                    ContentBlock::ToolResult {
-                                        tool_use_id,
-                                        content,
-                                        is_error,
-                                    } => {
-                                        let content_preview = match content {
-                                            Some(ToolResultContent::Text(t)) => {
-                                                let preview: String = t.chars().take(200).collect();
-                                                format!(
-                                                    "Text({} chars): {}{}",
-                                                    t.len(),
-                                                    preview,
-                                                    if t.len() > 200 { "..." } else { "" }
-                                                )
-                                            }
-                                            Some(ToolResultContent::Blocks(bs)) => {
-                                                format!("Blocks({})", bs.len())
-                                            }
-                                            None => "None".to_string(),
-                                        };
-                                        tracing::warn!(
-                                            "    [BLK {j}] ToolResult use_id={} is_error={:?} content={}",
-                                            tool_use_id,
-                                            is_error,
-                                            content_preview
-                                        );
-                                    }
-                                    _ => {
-                                        tracing::warn!("    [BLK {j}] Other block type");
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                tracing::warn!("===== [DEBUG] end of LLM context dump =====");
-            }
+            tracing::debug!(
+                "LLM context for iteration {} | total messages: {}",
+                iteration,
+                final_messages.len()
+            );
 
             let llm_request = handler
                 .build_llm_request(
@@ -323,10 +234,7 @@ impl ReactOrchestrator {
 
             // ===== Phase 3: Process Anthropic StreamEvent =====
             while let Some(item) = stream.next().await {
-                if context.is_aborted() {
-                    return Err(TaskExecutorError::TaskInterrupted);
-                }
-                context.check_aborted_async(true).await?;
+                context.check_aborted_async(false).await?;
 
                 match item {
                     Ok(StreamEvent::MessageStart { .. }) => {}
@@ -912,7 +820,7 @@ impl ReactOrchestrator {
             .await
             .map_err(|e| TaskExecutorError::InternalError(e.to_string()))?;
 
-        let context_usage = context.calculate_context_usage(model_id).await;
+        let context_usage = context.calculate_context_usage(context_window).await;
         context
             .emit_event(crate::agent::types::TaskEvent::MessageFinished {
                 task_id: context.task_id.to_string(),
@@ -930,26 +838,25 @@ impl ReactOrchestrator {
 }
 
 fn contains_fabricated_tool_output(text: &str, tool_names: &HashSet<String>) -> bool {
-    if tool_names.is_empty() {
+    if tool_names.is_empty() || text.len() < 20 {
         return false;
     }
 
     let lower = text.to_lowercase();
+
+    let result_indicators = [
+        "tool_result", "tool result:", "<tool_result>", "result:",
+        "[result]", "output:", "[output]",
+    ];
+
+    let has_result_pattern = result_indicators.iter().any(|p| lower.contains(p));
+    if !has_result_pattern {
+        return false;
+    }
+
     for name in tool_names {
         let name_lower = name.to_lowercase();
-        let name_spaced = name_lower.replace('_', " ");
-        if lower.contains("tool ")
-            && (lower.contains(&name_lower) || lower.contains(&name_spaced))
-            && (lower.contains("completed")
-                || lower.contains("successfully")
-                || lower.contains("failed")
-                || lower.contains("error")
-                || lower.contains("完成")  // "completed" in Chinese
-                || lower.contains("成功")  // "successfully" in Chinese
-                || lower.contains("失败")  // "failed" in Chinese
-                || lower.contains("错误"))
-        // "error" in Chinese
-        {
+        if lower.contains(&name_lower) {
             return true;
         }
     }

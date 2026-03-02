@@ -78,6 +78,22 @@
   const projectRules = useProjectRules()
   const aiChatStore = useAIChatStore()
 
+  // Watch for externally triggered slash commands (e.g. from Skills page)
+  watch(
+    () => aiChatStore.pendingSlashCommandId,
+    id => {
+      if (id) {
+        const cmd = createSlashCommands(t).find(c => c.id === id)
+        if (cmd) {
+          selectedCommand.value = cmd
+          inputTextarea.value?.focus()
+        }
+        aiChatStore.pendingSlashCommandId = null
+      }
+    },
+    { immediate: true }
+  )
+
   const terminalStore = useTerminalStore()
   const workspaceStore = useWorkspaceStore()
   const workspacePath = computed(() => workspaceStore.currentWorkspacePath ?? null)
@@ -240,8 +256,7 @@
   const addImageFile = async (file: File) => {
     // Check image count limit
     if (imageAttachments.value.length >= 5) {
-      console.warn(t('chat.max_images_reached'))
-      // TODO: Show error message
+      createMessage.warning(t('chat.max_images_reached'))
       return
     }
 
@@ -264,7 +279,7 @@
       imageAttachments.value.push(attachment)
     } catch (error) {
       console.error('Failed to process image:', error)
-      // TODO: Show error message
+      createMessage.error(t('chat.image_process_failed') || 'Failed to process image')
     }
   }
 
@@ -377,7 +392,7 @@
       indexStatus.value = { isReady: false, path: '' }
       return
     }
-    checkVectorIndexStatus()
+    checkVectorIndexStatus().catch(console.warn)
   })
 
   const computeBuildPercent = (p: {

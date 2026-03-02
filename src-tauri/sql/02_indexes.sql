@@ -5,7 +5,8 @@
 CREATE INDEX IF NOT EXISTS idx_terminal_sessions_active ON terminal_sessions(is_active);
 
 -- AI模型索引
--- 唯一索引已在表定义中通过 UNIQUE(provider, model_name) 约束创建
+CREATE INDEX IF NOT EXISTS idx_ai_models_provider ON ai_models(provider_id);
+CREATE INDEX IF NOT EXISTS idx_ai_models_model_type ON ai_models(model_type);
 CREATE INDEX IF NOT EXISTS idx_ai_features_enabled ON ai_features(enabled);
 
 -- 审计日志索引
@@ -42,3 +43,6 @@ CREATE INDEX IF NOT EXISTS idx_checkpoints_parent ON checkpoints(parent_id);
 CREATE INDEX IF NOT EXISTS idx_checkpoint_files_checkpoint ON checkpoint_file_snapshots(checkpoint_id);
 CREATE INDEX IF NOT EXISTS idx_checkpoint_files_blob ON checkpoint_file_snapshots(blob_hash);
 CREATE INDEX IF NOT EXISTS idx_blob_refcount ON checkpoint_blobs(ref_count);
+
+-- AI model usage stats
+CREATE INDEX IF NOT EXISTS idx_ai_model_usage_stats_model ON ai_model_usage_stats(model_id);

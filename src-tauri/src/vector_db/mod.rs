@@ -46,7 +46,7 @@ pub async fn build_search_engine_from_database(
     let config = VectorDbConfig {
         embedding: RemoteEmbeddingConfig {
             provider_config: LLMProviderConfig {
-                provider_type: model.provider.as_str().to_string(),
+                provider_type: model.provider_id.clone(),
                 api_key: model.api_key.unwrap_or_default(),
                 api_url: model.api_url,
                 options: model

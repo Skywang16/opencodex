@@ -1,12 +1,12 @@
 <script setup lang="ts">
   import { computed, ref, watch, onMounted, reactive } from 'vue'
   import { aiApi, vectorDbApi as vdbApi } from '@/api'
+  import { AiApi } from '@/api/ai'
   import { useI18n } from 'vue-i18n'
   import { useWorkspaceStore } from '@/stores/workspace'
   import { homeDir } from '@tauri-apps/api/path'
   import { getPathBasename } from '@/utils/path'
   import { useAISettingsStore } from '@/components/settings/components/AI/store'
-  import type { AIModelTestConnectionInput } from '@/api/ai/types'
   import { AuthType } from '@/types/oauth'
   import { XFormGroup, XInput } from '@/ui'
 
@@ -113,7 +113,7 @@
       .then(path => (homePath.value = path))
       .catch(() => {})
     // Load vector model configuration
-    await aiSettingsStore.loadModels()
+    await aiSettingsStore.loadSettings()
   })
 
   // ========== Vector Model Configuration ==========
@@ -169,19 +169,29 @@
     if (!validateForm()) return
     isSubmitting.value = true
     try {
-      const modelData = {
-        provider: 'openai_compatible' as const,
-        authType: AuthType.ApiKey,
-        apiUrl: formData.apiUrl,
-        apiKey: formData.apiKey,
-        model: formData.modelName,
-        modelType: 'embedding' as const,
-        options: { dimension: formData.dimension },
-      }
       if (embeddingModel.value) {
-        await aiSettingsStore.updateModel(embeddingModel.value.id, modelData)
+        // Update existing model (full update)
+        await aiSettingsStore.updateModel({
+          ...embeddingModel.value,
+          apiUrl: formData.apiUrl,
+          apiKey: formData.apiKey,
+          model: formData.modelName,
+          options: { dimension: formData.dimension },
+        })
       } else {
-        await aiSettingsStore.addModel(modelData)
+        // Create new embedding model
+        await aiSettingsStore.addModel(
+          AiApi.buildModel({
+            providerId: 'openai_compatible',
+            authType: AuthType.ApiKey,
+            displayName: 'Embedding Model',
+            model: formData.modelName,
+            apiUrl: formData.apiUrl,
+            apiKey: formData.apiKey,
+            modelType: 'embedding',
+            options: { dimension: formData.dimension },
+          })
+        )
       }
       await vdbApi.reloadEmbeddingConfig()
       showForm.value = false
@@ -194,16 +204,17 @@
     if (!validateForm()) return
     isTesting.value = true
     try {
-      const testConfig: AIModelTestConnectionInput = {
-        provider: 'openai_compatible',
-        authType: AuthType.ApiKey,
-        apiUrl: formData.apiUrl,
-        apiKey: formData.apiKey,
-        model: formData.modelName,
-        modelType: 'embedding',
-        options: { dimension: formData.dimension },
-      }
-      await aiApi.testConnectionWithConfig(testConfig)
+      await aiApi.testModel(
+        AiApi.buildModel({
+          providerId: 'openai_compatible',
+          authType: AuthType.ApiKey,
+          displayName: 'Embedding Test',
+          model: formData.modelName,
+          apiUrl: formData.apiUrl,
+          apiKey: formData.apiKey,
+          modelType: 'embedding',
+        })
+      )
     } finally {
       isTesting.value = false
     }

@@ -1,145 +1,105 @@
-//! AI model management commands
+//! AI model management commands — unified single-table design
 
 use super::AIManagerState;
 use crate::ai::error::AIServiceError;
-use crate::ai::types::AIModelConfig;
-use crate::storage::error::RepositoryError;
+use crate::storage::repositories::AIModelConfig;
 use crate::utils::{EmptyData, TauriApiResult};
-use crate::{api_error, api_success, validate_not_empty};
-
+use crate::{api_error, api_success};
 use tauri::State;
 use tracing::warn;
 
-/// Get all AI model configurations
+// ── Model commands ────────────────────────────────────────────────────────────
+
+/// Get all models
 #[tauri::command]
 pub async fn ai_models_get(state: State<'_, AIManagerState>) -> TauriApiResult<Vec<AIModelConfig>> {
     match state.ai_service.get_models().await {
         Ok(models) => Ok(api_success!(models)),
-        Err(error) => {
-            warn!(error = %error, "Failed to load AI model configuration");
+        Err(e) => {
+            warn!(error = %e, "Failed to load models");
             Ok(api_error!("ai.get_models_failed"))
         }
     }
 }
 
-/// Add AI model configuration
+/// Add a new model (complete config: auth + model + metadata)
 #[tauri::command]
 pub async fn ai_models_add(
-    config: AIModelConfig,
+    mut model: AIModelConfig,
     state: State<'_, AIManagerState>,
 ) -> TauriApiResult<AIModelConfig> {
-    if config
-        .display_name
-        .as_ref()
-        .map_or(true, |name| name.trim().is_empty())
-    {
-        return Ok(api_error!("ai.display_name_empty"));
-    }
-
-    match state.ai_service.add_model(config.clone()).await {
-        Ok(_) => {
-            let mut sanitized = config.clone();
-            sanitized.api_key = None;
-            Ok(api_success!(sanitized, "ai.add_model_success"))
-        }
-        Err(error) => {
-            warn!(error = %error, "Failed to add AI model");
-            match error {
-                AIServiceError::ModelAlreadyExists { provider, model } => Ok(api_error!(
-                    "ai.model_already_exists",
-                    "provider" => provider,
-                    "model" => model
-                )),
-                AIServiceError::Repository {
-                    source: RepositoryError::AiModelAlreadyExists { provider, model },
-                    ..
-                } => Ok(api_error!(
-                    "ai.model_already_exists",
-                    "provider" => provider,
-                    "model" => model
-                )),
-                AIServiceError::Configuration { message } if message == "display_name_empty" => {
-                    Ok(api_error!("ai.display_name_empty"))
-                }
-                _ => Ok(api_error!("ai.add_model_failed")),
+    // Auto-fill models.dev metadata if missing
+    if model.context_window.is_none() {
+        if let Some(md) = crate::llm::models_dev::get_model(&model.provider_id, &model.model).await
+        {
+            model.context_window = Some(md.context_window());
+            model.max_output = Some(md.max_output());
+            model.reasoning = md.reasoning;
+            model.tool_call = md.tool_call;
+            model.attachment = md.attachment;
+            model.cost = md.cost.as_ref().and_then(|c| serde_json::to_value(c).ok());
+            if model.display_name.is_empty() {
+                model.display_name = md.name.clone();
             }
+        }
+    }
+    match state.ai_service.add_model(model).await {
+        Ok(m) => Ok(api_success!(m, "ai.add_model_success")),
+        Err(e) => {
+            warn!(error = %e, "Failed to add model");
+            Ok(api_error!("ai.add_model_failed"))
         }
     }
 }
 
-/// Delete AI model configuration
+/// Full update of a model (overwrites the entire row)
+#[tauri::command]
+pub async fn ai_models_update(
+    mut model: AIModelConfig,
+    state: State<'_, AIManagerState>,
+) -> TauriApiResult<AIModelConfig> {
+    // Re-sync models.dev metadata on provider/model change
+    if let Some(md) = crate::llm::models_dev::get_model(&model.provider_id, &model.model).await {
+        model.context_window = Some(md.context_window());
+        model.max_output = Some(md.max_output());
+        model.reasoning = md.reasoning;
+        model.tool_call = md.tool_call;
+        model.attachment = md.attachment;
+        model.cost = md.cost.as_ref().and_then(|c| serde_json::to_value(c).ok());
+    }
+    match state.ai_service.update_model(model).await {
+        Ok(m) => Ok(api_success!(m, "ai.update_model_success")),
+        Err(AIServiceError::ModelNotFound { .. }) => Ok(api_error!("ai.model_not_found")),
+        Err(e) => {
+            warn!(error = %e, "Failed to update model");
+            Ok(api_error!("ai.update_model_failed"))
+        }
+    }
+}
+
+/// Remove a model
 #[tauri::command]
 pub async fn ai_models_remove(
     model_id: String,
     state: State<'_, AIManagerState>,
 ) -> TauriApiResult<EmptyData> {
-    validate_not_empty!(model_id, "common.invalid_params");
-
     match state.ai_service.remove_model(&model_id).await {
         Ok(_) => Ok(api_success!(EmptyData, "ai.remove_model_success")),
-        Err(error) => {
-            warn!(error = %error, model_id = %model_id, "Failed to delete AI model");
+        Err(e) => {
+            warn!(error = %e, "Failed to remove model");
             Ok(api_error!("ai.remove_model_failed"))
         }
     }
 }
 
-/// Update AI model configuration
+/// Test model connection
 #[tauri::command]
-pub async fn ai_models_update(
-    model_id: String,
-    updates: serde_json::Value,
+pub async fn ai_models_test(
+    model: AIModelConfig,
     state: State<'_, AIManagerState>,
 ) -> TauriApiResult<EmptyData> {
-    validate_not_empty!(model_id, "common.invalid_params");
-
-    match state.ai_service.update_model(&model_id, updates).await {
-        Ok(_) => Ok(api_success!(EmptyData, "ai.update_model_success")),
-        Err(error) => {
-            warn!(error = %error, model_id = %model_id, "Failed to update AI model");
-            match error {
-                AIServiceError::ModelAlreadyExists { provider, model } => Ok(api_error!(
-                    "ai.model_already_exists",
-                    "provider" => provider,
-                    "model" => model
-                )),
-                AIServiceError::Configuration { message } if message == "display_name_empty" => {
-                    Ok(api_error!("ai.display_name_empty"))
-                }
-                _ => Ok(api_error!("ai.update_model_failed")),
-            }
-        }
-    }
-}
-
-/// Test AI model connection
-#[tauri::command]
-pub async fn ai_models_test_connection(
-    config: AIModelConfig,
-    state: State<'_, AIManagerState>,
-) -> TauriApiResult<EmptyData> {
-    if config.model.trim().is_empty() {
-        return Ok(api_error!("ai.model_name_empty"));
-    }
-    if config.auth_type == crate::storage::repositories::AuthType::ApiKey {
-        if config
-            .api_url
-            .as_ref()
-            .map_or(true, |url| url.trim().is_empty())
-        {
-            return Ok(api_error!("ai.api_url_empty"));
-        }
-        if config
-            .api_key
-            .as_ref()
-            .map_or(true, |key| key.trim().is_empty())
-        {
-            return Ok(api_error!("ai.api_key_empty"));
-        }
-    }
-
-    match state.ai_service.test_connection_with_config(&config).await {
-        Ok(_result) => Ok(api_success!(EmptyData, "ai.test_connection_success")),
+    match state.ai_service.test_model(&model).await {
+        Ok(_) => Ok(api_success!(EmptyData, "ai.test_connection_success")),
         Err(e) => Ok(api_error!("ai.test_connection_error", "error" => e.to_string())),
     }
 }

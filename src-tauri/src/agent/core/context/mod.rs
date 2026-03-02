@@ -400,17 +400,26 @@ impl TaskContext {
     }
 
     /// Abort task execution
-    /// Simplified version: only needs to set aborted flag
     pub fn abort(&self) {
         self.states.aborted.store(true, Ordering::SeqCst);
         self.states.abort_token.cancel();
+        self.pause_status.store(0, Ordering::SeqCst);
+        self.pause_notify.notify_waiters();
 
-        // Mark react runtime as aborted
         let react_runtime = Arc::clone(&self.states.react_runtime);
         tokio::spawn(async move {
             let mut react = react_runtime.write().await;
             react.mark_abort();
         });
+    }
+
+    pub fn pause(&self) {
+        self.pause_status.store(1, Ordering::SeqCst);
+    }
+
+    pub fn resume(&self) {
+        self.pause_status.store(0, Ordering::SeqCst);
+        self.pause_notify.notify_waiters();
     }
 
     /// Check if already aborted
@@ -659,29 +668,24 @@ impl TaskContext {
     }
 
     pub async fn assistant_append_block(&self, block: Block) -> TaskExecutorResult<()> {
-        let mut message = self
-            .states
-            .messages
-            .lock()
-            .await
-            .assistant_message
-            .clone()
-            .ok_or_else(|| {
+        let message_id = {
+            let mut guard = self.states.messages.lock().await;
+            let message = guard.assistant_message.as_mut().ok_or_else(|| {
                 TaskExecutorError::StatePersistenceFailed(
                     "assistant message not initialized".to_string(),
                 )
             })?;
 
-        message.blocks.push(block.clone());
-        let message_id = message.id;
+            message.blocks.push(block.clone());
+            let mid = message.id;
 
-        self.agent_persistence()
-            .messages()
-            .update(&message)
-            .await
-            .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
-
-        self.states.messages.lock().await.assistant_message = Some(message);
+            self.agent_persistence()
+                .messages()
+                .update(message)
+                .await
+                .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
+            mid
+        };
 
         self.emit_event(TaskEvent::BlockAppended {
             task_id: self.task_id.to_string(),
@@ -696,35 +700,30 @@ impl TaskContext {
         block_id: &str,
         block: Block,
     ) -> TaskExecutorResult<()> {
-        let mut message = self
-            .states
-            .messages
-            .lock()
-            .await
-            .assistant_message
-            .clone()
-            .ok_or_else(|| {
+        let message_id = {
+            let mut guard = self.states.messages.lock().await;
+            let message = guard.assistant_message.as_mut().ok_or_else(|| {
                 TaskExecutorError::StatePersistenceFailed(
                     "assistant message not initialized".to_string(),
                 )
             })?;
 
-        let Some(index) = find_block_index(&message.blocks, block_id) else {
-            return Err(TaskExecutorError::StatePersistenceFailed(format!(
-                "block {block_id} not found for update"
-            )));
+            let Some(index) = find_block_index(&message.blocks, block_id) else {
+                return Err(TaskExecutorError::StatePersistenceFailed(format!(
+                    "block {block_id} not found for update"
+                )));
+            };
+
+            message.blocks[index] = block.clone();
+            let mid = message.id;
+
+            self.agent_persistence()
+                .messages()
+                .update(message)
+                .await
+                .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
+            mid
         };
-
-        message.blocks[index] = block.clone();
-        let message_id = message.id;
-
-        self.agent_persistence()
-            .messages()
-            .update(&message)
-            .await
-            .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
-
-        self.states.messages.lock().await.assistant_message = Some(message);
 
         self.emit_event(TaskEvent::BlockUpdated {
             task_id: self.task_id.to_string(),
@@ -748,35 +747,30 @@ impl TaskContext {
             }
         };
 
-        let mut message = self
-            .states
-            .messages
-            .lock()
-            .await
-            .assistant_message
-            .clone()
-            .ok_or_else(|| {
+        let (message_id, existed) = {
+            let mut guard = self.states.messages.lock().await;
+            let message = guard.assistant_message.as_mut().ok_or_else(|| {
                 TaskExecutorError::StatePersistenceFailed(
                     "assistant message not initialized".to_string(),
                 )
             })?;
 
-        let message_id = message.id;
-        let index_opt = find_block_index(&message.blocks, &block_id);
-        let existed = index_opt.is_some();
-        if let Some(index) = index_opt {
-            message.blocks[index] = block.clone();
-        } else {
-            message.blocks.push(block.clone());
-        }
+            let mid = message.id;
+            let index_opt = find_block_index(&message.blocks, &block_id);
+            let existed = index_opt.is_some();
+            if let Some(index) = index_opt {
+                message.blocks[index] = block.clone();
+            } else {
+                message.blocks.push(block.clone());
+            }
 
-        self.agent_persistence()
-            .messages()
-            .update(&message)
-            .await
-            .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
-
-        self.states.messages.lock().await.assistant_message = Some(message);
+            self.agent_persistence()
+                .messages()
+                .update(message)
+                .await
+                .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
+            (mid, existed)
+        };
 
         if existed {
             self.emit_event(TaskEvent::BlockUpdated {
@@ -796,27 +790,13 @@ impl TaskContext {
         }
     }
 
-    /// Calculate current session's context usage
+    /// Calculate current session's context usage.
+    /// `context_window` should come from DB metadata (models.dev).
     pub async fn calculate_context_usage(
         &self,
-        model_id: &str,
+        context_window: u32,
     ) -> Option<crate::agent::types::ContextUsage> {
         use crate::agent::utils::tokenizer::{count_message_param_tokens, count_text_tokens};
-
-        // Get model's context window size
-        let context_window = match model_id {
-            // Claude models
-            s if s.contains("claude-3-5-sonnet") => 200_000,
-            s if s.contains("claude-3-5-haiku") => 200_000,
-            s if s.contains("claude-3-opus") => 200_000,
-            s if s.contains("claude-3-sonnet") => 200_000,
-            s if s.contains("claude-3-haiku") => 200_000,
-            // GPT models
-            s if s.contains("gpt-4") => 128_000,
-            s if s.contains("gpt-3.5-turbo") => 16_384,
-            // Default value
-            _ => 128_000,
-        };
 
         let mut tokens_used = 0usize;
 
@@ -1115,7 +1095,12 @@ fn map_user_image_blocks(images: &[ImageAttachment]) -> Vec<Block> {
                 data_url: attachment.data_url.clone(),
                 mime_type: attachment.mime_type.clone(),
                 file_name: Some(format!("image_{index}.{ext}")),
-                file_size: Some(attachment.data_url.len() as i64),
+                file_size: {
+                    let raw_len = attachment.data_url.len();
+                    let b64_start = attachment.data_url.find(',').map(|i| i + 1).unwrap_or(0);
+                    let b64_len = raw_len.saturating_sub(b64_start);
+                    Some((b64_len * 3 / 4) as i64)
+                },
             })
         })
         .collect()

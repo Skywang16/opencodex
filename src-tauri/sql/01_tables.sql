@@ -1,26 +1,30 @@
 -- 数据库表结构定义
 -- 创建所有基础表
 
--- AI模型配置表
+-- AI模型配置表（单表设计：认证 + 模型选择 + 元数据，一行 = 一个完整配置）
 CREATE TABLE IF NOT EXISTS ai_models (
     id TEXT PRIMARY KEY,
-    provider TEXT NOT NULL,
-    api_url TEXT,
-    api_key_encrypted TEXT,
-    model_name TEXT NOT NULL,
-    display_name TEXT,
-    model_type TEXT DEFAULT 'chat' CHECK (model_type IN ('chat', 'embedding')),
-    config_json TEXT,
-    use_custom_base_url INTEGER DEFAULT 0,
-
-    -- OAuth 支持
+    -- provider & auth
+    provider_id TEXT NOT NULL,              -- e.g. "openai", "anthropic", "gemini", "openai_compatible"
     auth_type TEXT NOT NULL DEFAULT 'api_key' CHECK (auth_type IN ('api_key', 'oauth')),
-    oauth_provider TEXT CHECK (oauth_provider IN ('openai_codex', 'claude_pro', 'gemini_advanced') OR oauth_provider IS NULL),
+    display_name TEXT NOT NULL,
+    api_url TEXT,                           -- custom base URL
+    api_key_encrypted TEXT,
     oauth_refresh_token_encrypted TEXT,
     oauth_access_token_encrypted TEXT,
-    oauth_token_expires_at INTEGER,
-    oauth_metadata TEXT,  -- JSON: {"account_id": "...", "subscription_tier": "..."}
-
+    oauth_expires_at INTEGER,
+    oauth_metadata TEXT,                    -- JSON: {"account_id": "..."}
+    -- model selection
+    model_name TEXT NOT NULL,
+    model_type TEXT DEFAULT 'chat' CHECK (model_type IN ('chat', 'embedding')),
+    options_json TEXT,                      -- user preferences: temperature, reasoningEffort, timeout
+    -- models.dev metadata (synced on creation/update)
+    context_window INTEGER,
+    max_output INTEGER,
+    reasoning BOOLEAN DEFAULT 0,
+    tool_call BOOLEAN DEFAULT 0,
+    attachment BOOLEAN DEFAULT 0,
+    cost_json TEXT,                         -- JSON: {"input":N,"output":N,"cacheRead":N,...}
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -68,14 +72,13 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 -- AI模型使用统计表
 CREATE TABLE IF NOT EXISTS ai_model_usage_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    model_id TEXT NOT NULL,
+    model_id TEXT NOT NULL REFERENCES ai_models(id) ON DELETE CASCADE,
     request_count INTEGER DEFAULT 0,
     total_tokens INTEGER DEFAULT 0,
     total_cost REAL DEFAULT 0.0,
     last_used_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (model_id) REFERENCES ai_models(id) ON DELETE CASCADE
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ===========================

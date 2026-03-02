@@ -8,6 +8,10 @@
   import SkillCard from './SkillCard.vue'
   import SkillDetailDialog from './SkillDetailDialog.vue'
 
+  const emit = defineEmits<{
+    (e: 'create-skill'): void
+  }>()
+
   const { t } = useI18n()
   const workspaceStore = useWorkspaceStore()
 
@@ -156,8 +160,7 @@
 
   // ============ Lifecycle ============
   onMounted(async () => {
-    await loadInstalledSkills()
-    await loadDiscoverSkills()
+    await Promise.all([loadInstalledSkills(), loadDiscoverSkills()])
   })
 
   watch(
@@ -190,7 +193,7 @@
           class="search-input"
         />
       </div>
-      <button class="new-skill-btn" @mousedown.stop @dblclick.stop>
+      <button class="new-skill-btn" @click="emit('create-skill')" @mousedown.stop @dblclick.stop>
         <svg
           viewBox="0 0 24 24"
           fill="none"

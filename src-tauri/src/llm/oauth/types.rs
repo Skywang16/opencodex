@@ -61,3 +61,19 @@ pub enum OAuthError {
 }
 
 pub type OAuthResult<T> = Result<T, OAuthError>;
+
+/// Result returned by OAuth flow — lightweight token bundle for the frontend.
+/// The caller merges these fields into an AIModelConfig when saving.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthTokenResult {
+    pub provider_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_url: Option<String>,
+    pub oauth_refresh_token: String,
+    pub oauth_access_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_expires_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_metadata: Option<serde_json::Value>,
+}

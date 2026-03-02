@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // Re-export types from Repository
-pub use crate::storage::repositories::ai_models::{AIModelConfig, AIProvider, ModelType};
+pub use crate::storage::repositories::ai_models::{AIModelConfig, AIProvider, AuthType, ModelType};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]

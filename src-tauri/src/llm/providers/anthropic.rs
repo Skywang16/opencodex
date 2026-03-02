@@ -83,10 +83,13 @@ impl AnthropicProvider {
 
     /// Build request headers
     fn build_headers(&self) -> reqwest::header::HeaderMap {
+        use reqwest::header::HeaderValue;
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("x-api-key", self.api_key.parse().unwrap());
-        headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
-        headers.insert("content-type", "application/json".parse().unwrap());
+        if let Ok(val) = HeaderValue::from_str(&self.api_key) {
+            headers.insert("x-api-key", val);
+        }
+        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
         headers
     }
 

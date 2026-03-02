@@ -1,9 +1,9 @@
 <script setup lang="ts">
-  import type { AIModelCreateInput, AIModelTestConnectionInput } from '@/api/ai/types'
-  import type { AIModelConfig, AIProvider } from '@/types'
-  import { AuthType, OAuthProvider, type OAuthConfig } from '@/types/oauth'
+  import type { AIModelConfig } from '@/types'
+  import type { OAuthTokenResult } from '@/types/domain/ai'
+  import { AuthType, OAuthProvider } from '@/types/oauth'
 
-  import { aiApi } from '@/api'
+  import { AiApi, aiApi } from '@/api/ai'
   import { useLLMRegistry, type ModelOption } from '@/composables/useLLMRegistry'
   import { useOAuth } from '@/composables/useOAuth'
   import { confirmDanger, XFormGroup, XInput } from '@/ui'
@@ -13,7 +13,7 @@
 
   const { t } = useI18n()
   const aiSettingsStore = useAISettingsStore()
-  const { providers, providerOptions, getChatModelOptions, getModelInfo, loadProviders } = useLLMRegistry()
+  const { providers, providerOptions, getChatModelOptions, getModelInfo, findProvider, loadProviders } = useLLMRegistry()
 
   const models = computed(() => aiSettingsStore.chatModels)
   const loading = computed(() => aiSettingsStore.isLoading)
@@ -37,10 +37,10 @@
     useCustomBaseUrl: false,
     useCustomModel: false,
     oauthProvider: '' as string,
-    oauthConfig: undefined as OAuthConfig | undefined,
+    oauthTokens: undefined as OAuthTokenResult | undefined,
     options: {
       maxContextTokens: 128000,
-      temperature: 0.5,
+      temperature: 0.7,
       timeoutSeconds: 300,
       maxTokens: -1,
       enableDeepThinking: false,
@@ -51,18 +51,21 @@
   const availableModels = computed<ModelOption[]>(() => {
     if (formData.authType === 'oauth') {
       return [
+        { value: 'o3', label: 'o3', reasoning: true, toolCall: true, attachment: true },
+        { value: 'o4-mini', label: 'o4 Mini', reasoning: true, toolCall: true, attachment: true },
         { value: 'gpt-4o', label: 'GPT-4o', reasoning: false, toolCall: true, attachment: true },
         { value: 'gpt-4o-mini', label: 'GPT-4o Mini', reasoning: false, toolCall: true, attachment: true },
-        { value: 'o1', label: 'o1', reasoning: true, toolCall: false, attachment: false },
-        { value: 'o1-mini', label: 'o1 Mini', reasoning: true, toolCall: false, attachment: false },
+        { value: 'gpt-4.1', label: 'GPT-4.1', reasoning: false, toolCall: true, attachment: true },
+        { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', reasoning: false, toolCall: true, attachment: true },
+        { value: 'codex-mini', label: 'Codex Mini', reasoning: true, toolCall: true, attachment: false },
       ]
     }
     return getChatModelOptions(formData.provider)
   })
 
   const providerInfo = computed(() => {
-    if (formData.authType === 'oauth') return null
-    return providers.value.find(p => p.providerType === formData.provider) || null
+    if (formData.authType === 'oauth' || !formData.provider) return null
+    return findProvider(formData.provider) ?? null
   })
 
   const hasPresetModels = computed(() => availableModels.value.length > 0)
@@ -87,7 +90,7 @@
   })
 
   onMounted(async () => {
-    await Promise.all([aiSettingsStore.loadModels(), loadProviders()])
+    await Promise.all([aiSettingsStore.loadSettings(), loadProviders()])
   })
 
   const resetForm = () => {
@@ -104,7 +107,7 @@
     formData.useCustomBaseUrl = false
     formData.useCustomModel = false
     formData.oauthProvider = ''
-    formData.oauthConfig = undefined
+    formData.oauthTokens = undefined
     formData.options = {
       maxContextTokens: 128000,
       temperature: 0.7,
@@ -128,25 +131,32 @@
     showAddForm.value = true
     if (model.authType === AuthType.OAuth) {
       formData.authType = 'oauth'
-      formData.oauthProvider = model.oauthConfig?.provider || OAuthProvider.OpenAiCodex
-      formData.oauthConfig = model.oauthConfig
+      formData.oauthProvider = (model.oauthMetadata?.provider as string) || OAuthProvider.OpenAiCodex
+      formData.oauthTokens = {
+        providerId: model.providerId,
+        apiUrl: model.apiUrl,
+        oauthRefreshToken: model.oauthRefreshToken || '',
+        oauthAccessToken: model.oauthAccessToken || '',
+        oauthExpiresAt: model.oauthExpiresAt,
+        oauthMetadata: model.oauthMetadata,
+      }
       formData.model = model.model
       formData.displayName = model.displayName || model.model
       formData.provider = ''
     } else {
       formData.authType = 'apikey'
-      formData.provider = model.provider
+      formData.provider = model.providerId || ''
       formData.apiUrl = model.apiUrl || ''
       formData.apiKey = model.apiKey || ''
       formData.model = model.model
       formData.displayName = model.displayName || model.model
-      formData.useCustomBaseUrl = model.useCustomBaseUrl || false
-      formData.useCustomModel = !getChatModelOptions(model.provider).some(m => m.value === model.model)
+      formData.useCustomBaseUrl = !!model.apiUrl
+      formData.useCustomModel = !getChatModelOptions(model.providerId || '').some(m => m.value === model.model)
       formData.oauthProvider = ''
     }
     formData.options = {
       maxContextTokens: model.options?.maxContextTokens ?? 128000,
-      temperature: model.options?.temperature ?? 0.5,
+      temperature: model.options?.temperature ?? 0.7,
       timeoutSeconds: model.options?.timeoutSeconds ?? 300,
       maxTokens: model.options?.maxTokens ?? -1,
       enableDeepThinking: model.options?.enableDeepThinking ?? false,
@@ -164,7 +174,7 @@
       formData.oauthProvider = OAuthProvider.OpenAiCodex
       formData.model = 'gpt-4o'
     } else {
-      formData.oauthConfig = undefined
+      formData.oauthTokens = undefined
       formData.oauthProvider = ''
     }
   }
@@ -191,9 +201,9 @@
 
   const handleStartAuth = async () => {
     const provider = (formData.oauthProvider as OAuthProvider) || OAuthProvider.OpenAiCodex
-    const config = await startOAuth(provider)
-    if (config) {
-      formData.oauthConfig = config
+    const tokens = await startOAuth(provider)
+    if (tokens) {
+      formData.oauthTokens = tokens
     }
   }
 
@@ -201,60 +211,64 @@
     if (formData.authType === 'oauth' || !formData.provider || !formData.model || !formData.apiKey) return
     isTesting.value = true
     try {
-      await aiApi.testConnectionWithConfig({
-        provider: formData.provider as AIProvider,
-        authType: AuthType.ApiKey,
-        apiUrl: formData.apiUrl,
-        apiKey: formData.apiKey,
-        model: formData.model,
-        modelType: 'chat',
-        options: formData.options,
-      } as AIModelTestConnectionInput)
+      await aiApi.testModel(
+        AiApi.buildModel({
+          providerId: formData.provider,
+          authType: AuthType.ApiKey,
+          displayName: formData.displayName || formData.model,
+          model: formData.model,
+          apiUrl: formData.apiUrl || undefined,
+          apiKey: formData.apiKey,
+        })
+      )
     } finally {
       isTesting.value = false
     }
   }
 
+  /** Build a complete AIModelConfig from the form */
+  const buildModelFromForm = (): AIModelConfig => {
+    if (formData.authType === 'oauth') {
+      return AiApi.buildModel({
+        id: editingId.value || undefined,
+        providerId: formData.oauthTokens?.providerId || 'openai',
+        authType: AuthType.OAuth,
+        displayName: formData.displayName.trim() || formData.model.trim(),
+        model: formData.model,
+        apiUrl: formData.oauthTokens?.apiUrl,
+        oauthRefreshToken: formData.oauthTokens?.oauthRefreshToken,
+        oauthAccessToken: formData.oauthTokens?.oauthAccessToken,
+        oauthExpiresAt: formData.oauthTokens?.oauthExpiresAt,
+        oauthMetadata: formData.oauthTokens?.oauthMetadata,
+        options: formData.options,
+      })
+    }
+    return AiApi.buildModel({
+      id: editingId.value || undefined,
+      providerId: formData.provider,
+      authType: AuthType.ApiKey,
+      displayName: formData.displayName.trim() || formData.model.trim(),
+      model: formData.model,
+      apiUrl: formData.useCustomBaseUrl ? formData.apiUrl : undefined,
+      apiKey: formData.apiKey,
+      options: formData.options,
+    })
+  }
+
   const saveModel = async () => {
     if (formData.authType === 'oauth') {
-      if (!formData.oauthConfig || !formData.model || !formData.oauthProvider) return
+      if (!formData.oauthTokens || !formData.model || !formData.oauthProvider) return
     } else {
       if (!formData.provider || !formData.model || !formData.apiKey) return
     }
 
     isSaving.value = true
     try {
-      const modelData =
-        formData.authType === 'oauth'
-          ? {
-              provider: 'openai_compatible' as AIProvider,
-              authType: AuthType.OAuth,
-              apiUrl: '',
-              apiKey: '',
-              model: formData.model,
-              displayName: formData.displayName.trim() || formData.model.trim(),
-              modelType: 'chat' as const,
-              options: formData.options,
-              oauthConfig: formData.oauthConfig,
-              useCustomBaseUrl: false,
-            }
-          : {
-              provider: formData.provider as AIProvider,
-              authType: AuthType.ApiKey,
-              apiUrl: formData.apiUrl,
-              apiKey: formData.apiKey,
-              model: formData.model,
-              displayName: formData.displayName.trim() || formData.model.trim(),
-              modelType: 'chat' as const,
-              options: formData.options,
-              oauthConfig: undefined,
-              useCustomBaseUrl: formData.useCustomBaseUrl,
-            }
-
+      const model = buildModelFromForm()
       if (editingId.value) {
-        await aiSettingsStore.updateModel(editingId.value, modelData)
+        await aiSettingsStore.updateModel(model)
       } else {
-        await aiSettingsStore.addModel(modelData as AIModelCreateInput)
+        await aiSettingsStore.addModel(model)
       }
       resetForm()
     } finally {
@@ -271,21 +285,21 @@
     await aiSettingsStore.removeModel(modelId)
   }
 
+  /** Get the auth type directly from the model */
+  const getModelAuthType = (model: AIModelConfig): string => {
+    return model.authType ?? AuthType.ApiKey
+  }
+
+  /** Get the provider name for display */
+  const getModelProviderName = (model: AIModelConfig): string => {
+    return model.providerId ?? ''
+  }
+
   const isFormValid = computed(() => {
     if (formData.authType === 'oauth') {
-      return (
-        !!formData.oauthConfig &&
-        !!formData.model &&
-        !!formData.oauthProvider &&
-        !!formData.displayName.trim()
-      )
+      return !!formData.oauthTokens && !!formData.model && !!formData.oauthProvider && !!formData.displayName.trim()
     }
-    return (
-      !!formData.provider &&
-      !!formData.model &&
-      !!formData.apiKey?.trim() &&
-      !!formData.displayName.trim()
-    )
+    return !!formData.provider && !!formData.model && !!formData.apiKey?.trim() && !!formData.displayName.trim()
   })
 </script>
 
@@ -339,8 +353,8 @@
         <!-- Models List -->
         <div v-if="models.length > 0" class="models-list">
           <div v-for="model in models" :key="model.id" class="model-card">
-            <div class="model-icon" :class="model.authType === AuthType.OAuth ? 'oauth' : 'apikey'">
-              <svg v-if="model.authType === AuthType.OAuth" viewBox="0 0 24 24" fill="currentColor">
+            <div class="model-icon" :class="getModelAuthType(model) === AuthType.OAuth ? 'oauth' : 'apikey'">
+              <svg v-if="getModelAuthType(model) === AuthType.OAuth" viewBox="0 0 24 24" fill="currentColor">
                 <path
                   d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729z"
                 />
@@ -354,10 +368,10 @@
             <div class="model-info">
               <span class="model-name">{{ model.displayName || model.model }}</span>
               <div class="model-meta">
-                <span class="provider-name">{{ model.provider }}</span>
+                <span class="provider-name">{{ getModelProviderName(model) }}</span>
                 <span class="model-id">{{ model.model }}</span>
-                <span class="model-badge" :class="model.authType === AuthType.OAuth ? 'oauth' : 'apikey'">
-                  {{ model.authType === AuthType.OAuth ? 'OAuth' : 'API Key' }}
+                <span class="model-badge" :class="getModelAuthType(model) === AuthType.OAuth ? 'oauth' : 'apikey'">
+                  {{ getModelAuthType(model) === AuthType.OAuth ? 'OAuth' : 'API Key' }}
                 </span>
               </div>
             </div>
@@ -543,10 +557,10 @@
               <div class="oauth-status-row">
                 <div
                   class="oauth-status"
-                  :class="{ authorized: formData.oauthConfig, authenticating: isAuthenticating }"
+                  :class="{ authorized: formData.oauthTokens, authenticating: isAuthenticating }"
                 >
                   <svg
-                    v-if="formData.oauthConfig"
+                    v-if="formData.oauthTokens"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -571,7 +585,7 @@
                     {{
                       isAuthenticating
                         ? t('ai_model.authorizing') || 'Authorizing...'
-                        : formData.oauthConfig
+                        : formData.oauthTokens
                           ? t('ai_model.authorized') || 'Authorized'
                           : t('ai_model.not_authorized') || 'Not authorized'
                     }}
@@ -579,12 +593,12 @@
                 </div>
                 <button
                   class="auth-btn"
-                  :class="{ secondary: formData.oauthConfig }"
+                  :class="{ secondary: formData.oauthTokens }"
                   :disabled="isAuthenticating"
                   @click="handleStartAuth"
                 >
                   {{
-                    formData.oauthConfig
+                    formData.oauthTokens
                       ? t('ai_model.reauthorize') || 'Re-authorize'
                       : t('ai_model.start_authorization') || 'Authorize'
                   }}
@@ -592,15 +606,34 @@
               </div>
             </div>
 
-            <XFormGroup v-if="formData.oauthConfig" :label="t('ai_model.model')" required>
+            <XFormGroup v-if="formData.oauthTokens" :label="t('ai_model.model')" required>
               <select v-model="formData.model" class="form-select">
                 <option value="" disabled>{{ t('ai_model.select_model') }}</option>
                 <option v-for="m in availableModels" :key="m.value" :value="m.value">{{ m.label }}</option>
               </select>
             </XFormGroup>
 
-            <XFormGroup v-if="formData.oauthConfig" :label="t('ai_model.config_name')" required>
+            <XFormGroup v-if="formData.oauthTokens" :label="t('ai_model.config_name')" required>
               <XInput v-model="formData.displayName" :placeholder="t('ai_model.config_name_placeholder')" />
+            </XFormGroup>
+
+            <!-- Reasoning Effort for OAuth models -->
+            <div v-if="formData.oauthTokens && formData.model && supportsDeepThinking" class="form-group inline">
+              <div class="label-with-badge">
+                <label class="form-label">{{ t('ai_model.reasoning_effort') || 'Reasoning Effort' }}</label>
+                <span class="feature-badge reasoning">{{ t('ai_model.reasoning_model') || 'Reasoning' }}</span>
+              </div>
+            </div>
+
+            <XFormGroup
+              v-if="formData.oauthTokens && formData.model && supportsDeepThinking"
+              :label="t('ai_model.reasoning_effort') || 'Reasoning Effort'"
+            >
+              <select v-model="formData.options.reasoningEffort" class="form-select">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
             </XFormGroup>
           </div>
 

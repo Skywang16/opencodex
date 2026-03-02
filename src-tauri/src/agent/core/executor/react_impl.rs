@@ -42,21 +42,14 @@ impl ReactHandler for TaskExecutor {
                 ))
             })?;
 
+        // User override via options.maxTokens, else DB metadata from models.dev
         let max_tokens = model_config
             .options
             .as_ref()
             .and_then(|opts| opts.get("maxTokens"))
             .and_then(|v| v.as_i64())
             .and_then(|v| if v > 0 { Some(v as u32) } else { None })
-            .or_else(|| {
-                model_config
-                    .options
-                    .as_ref()
-                    .and_then(|opts| opts.get("maxContextTokens"))
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v.min(32_768) as u32)
-            })
-            .unwrap_or(32_768);
+            .unwrap_or_else(|| model_config.max_output.unwrap_or(32_768));
 
         let temperature = model_config
             .options
@@ -180,14 +173,7 @@ impl ReactHandler for TaskExecutor {
         // Convert to ToolCall and execute in parallel
         let calls: Vec<tools::ToolCall> = tool_calls
             .into_iter()
-            .map(|(id, name, mut params)| {
-                if name == "task" {
-                    if let Value::Object(ref mut obj) = params {
-                        obj.insert("call_id".to_string(), Value::String(id.clone()));
-                    }
-                }
-                tools::ToolCall { id, name, params }
-            })
+            .map(|(id, name, params)| tools::ToolCall { id, name, params })
             .collect();
 
         let responses = tools::execute_batch(&context.tool_registry(), context, calls).await;

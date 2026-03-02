@@ -1,10 +1,8 @@
 use crate::llm::oauth::provider_trait::OAuthProvider;
 use crate::llm::oauth::server::OAuthCallbackServer;
 use crate::llm::oauth::types::{OAuthError, OAuthResult, PkceCodes, TokenResponse};
-use crate::storage::repositories::ai_models::OAuthConfig;
 use async_trait::async_trait;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use reqwest::RequestBuilder;
 use serde_json::{json, Value};
 
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -75,6 +73,8 @@ impl OAuthProvider for OpenAiCodexProvider {
             ("code_challenge", &pkce.challenge),
             ("code_challenge_method", "S256"),
             ("id_token_add_organizations", "true"),
+            ("codex_cli_simplified_flow", "true"),
+            ("originator", "opencode"),
             ("state", state),
         ];
 
@@ -164,32 +164,6 @@ impl OAuthProvider for OpenAiCodexProvider {
         }
 
         Ok(metadata)
-    }
-
-    async fn prepare_request(
-        &self,
-        mut request: RequestBuilder,
-        oauth_config: &OAuthConfig,
-    ) -> OAuthResult<RequestBuilder> {
-        // Add Bearer token
-        if let Some(access_token) = &oauth_config.access_token {
-            request = request.header("Authorization", format!("Bearer {access_token}"));
-        }
-
-        // Add ChatGPT-Account-Id (for organization subscriptions)
-        if let Some(metadata) = &oauth_config.metadata {
-            if let Some(account_id) = metadata.get("account_id") {
-                if let Some(account_id_str) = account_id.as_str() {
-                    request = request.header("ChatGPT-Account-Id", account_id_str);
-                }
-            }
-        }
-
-        // Add originator
-        request = request.header("originator", "OpenCodex");
-        request = request.header("Content-Type", "application/json");
-
-        Ok(request)
     }
 }
 
