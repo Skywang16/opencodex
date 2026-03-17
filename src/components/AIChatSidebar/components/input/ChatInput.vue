@@ -53,7 +53,9 @@
   })
 
   onBeforeUnmount(() => {
-    buildSubscription?.unsubscribe().catch(() => {})
+    buildSubscription?.unsubscribe().catch(error => {
+      console.warn('Failed to unsubscribe vector build progress channel on unmount:', error)
+    })
     buildSubscription = null
     if (compositionTimer) {
       clearTimeout(compositionTimer)
@@ -400,7 +402,9 @@
     isBuilding.value = true
     buildProgress.value = 0
 
-    await buildSubscription?.unsubscribe().catch(() => {})
+    await buildSubscription?.unsubscribe().catch(error => {
+      console.warn('Failed to unsubscribe previous vector build progress channel:', error)
+    })
     buildSubscription = null
 
     await vdbApi.startBuildIndex({ root: targetPath })
@@ -411,7 +415,9 @@
           buildProgress.value = computeBuildPercent(progress)
           if (!progress.isDone) return
 
-          await buildSubscription?.unsubscribe().catch(() => {})
+          await buildSubscription?.unsubscribe().catch(error => {
+            console.warn('Failed to unsubscribe completed vector build progress channel:', error)
+          })
           buildSubscription = null
 
           isBuilding.value = false
@@ -446,7 +452,9 @@
     if (!targetPath) return
 
     await vdbApi.cancelBuild({ root: targetPath })
-    await buildSubscription?.unsubscribe().catch(() => {})
+    await buildSubscription?.unsubscribe().catch(error => {
+      console.warn('Failed to unsubscribe cancelled vector build progress channel:', error)
+    })
     buildSubscription = null
 
     isBuilding.value = false
@@ -497,7 +505,9 @@
               buildProgress.value = computeBuildPercent(p)
               if (!p.isDone) return
 
-              await buildSubscription?.unsubscribe().catch(() => {})
+              await buildSubscription?.unsubscribe().catch(error => {
+                console.warn('Failed to unsubscribe recovered vector build progress channel:', error)
+              })
               buildSubscription = null
               isBuilding.value = false
               buildProgress.value = 0

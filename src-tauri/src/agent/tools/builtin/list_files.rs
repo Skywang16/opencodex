@@ -147,21 +147,41 @@ Examples:
         };
 
         if api_response.code != 200 {
-            let message = api_response
-                .message
-                .unwrap_or_else(|| "Failed to list directory".to_string());
+            let message = match api_response.message {
+                Some(message) => message,
+                None => format!(
+                    "Directory listing failed with code {} and no error message",
+                    api_response.code
+                ),
+            };
             return Ok(tool_error(message));
         }
 
-        let mut entries = api_response.data.unwrap_or_default();
+        let mut entries = match api_response.data {
+            Some(entries) => entries,
+            None => {
+                return Ok(tool_error(format!(
+                    "Directory listing response missing data for {}",
+                    path.display()
+                )));
+            }
+        };
 
         // Apply ignore_globs filtering
         let ignore_globs = args.ignore_globs.unwrap_or_default();
         if !ignore_globs.is_empty() {
-            let matchers: Vec<glob::Pattern> = ignore_globs
-                .iter()
-                .filter_map(|g| glob::Pattern::new(g).ok())
-                .collect();
+            let mut matchers = Vec::with_capacity(ignore_globs.len());
+            for glob in &ignore_globs {
+                let matcher = match glob::Pattern::new(glob) {
+                    Ok(matcher) => matcher,
+                    Err(err) => {
+                        return Ok(validation_error(format!(
+                            "Invalid ignore glob '{glob}': {err}"
+                        )));
+                    }
+                };
+                matchers.push(matcher);
+            }
 
             if !matchers.is_empty() {
                 entries.retain(|entry| {

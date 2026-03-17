@@ -5,8 +5,10 @@
 
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::agent::agents::{visible_task_profiles, AgentConfigLoader};
 use crate::agent::context::ContextBuilder;
 use crate::agent::core::context::{AgentToolCallResult, TaskContext};
 use crate::agent::core::executor::{ReactHandler, TaskExecutor};
@@ -19,6 +21,7 @@ use crate::agent::types::{Block, ToolBlock, ToolOutput, ToolStatus};
 use crate::llm::anthropic_types::{CreateMessageRequest, ThinkingConfig};
 
 const TOOL_OUTPUT_PREVIEW_MAX_CHARS: usize = 8000;
+const DEFAULT_MAX_TOKENS: u32 = 32_768;
 
 #[async_trait::async_trait]
 impl ReactHandler for TaskExecutor {
@@ -42,21 +45,8 @@ impl ReactHandler for TaskExecutor {
                 ))
             })?;
 
-        let max_tokens = model_config
-            .options
-            .as_ref()
-            .and_then(|opts| opts.get("maxTokens"))
-            .and_then(|v| v.as_i64())
-            .and_then(|v| if v > 0 { Some(v as u32) } else { None })
-            .or_else(|| {
-                model_config
-                    .options
-                    .as_ref()
-                    .and_then(|opts| opts.get("maxContextTokens"))
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v.min(32_768) as u32)
-            })
-            .unwrap_or(32_768);
+        let options = model_config.options.as_ref();
+        let max_tokens = explicit_max_tokens(options).unwrap_or(DEFAULT_MAX_TOKENS);
 
         let temperature = model_config
             .options
@@ -79,12 +69,10 @@ impl ReactHandler for TaskExecutor {
             .map(|v| v as u32);
 
         // Deep Thinking configuration (Anthropic Extended Thinking)
-        let enable_deep_thinking = model_config
-            .options
-            .as_ref()
+        let enable_deep_thinking = options
             .and_then(|opts| opts.get("enableDeepThinking"))
             .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+            .is_some_and(|enabled| enabled);
 
         let thinking = if enable_deep_thinking {
             Some(ThinkingConfig::default_budget())
@@ -101,6 +89,9 @@ impl ReactHandler for TaskExecutor {
 
         let tool_schemas = tool_registry.get_tool_schemas_with_context(&ToolDescriptionContext {
             cwd: cwd.to_string(),
+            agent_type: Some(context.agent_type.to_string()),
+            allowed_task_profiles: load_allowed_task_profiles(cwd, context.agent_type.as_ref())
+                .await,
         });
 
         let tools: Vec<crate::llm::anthropic_types::Tool> = tool_schemas
@@ -113,6 +104,7 @@ impl ReactHandler for TaskExecutor {
             .collect();
 
         let system_prompt = context.get_system_prompt().await;
+        let developer_context = context.get_developer_context().await;
         let final_messages = if let Some(msgs) = messages {
             msgs
         } else {
@@ -123,6 +115,7 @@ impl ReactHandler for TaskExecutor {
             model: model_id.to_string(),
             max_tokens,
             system: system_prompt,
+            developer_context: (!developer_context.is_empty()).then_some(developer_context),
             messages: final_messages,
             tools: if tools.is_empty() { None } else { Some(tools) },
             stream: true,
@@ -214,16 +207,13 @@ impl ReactHandler for TaskExecutor {
             let preview_value =
                 truncate_tool_output_value(&result_value, TOOL_OUTPUT_PREVIEW_MAX_CHARS);
             let finished_at = chrono::Utc::now();
-            let duration_ms = resp
-                .result
-                .execution_time_ms
-                .map(|v| v as i64)
-                .unwrap_or_else(|| {
-                    finished_at
-                        .signed_duration_since(started_at)
-                        .num_milliseconds()
-                        .max(0)
-                });
+            let duration_ms = match resp.result.execution_time_ms {
+                Some(duration_ms) => duration_ms as i64,
+                None => finished_at
+                    .signed_duration_since(started_at)
+                    .num_milliseconds()
+                    .max(0),
+            };
 
             let status = match result_status {
                 ToolResultStatus::Success => ToolStatus::Completed,
@@ -274,6 +264,42 @@ impl ReactHandler for TaskExecutor {
         let file_tracker = context.file_tracker();
         Arc::new(ContextBuilder::new(file_tracker))
     }
+}
+
+fn explicit_max_tokens(options: Option<&Value>) -> Option<u32> {
+    let max_tokens = options
+        .and_then(|opts| opts.get("maxTokens"))
+        .and_then(|value| value.as_i64())
+        .and_then(|value| (value > 0).then_some(value as u32));
+    if max_tokens.is_some() {
+        return max_tokens;
+    }
+
+    options
+        .and_then(|opts| opts.get("maxContextTokens"))
+        .and_then(|value| value.as_u64())
+        .map(|value| value.min(DEFAULT_MAX_TOKENS as u64) as u32)
+}
+
+async fn load_allowed_task_profiles(cwd: &str, agent_type: &str) -> Vec<String> {
+    let workspace_root = PathBuf::from(cwd);
+    let Ok(configs) = AgentConfigLoader::load_for_workspace(&workspace_root).await else {
+        tracing::warn!(
+            "Failed to load agent configs for workspace {}, cannot resolve task profiles for {}",
+            workspace_root.display(),
+            agent_type
+        );
+        return Vec::new();
+    };
+    let Some(caller) = configs.get(agent_type) else {
+        tracing::warn!(
+            "Agent config `{}` not found in workspace {}, no task profiles exposed",
+            agent_type,
+            workspace_root.display()
+        );
+        return Vec::new();
+    };
+    visible_task_profiles(caller, &configs)
 }
 
 /// Convert ToolResult to (status, json_value)

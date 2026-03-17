@@ -10,6 +10,7 @@
   interface Props {
     sessions: SessionRecord[]
     currentSessionId?: number | null
+    selectedLabel?: string | null
     isLoading?: boolean
   }
 
@@ -45,6 +46,7 @@
       <SessionSelect
         :sessions="sessions"
         :current-session-id="currentSessionId || null"
+        :selected-label="selectedLabel || null"
         :loading="isLoading"
         @select-session="handleSelectSession"
         @create-new-session="handleCreateNewSession"

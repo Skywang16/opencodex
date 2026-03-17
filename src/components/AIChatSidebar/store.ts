@@ -1,13 +1,25 @@
 import { agentApi } from '@/api/agent'
 import type { TaskProgressPayload, TaskProgressStream } from '@/api/agent/types'
+import type { ExecutionNodeRecord } from '@/api/workspace'
 import { useAISettingsStore } from '@/components/settings/components/AI'
 import type { ImageAttachment } from '@/stores/imageLightbox'
 import { useLayoutStore } from '@/stores/layout'
 import { useToolConfirmationDialogStore } from '@/stores/toolConfirmationDialog'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { RetryStatus } from '@/types'
+import type { Block } from '@/types/domain/aiMessage'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+
+type TaskBlock = Extract<Block, { type: 'subtask' }>
+
+interface ActiveExecutionNode {
+  nodeId: number
+  backingSessionId: number
+  title: string
+  profile: string
+  status: 'queued' | 'running' | 'completed' | 'error' | 'cancelled'
+}
 
 export interface QueuedMessage {
   id: string
@@ -16,6 +28,10 @@ export interface QueuedMessage {
 }
 
 export const useAIChatStore = defineStore('ai-chat', () => {
+  const formatErrorMessage = (error: unknown): string => {
+    return error instanceof Error ? error.message : String(error)
+  }
+
   const workspaceStore = useWorkspaceStore()
   const layoutStore = useLayoutStore()
   const aiSettingsStore = useAISettingsStore()
@@ -133,6 +149,50 @@ export const useAIChatStore = defineStore('ai-chat', () => {
   const messageList = computed(() => workspaceStore.messages.filter(m => !m.isInternal))
   const canSendMessage = computed(() => !isSending.value && aiSettingsStore.hasModels && hasWorkspace.value)
 
+  const activeTaskBlocks = computed((): TaskBlock[] => {
+    const map = new Map<number, TaskBlock>()
+    for (const msg of workspaceStore.messages) {
+      for (const block of msg.blocks) {
+        if (block.type === 'subtask') {
+          map.set(block.childSessionId, block as TaskBlock)
+        }
+      }
+    }
+    return [...map.values()].filter(b => b.status === 'running' || b.status === 'pending')
+  })
+
+  const activeExecutionNodes = computed((): ActiveExecutionNode[] => {
+    const workspacePath = currentWorkspacePath.value
+    if (!workspacePath) return []
+
+    const workspaceNode = workspaceStore.getNode(workspacePath)
+    if (!workspaceNode) return []
+
+    const activeNodes: ActiveExecutionNode[] = []
+    const collect = (node: ExecutionNodeRecord) => {
+      if (
+        node.role !== 'root' &&
+        typeof node.backingSessionId === 'number' &&
+        (node.status === 'queued' || node.status === 'running')
+      ) {
+        activeNodes.push({
+          nodeId: node.id,
+          backingSessionId: node.backingSessionId,
+          title: node.title,
+          profile: node.profile,
+          status: node.status,
+        })
+      }
+      node.children.forEach(collect)
+    }
+
+    for (const sessionView of workspaceNode.sessionViews) {
+      sessionView.executionTree.forEach(collect)
+    }
+
+    return activeNodes
+  })
+
   const extractContextUsage = () => {
     const msgs = workspaceStore.messages
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -178,12 +238,9 @@ export const useAIChatStore = defineStore('ai-chat', () => {
 
   const switchSession = async (sessionId: number) => {
     const path = currentWorkspacePath.value
-    const node = workspaceStore.getNode(path)
-    const session = node?.sessions.find(s => s.id === sessionId)
-    if (session) {
-      await workspaceStore.selectSession(session)
-      extractContextUsage()
-    }
+    if (!path) return
+    await workspaceStore.selectSessionById(sessionId, path)
+    extractContextUsage()
   }
 
   // Agent event handling
@@ -200,13 +257,22 @@ export const useAIChatStore = defineStore('ai-chat', () => {
       case 'message_created':
         retryStatus.value = null
         workspaceStore.upsertMessage(event.message)
+        if (event.message.role === 'user' && currentWorkspacePath.value) {
+          void workspaceStore.loadSessionViews(currentWorkspacePath.value)
+        }
         break
       case 'block_appended':
         retryStatus.value = null
         workspaceStore.appendBlock(event.messageId, event.block)
+        if (event.block.type === 'subtask' && currentWorkspacePath.value) {
+          void workspaceStore.loadSessionViews(currentWorkspacePath.value)
+        }
         break
       case 'block_updated':
         workspaceStore.updateBlock(event.messageId, event.blockId, event.block)
+        if (event.block.type === 'subtask' && currentWorkspacePath.value) {
+          void workspaceStore.loadSessionViews(currentWorkspacePath.value)
+        }
         break
       case 'message_finished': {
         workspaceStore.finishMessage(event.messageId, {
@@ -242,12 +308,15 @@ export const useAIChatStore = defineStore('ai-chat', () => {
         }
         // Reload sessions to get updated title
         if (currentWorkspacePath.value) {
-          workspaceStore.loadSessions(currentWorkspacePath.value)
+          void workspaceStore.loadSessionViews(currentWorkspacePath.value)
         }
         break
       case 'task_cancelled':
       case 'task_error':
         retryStatus.value = null
+        if (currentWorkspacePath.value) {
+          void workspaceStore.loadSessionViews(currentWorkspacePath.value)
+        }
         if (taskState.value.status !== 'running' || event.taskId === taskState.value.taskId) {
           resetTaskState()
           toolConfirmStore.close()
@@ -291,7 +360,10 @@ export const useAIChatStore = defineStore('ai-chat', () => {
 
     stream.onError((streamError: Error) => {
       console.error('Agent task error:', streamError)
+      error.value = formatErrorMessage(streamError)
       resetTaskState()
+      retryStatus.value = null
+      toolConfirmStore.close()
     })
 
     stream.onClose(() => {
@@ -313,7 +385,9 @@ export const useAIChatStore = defineStore('ai-chat', () => {
       const s = taskState.value
       if (s.status === 'running' && !cancelSent) {
         cancelSent = true
-        void agentApi.cancelTask(s.taskId)
+        void agentApi.cancelTask(s.taskId).catch(cancelError => {
+          console.warn(`Failed to cancel running task '${s.taskId}':`, cancelError)
+        })
       }
       resetTaskState()
     }
@@ -338,8 +412,14 @@ export const useAIChatStore = defineStore('ai-chat', () => {
       if (lower.startsWith('/explore ') || lower === '/explore') {
         return { agentType: 'explore', prompt: trimmed.replace(/^\/explore\b\s*/i, '') }
       }
+      if (lower.startsWith('/orchestrate ') || lower === '/orchestrate') {
+        return { agentType: 'orchestrate', prompt: trimmed.replace(/^\/orchestrate\b\s*/i, '') }
+      }
       if (trimmed.startsWith('用explore') || trimmed.startsWith('使用explore')) {
         return { agentType: 'explore', prompt: trimmed.replace(/^(用|使用)explore\s*/i, '') }
+      }
+      if (trimmed.startsWith('用orchestrate') || trimmed.startsWith('使用orchestrate')) {
+        return { agentType: 'orchestrate', prompt: trimmed.replace(/^(用|使用)orchestrate\s*/i, '') }
       }
       return { prompt: text }
     }
@@ -360,19 +440,26 @@ export const useAIChatStore = defineStore('ai-chat', () => {
     const commandId = pendingCommandId.value ?? undefined
     pendingCommandId.value = null
 
-    const stream = await agentApi.executeTask({
-      workspacePath,
-      sessionId,
-      userPrompt: prompt,
-      modelId: selectedModelId,
-      agentType,
-      commandId,
-      images: images?.map(img => ({
-        type: 'image' as const,
-        dataUrl: img.dataUrl,
-        mimeType: img.mimeType,
-      })),
-    })
+    let stream: TaskProgressStream | null = null
+    try {
+      stream = await agentApi.executeTask({
+        workspacePath,
+        sessionId,
+        userPrompt: prompt,
+        modelId: selectedModelId,
+        agentType,
+        commandId,
+        images: images?.map(img => ({
+          type: 'image' as const,
+          dataUrl: img.dataUrl,
+          mimeType: img.mimeType,
+        })),
+      })
+    } catch (executeError) {
+      resetTaskState()
+      error.value = formatErrorMessage(executeError)
+      throw executeError
+    }
 
     if (!stream) {
       resetTaskState()
@@ -389,6 +476,7 @@ export const useAIChatStore = defineStore('ai-chat', () => {
         cancelFunction.value()
       } catch (e) {
         console.warn('Failed to stop task:', e)
+        error.value = formatErrorMessage(e)
       } finally {
         cancelFunction.value = null
         resetTaskState()
@@ -429,6 +517,8 @@ export const useAIChatStore = defineStore('ai-chat', () => {
 
     // Derived
     messageList,
+    activeTaskBlocks,
+    activeExecutionNodes,
     currentSession,
     currentWorkspacePath,
     hasWorkspace,

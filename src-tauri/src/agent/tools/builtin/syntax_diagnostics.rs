@@ -87,9 +87,10 @@ impl RunnableTool for SyntaxDiagnosticsTool {
             };
 
             let Some(language) = Language::from_path(&path) else {
-                skipped.push(
-                    json!({ "path": path.display().to_string(), "reason": "unknown language" }),
-                );
+                skipped.push(json!({
+                    "path": path.display().to_string(),
+                    "reason": "unsupported file type for syntax diagnostics"
+                }));
                 continue;
             };
 
@@ -168,15 +169,14 @@ fn format_diagnostics_summary(diags: &[TreeSitterDiagnostic]) -> String {
     out.push_str("<file_diagnostics>\n");
 
     for d in diags {
+        let display_name = PathBuf::from(&d.file)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| d.file.clone());
         out.push_str(&format!(
             "{}:{}:{} {}\n",
-            PathBuf::from(&d.file)
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or(&d.file),
-            d.range.start.line,
-            d.range.start.column,
-            d.message
+            display_name, d.range.start.line, d.range.start.column, d.message
         ));
     }
 

@@ -1,7 +1,7 @@
 import type { AIModelConfig } from '@/types'
 import type { AuthType, OAuthConfig } from '@/types/oauth'
 
-export type { AIModelConfig, AISettings } from '@/types'
+export type { AIModelConfig, AIModelsConfig, AISettings } from '@/types'
 
 export interface AIModelCreateInput {
   provider: AIModelConfig['provider']
@@ -13,23 +13,13 @@ export interface AIModelCreateInput {
   modelType: AIModelConfig['modelType']
   options?: AIModelConfig['options']
   oauthConfig?: OAuthConfig
-  useCustomBaseUrl?: boolean
 }
 
 export type AIModelUpdateChanges = Partial<
   Omit<
     Pick<
       AIModelConfig,
-      | 'provider'
-      | 'authType'
-      | 'apiUrl'
-      | 'apiKey'
-      | 'model'
-      | 'displayName'
-      | 'modelType'
-      | 'options'
-      | 'oauthConfig'
-      | 'useCustomBaseUrl'
+      'provider' | 'authType' | 'apiUrl' | 'apiKey' | 'model' | 'displayName' | 'modelType' | 'options' | 'oauthConfig'
     >,
     'oauthConfig'
   >

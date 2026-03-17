@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use crate::agent::agents::AgentMode;
+use crate::agent::agents::{AgentMode, TaskPermissionRule};
 use crate::agent::error::{AgentError, AgentResult};
-use crate::agent::permissions::ToolFilter;
+use crate::agent::permissions::{PermissionDecision, ToolFilter};
 
 #[derive(Debug, Default)]
 pub struct ParsedFrontmatter {
@@ -66,7 +66,7 @@ pub fn parse_frontmatter(raw: &str) -> ParsedFrontmatter {
 pub fn parse_agent_mode(raw: &str) -> AgentResult<AgentMode> {
     match raw.trim() {
         "primary" => Ok(AgentMode::Primary),
-        "subagent" => Ok(AgentMode::Subagent),
+        "task_profile" => Ok(AgentMode::TaskProfile),
         "internal" => Ok(AgentMode::Internal),
         other => Err(AgentError::Parse(format!("Unknown agent mode: {other}"))),
     }
@@ -74,7 +74,7 @@ pub fn parse_agent_mode(raw: &str) -> AgentResult<AgentMode> {
 
 /// Parse tool filter from frontmatter.
 ///
-/// Claude Code subagent format:
+/// Claude Code agent profile format:
 /// ```yaml
 /// tools: Read, Grep, List        # whitelist (comma-separated or YAML list)
 /// disallowedTools: Write, Shell  # blacklist
@@ -83,11 +83,10 @@ pub fn parse_agent_mode(raw: &str) -> AgentResult<AgentMode> {
 /// If neither is specified, returns allow-all filter (inherit from parent).
 pub fn parse_tool_filter(frontmatter: &str) -> AgentResult<ToolFilter> {
     let tools = parse_tools_field(frontmatter, "tools")?;
-    let disallowed = parse_tools_field(frontmatter, "disallowedTools")?.or_else(|| {
-        parse_tools_field(frontmatter, "disallowed_tools")
-            .ok()
-            .flatten()
-    });
+    let disallowed = match parse_tools_field(frontmatter, "disallowedTools")? {
+        Some(disallowed) => Some(disallowed),
+        None => parse_tools_field(frontmatter, "disallowed_tools")?,
+    };
 
     match (tools, disallowed) {
         (None, None) => Ok(ToolFilter::allow_all()),
@@ -97,6 +96,71 @@ pub fn parse_tool_filter(frontmatter: &str) -> AgentResult<ToolFilter> {
             Ok(ToolFilter::whitelist(whitelist).with_disallowed(blacklist))
         }
     }
+}
+
+pub fn parse_task_permissions(frontmatter: &str) -> AgentResult<Vec<TaskPermissionRule>> {
+    let mut rules = Vec::new();
+    let mut in_permissions = false;
+    let mut in_task = false;
+
+    for line in frontmatter.lines() {
+        let raw = line.trim_end();
+        if raw.trim().is_empty() || raw.trim_start().starts_with('#') {
+            continue;
+        }
+
+        let indent = line.chars().take_while(|c| *c == ' ').count();
+        let trimmed = raw.trim();
+
+        if indent == 0 {
+            in_permissions = trimmed.eq_ignore_ascii_case("permissions:");
+            in_task = false;
+            continue;
+        }
+
+        if !in_permissions {
+            continue;
+        }
+
+        if indent <= 2 && trimmed.ends_with(':') {
+            in_task = trimmed[..trimmed.len() - 1]
+                .trim()
+                .eq_ignore_ascii_case("task");
+            continue;
+        }
+
+        if !in_task || indent <= 2 {
+            continue;
+        }
+
+        let Some((pattern_raw, decision_raw)) = trimmed.split_once(':') else {
+            continue;
+        };
+
+        let pattern = pattern_raw
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string();
+        if pattern.is_empty() {
+            continue;
+        }
+
+        let decision = match decision_raw.trim().trim_matches('"').trim_matches('\'') {
+            "allow" => PermissionDecision::Allow,
+            "deny" => PermissionDecision::Deny,
+            "ask" => PermissionDecision::Ask,
+            other => {
+                return Err(AgentError::Parse(format!(
+                    "Unknown permissions.task decision: {other}"
+                )))
+            }
+        };
+
+        rules.push(TaskPermissionRule { pattern, decision });
+    }
+
+    Ok(rules)
 }
 
 /// Parse a tools field (either `tools:` or `disallowedTools:`).
@@ -178,5 +242,31 @@ fn parse_tools_field(frontmatter: &str, field_name: &str) -> AgentResult<Option<
         Ok(None)
     } else {
         Ok(Some(tools))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_task_permissions_block() {
+        let frontmatter = r#"
+name: planner
+permissions:
+  task:
+    "*": deny
+    explore: allow
+    research: ask
+"#;
+
+        let rules = parse_task_permissions(frontmatter).expect("parse task permissions");
+        assert_eq!(rules.len(), 3);
+        assert_eq!(rules[0].pattern, "*");
+        assert_eq!(rules[0].decision, PermissionDecision::Deny);
+        assert_eq!(rules[1].pattern, "explore");
+        assert_eq!(rules[1].decision, PermissionDecision::Allow);
+        assert_eq!(rules[2].pattern, "research");
+        assert_eq!(rules[2].decision, PermissionDecision::Ask);
     }
 }

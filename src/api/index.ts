@@ -6,7 +6,6 @@
  */
 
 export { agentApi } from './agent'
-export { agentTerminalApi } from './agent-terminal'
 export { aiApi } from './ai'
 export { appApi } from './app'
 export { codeApi } from './code'
@@ -15,6 +14,7 @@ export { fileWatcherApi } from './file-watcher'
 export { filesystemApi } from './filesystem'
 export { gitApi } from './git'
 export { llmApi } from './llm'
+export { lspApi } from './lsp'
 export { mcpApi } from './mcp'
 export { nodeApi } from './node'
 export { settingsApi } from './settings'

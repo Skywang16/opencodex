@@ -38,13 +38,13 @@ pub struct ShellManagerStats {
 #[derive(Debug, Clone)]
 struct ShellCacheEntry {
     shells: Vec<ShellInfo>,
-    default_shell: ShellInfo,
+    default_shell: Option<ShellInfo>,
     timestamp: SystemTime,
     access_count: u64,
 }
 
 impl ShellCacheEntry {
-    fn new(shells: Vec<ShellInfo>, default_shell: ShellInfo) -> Self {
+    fn new(shells: Vec<ShellInfo>, default_shell: Option<ShellInfo>) -> Self {
         Self {
             shells,
             default_shell,
@@ -54,7 +54,13 @@ impl ShellCacheEntry {
     }
 
     fn is_expired(&self, ttl: Duration) -> bool {
-        self.timestamp.elapsed().unwrap_or(Duration::MAX) > ttl
+        match self.timestamp.elapsed() {
+            Ok(elapsed) => elapsed > ttl,
+            Err(err) => {
+                warn!("Shell cache timestamp is in the future: {}", err);
+                true
+            }
+        }
     }
 
     fn access(&mut self) {
@@ -84,17 +90,17 @@ impl ShellManager {
 
         if let Some(entry) = cache_guard.as_ref() {
             self.stats.available_shells = entry.shells.len();
-            self.stats.default_shell = Some(entry.default_shell.clone());
-            self.stats.last_detection_time = Some(
-                entry
-                    .timestamp
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-            );
+            self.stats.default_shell = entry.default_shell.clone();
+            self.stats.last_detection_time = match entry.timestamp.duration_since(UNIX_EPOCH) {
+                Ok(duration) => Some(duration.as_secs()),
+                Err(err) => {
+                    warn!("Shell cache timestamp predates UNIX_EPOCH: {}", err);
+                    None
+                }
+            };
         } else {
             drop(cache_guard);
-            let _ = Self::get_cached_shells();
+            Self::get_cached_shells();
             self.update_stats();
         }
     }
@@ -110,10 +116,13 @@ impl ShellManager {
     fn lock_cache<'a>(
         cache: &'a Mutex<Option<ShellCacheEntry>>,
     ) -> std::sync::MutexGuard<'a, Option<ShellCacheEntry>> {
-        cache.lock().unwrap_or_else(|poisoned| {
-            warn!("Shell cache mutex poisoned, recovering");
-            poisoned.into_inner()
-        })
+        match cache.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                warn!("Shell cache mutex poisoned, recovering");
+                poisoned.into_inner()
+            }
+        }
     }
 
     pub fn get_cached_shells() -> Vec<ShellInfo> {
@@ -129,7 +138,7 @@ impl ShellManager {
 
         // Cache expired or missing, re-detect
         let shells = Self::detect_available_shells_internal();
-        let default_shell = Self::get_default_shell_internal();
+        let default_shell = Self::select_default_shell(&shells);
 
         // Update cache
         *cache_guard = Some(ShellCacheEntry::new(shells.clone(), default_shell));
@@ -137,7 +146,7 @@ impl ShellManager {
         shells
     }
 
-    pub fn get_cached_default_shell() -> ShellInfo {
+    pub fn get_cached_default_shell() -> Result<ShellInfo, String> {
         let cache = Self::get_cache();
         let mut cache_guard = Self::lock_cache(cache);
 
@@ -145,20 +154,25 @@ impl ShellManager {
         if let Some(entry) = cache_guard.as_mut() {
             if !entry.is_expired(config.shell_cache_ttl()) {
                 entry.access();
-                return entry.default_shell.clone();
+                return entry
+                    .default_shell
+                    .clone()
+                    .ok_or_else(|| "No valid default shell detected in shell cache".to_string());
             }
         }
 
         // Cache expired or missing, re-detect
         drop(cache_guard);
-        let _ = Self::get_cached_shells(); // This will update the cache
+        Self::get_cached_shells(); // This will update the cache
 
         // Re-acquire
         let cache_guard = Self::lock_cache(cache);
-        cache_guard
-            .as_ref()
-            .map(|entry| entry.default_shell.clone())
-            .unwrap_or_else(Self::get_default_shell_internal)
+        match cache_guard.as_ref() {
+            Some(entry) => entry.default_shell.clone().ok_or_else(|| {
+                "No valid default shell detected after refreshing shell cache".to_string()
+            }),
+            None => Err("Shell cache unavailable after refresh".to_string()),
+        }
     }
 
     /// Detect available shells on system (public interface, uses cache)
@@ -195,42 +209,53 @@ impl ShellManager {
         }
 
         // Try to find other shells from PATH environment variable
-        if let Ok(path_env) = std::env::var("PATH") {
-            // Use platform-specific PATH separator
-            let path_separator = if cfg!(windows) { ';' } else { ':' };
-            for path_dir in path_env.split(path_separator) {
-                // Select shells to search based on platform
-                let shell_names = if cfg!(windows) {
-                    &["bash.exe", "zsh.exe", "fish.exe"][..]
-                } else {
-                    &["zsh", "bash", "fish"][..]
-                };
+        match std::env::var("PATH") {
+            Ok(path_env) => {
+                // Use platform-specific PATH separator
+                let path_separator = if cfg!(windows) { ';' } else { ':' };
+                for path_dir in path_env.split(path_separator) {
+                    // Select shells to search based on platform
+                    let shell_names = if cfg!(windows) {
+                        &["bash.exe", "zsh.exe", "fish.exe"][..]
+                    } else {
+                        &["zsh", "bash", "fish"][..]
+                    };
 
-                for shell_name in shell_names {
-                    // Use PathBuf to properly handle path joining
-                    let shell_path = std::path::PathBuf::from(path_dir)
-                        .join(shell_name)
-                        .to_string_lossy()
-                        .to_string();
+                    for shell_name in shell_names {
+                        // Use PathBuf to properly handle path joining
+                        let shell_path = std::path::PathBuf::from(path_dir)
+                            .join(shell_name)
+                            .to_string_lossy()
+                            .to_string();
 
-                    if Self::validate_shell(&shell_path)
-                        && !shells.iter().any(|s| s.path == shell_path)
-                    {
-                        let base_name = if cfg!(windows) {
-                            shell_name.strip_suffix(".exe").unwrap_or(shell_name)
-                        } else {
-                            shell_name
-                        };
+                        if Self::validate_shell(&shell_path)
+                            && !shells.iter().any(|s| s.path == shell_path)
+                        {
+                            let base_name = if cfg!(windows) {
+                                match shell_name.strip_suffix(".exe") {
+                                    Some(base_name) => base_name,
+                                    None => shell_name,
+                                }
+                            } else {
+                                shell_name
+                            };
 
-                        let display_name = match base_name {
-                            "zsh" => "Zsh",
-                            "bash" => "Bash",
-                            "fish" => "Fish",
-                            _ => shell_name,
-                        };
-                        shells.push(ShellInfo::new(base_name, &shell_path, display_name));
+                            let display_name = match base_name {
+                                "zsh" => "Zsh",
+                                "bash" => "Bash",
+                                "fish" => "Fish",
+                                _ => shell_name,
+                            };
+                            shells.push(ShellInfo::new(base_name, &shell_path, display_name));
+                        }
                     }
                 }
+            }
+            Err(err) => {
+                warn!(
+                    "PATH environment variable unavailable during shell detection: {}",
+                    err
+                );
             }
         }
 
@@ -238,67 +263,60 @@ impl ShellManager {
     }
 
     /// Get default shell (public interface, uses cache)
-    pub fn terminal_get_default_shell() -> ShellInfo {
+    pub fn terminal_get_default_shell() -> Result<ShellInfo, String> {
         Self::get_cached_default_shell()
     }
 
-    /// Internal default shell retrieval implementation (does not use cache)
-    fn get_default_shell_internal() -> ShellInfo {
-        #[cfg(windows)]
-        {
-            // Default shell detection for Windows platform
-            let windows_shells = [
-                ("bash", "C:\\Program Files\\Git\\bin\\bash.exe", "Git Bash"),
-                (
-                    "bash",
-                    "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
-                    "Git Bash",
-                ),
-                ("zsh", "C:\\Program Files\\Git\\usr\\bin\\zsh.exe", "Zsh"),
-                ("fish", "C:\\Program Files\\Git\\usr\\bin\\fish.exe", "Fish"),
-            ];
-
-            for (name, path, display_name) in &windows_shells {
-                if Self::validate_shell(path) {
-                    return ShellInfo::new(name, path, display_name);
-                }
-            }
-
-            // Fallback option
-            ShellInfo::new("cmd", "C:\\Windows\\System32\\cmd.exe", "Command Prompt")
-        }
-
+    fn select_default_shell(shells: &[ShellInfo]) -> Option<ShellInfo> {
         #[cfg(not(windows))]
         {
-            // First try to get default shell from environment variable
-            if let Ok(shell_path) = std::env::var("SHELL") {
-                if Self::validate_shell(&shell_path) {
-                    // Extract shell name from path
-                    if let Some(shell_name) = std::path::Path::new(&shell_path).file_name() {
-                        if let Some(name_str) = shell_name.to_str() {
-                            let display_name = Self::get_shell_display_name(name_str);
-                            return ShellInfo::new(name_str, &shell_path, display_name);
+            match std::env::var("SHELL") {
+                Ok(shell_path) => {
+                    if Self::validate_shell(&shell_path) {
+                        if let Some(shell_name) = std::path::Path::new(&shell_path).file_name() {
+                            if let Some(name_str) = shell_name.to_str() {
+                                let display_name = Self::get_shell_display_name(name_str);
+                                return Some(ShellInfo::new(name_str, &shell_path, display_name));
+                            }
                         }
+
+                        warn!(
+                            "SHELL path '{}' is valid but has no UTF-8 file name",
+                            shell_path
+                        );
+                    } else {
+                        warn!(
+                            "SHELL environment variable points to invalid shell: {}",
+                            shell_path
+                        );
                     }
                 }
-            }
-
-            let preferred_shells = [
-                ("zsh", "/bin/zsh", "Zsh"),
-                ("bash", "/bin/bash", "Bash"),
-                ("fish", "/usr/bin/fish", "Fish"),
-                ("sh", "/bin/sh", "sh"),
-            ];
-
-            for (name, path, display_name) in &preferred_shells {
-                if Self::validate_shell(path) {
-                    return ShellInfo::new(name, path, display_name);
+                Err(err) => {
+                    warn!(
+                        "SHELL environment variable unavailable during shell detection: {}",
+                        err
+                    );
                 }
             }
+        }
 
-            // Final fallback option
-            warn!("No available shell found, using fallback");
-            ShellInfo::new("bash", "/bin/bash", "Bash")
+        let preferred_names: &[&str] = if cfg!(windows) {
+            &["bash", "zsh", "fish", "cmd"]
+        } else {
+            &["zsh", "bash", "fish", "sh"]
+        };
+
+        for name in preferred_names {
+            if let Some(shell) = shells.iter().find(|shell| shell.name == *name) {
+                return Some(shell.clone());
+            }
+        }
+
+        if shells.is_empty() {
+            warn!("No available shells detected on the system");
+            None
+        } else {
+            Some(shells[0].clone())
         }
     }
 

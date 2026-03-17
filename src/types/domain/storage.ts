@@ -12,6 +12,10 @@ export enum ConfigSection {
   Ai = 'ai',
 }
 
+export type RuntimeTerminalKind = 'workspace' | 'task'
+export type TaskTerminalMode = 'blocking' | 'background'
+export type TaskTerminalStatus = 'initializing' | 'running' | 'completed' | 'failed' | 'aborted'
+
 export interface DataQuery {
   query: string
   params: Record<string, unknown>
@@ -46,6 +50,12 @@ export interface RuntimeTerminalState {
   shell: string
   /** Pre-computed display title for the tab */
   displayTitle: string
+  kind: RuntimeTerminalKind
+  sessionId: number | null
+  taskTerminalId: string | null
+  sourceLabel: string | null
+  taskMode: TaskTerminalMode | null
+  taskStatus: TaskTerminalStatus | null
 }
 
 export interface StorageEvent {

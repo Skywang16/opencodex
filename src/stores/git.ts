@@ -7,6 +7,10 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 
 export const useGitStore = defineStore('git', () => {
+  const formatErrorMessage = (error: unknown): string => {
+    return error instanceof Error ? error.message : String(error)
+  }
+
   const fileWatcherStore = useFileWatcherStore()
 
   const status = ref<RepositoryStatus | null>(null)
@@ -77,9 +81,12 @@ export const useGitStore = defineStore('git', () => {
         diffAdditions.value = stat.additions
         diffDeletions.value = stat.deletions
       }
-    } catch (e) {
-      // Silently handle all Git-related errors
+    } catch (error) {
+      console.warn(`Failed to refresh git status for '${path}', clearing git state:`, error)
       status.value = null
+      branches.value = []
+      commits.value = []
+      selectedFile.value = null
       diffAdditions.value = 0
       diffDeletions.value = 0
     } finally {
@@ -98,7 +105,7 @@ export const useGitStore = defineStore('git', () => {
     try {
       branches.value = await gitApi.getBranches(path)
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = formatErrorMessage(e)
     }
   }
 
@@ -109,7 +116,8 @@ export const useGitStore = defineStore('git', () => {
     while (commitsInFlight) {
       try {
         await commitsInFlight
-      } catch {
+      } catch (error) {
+        console.warn('Previous commit load failed while waiting for queue drain:', error)
         break
       }
     }
@@ -130,7 +138,7 @@ export const useGitStore = defineStore('git', () => {
     try {
       return await task
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = formatErrorMessage(e)
       return 0
     } finally {
       commitsInFlight = null
@@ -144,7 +152,8 @@ export const useGitStore = defineStore('git', () => {
     while (commitsInFlight) {
       try {
         await commitsInFlight
-      } catch {
+      } catch (error) {
+        console.warn('Previous commit pagination load failed while waiting for queue drain:', error)
         break
       }
     }
@@ -182,7 +191,7 @@ export const useGitStore = defineStore('git', () => {
     try {
       return await task
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = formatErrorMessage(e)
       return { loaded: 0, hasMore: false }
     } finally {
       commitsInFlight = null

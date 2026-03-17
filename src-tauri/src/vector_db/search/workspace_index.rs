@@ -42,7 +42,7 @@ struct CacheInner {
 
 impl WorkspaceIndexCache {
     pub fn new(max_workspaces: usize, max_bytes: usize) -> Self {
-        let cap = NonZeroUsize::new(max_workspaces.max(1)).unwrap();
+        let cap = NonZeroUsize::new(max_workspaces.max(1)).unwrap_or(NonZeroUsize::MIN);
         Self {
             inner: Mutex::new(CacheInner {
                 lru: LruCache::new(cap),
@@ -206,7 +206,10 @@ impl CachedWorkspaceIndex {
             })
             .collect();
 
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| match b.1.partial_cmp(&a.1) {
+            Some(ordering) => ordering,
+            None => std::cmp::Ordering::Equal,
+        });
         Ok(results)
     }
 

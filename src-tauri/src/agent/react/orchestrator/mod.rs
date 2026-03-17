@@ -9,6 +9,7 @@
  */
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -18,6 +19,7 @@ use tokio_stream::StreamExt;
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::agent::agents::{visible_task_profiles, AgentConfigLoader};
 use crate::agent::compaction::{
     CompactionConfig, CompactionService, CompactionTrigger, SessionMessageLoader,
 };
@@ -93,9 +95,12 @@ impl ReactOrchestrator {
             context.set_system_prompt_overlay(None).await?;
             if let Some(manager) = AgentTerminalManager::global() {
                 if let Some(overlay) = manager.build_prompt_overlay(context.session_id) {
-                    let _ = context
+                    if let Err(err) = context
                         .set_system_prompt_overlay(Some(SystemPrompt::Text(overlay)))
-                        .await;
+                        .await
+                    {
+                        warn!("Failed to apply terminal prompt overlay: {}", err);
+                    }
                 }
             }
 
@@ -112,6 +117,12 @@ impl ReactOrchestrator {
             let tool_names: HashSet<String> = tool_registry
                 .get_tool_schemas_with_context(&ToolDescriptionContext {
                     cwd: context.cwd.to_string(),
+                    agent_type: Some(context.agent_type.to_string()),
+                    allowed_task_profiles: load_allowed_task_profiles(
+                        context.cwd.as_ref(),
+                        context.agent_type.as_ref(),
+                    )
+                    .await,
                 })
                 .into_iter()
                 .map(|schema| schema.name.to_lowercase())
@@ -279,7 +290,7 @@ impl ReactOrchestrator {
                         let reason = e
                             .as_provider()
                             .map(crate::llm::retry::error_retry_reason)
-                            .unwrap_or("unknown");
+                            .unwrap_or("non_provider");
                         let delay = retry_cfg.delay_for_attempt(attempt - 1);
 
                         tracing::warn!(
@@ -290,7 +301,7 @@ impl ReactOrchestrator {
                             delay
                         );
 
-                        let _ = context
+                        if let Err(err) = context
                             .emit_event(crate::agent::types::TaskEvent::TaskRetrying {
                                 task_id: context.task_id.to_string(),
                                 attempt,
@@ -299,7 +310,10 @@ impl ReactOrchestrator {
                                 error_message: e.to_string(),
                                 retry_in_ms: delay.as_millis() as u64,
                             })
-                            .await;
+                            .await
+                        {
+                            warn!("Failed to emit task retrying event: {}", err);
+                        }
 
                         tokio::time::sleep(delay).await;
                     }
@@ -384,17 +398,16 @@ impl ReactOrchestrator {
                                 ContentDelta::Text { text } => {
                                     if let BlockAccumulator::Text(s) = block {
                                         s.push_str(&text);
-                                        if text_stream_id.is_none() {
-                                            text_stream_id = Some(Uuid::new_v4().to_string());
-                                        }
-                                        let id = text_stream_id.as_ref().unwrap();
+                                        let id = text_stream_id
+                                            .get_or_insert_with(|| Uuid::new_v4().to_string())
+                                            .clone();
                                         let block = Block::Text(TextBlock {
                                             id: id.clone(),
                                             content: s.clone(),
                                             is_streaming: true,
                                         });
                                         if text_created {
-                                            context.assistant_update_block(id, block).await?;
+                                            context.assistant_update_block(&id, block).await?;
                                         } else {
                                             context.assistant_append_block(block).await?;
                                             text_created = true;
@@ -435,11 +448,18 @@ impl ReactOrchestrator {
                                         *last_ui_update = now;
                                         *last_ui_len = bytes;
 
-                                        let started_at = tool_block_started_at
-                                            .get(id)
-                                            .cloned()
-                                            .unwrap_or_else(Utc::now);
-                                        let _ = context
+                                        let started_at = match tool_block_started_at.get(id) {
+                                            Some(started_at) => *started_at,
+                                            None => {
+                                                warn!(
+                                                    tool_use_id = %id,
+                                                    tool_name = %name,
+                                                    "Missing tool start timestamp for streaming update"
+                                                );
+                                                Utc::now()
+                                            }
+                                        };
+                                        if let Err(err) = context
                                             .assistant_upsert_block(Block::Tool(ToolBlock {
                                                 id: id.clone(),
                                                 call_id: id.clone(),
@@ -455,7 +475,13 @@ impl ReactOrchestrator {
                                                 finished_at: None,
                                                 duration_ms: None,
                                             }))
-                                            .await;
+                                            .await
+                                        {
+                                            warn!(
+                                                "Failed to stream pending tool block '{}' to UI: {}",
+                                                id, err
+                                            );
+                                        }
                                     }
                                 }
                                 ContentDelta::Thinking { thinking: delta } => {
@@ -499,7 +525,14 @@ impl ReactOrchestrator {
                                                 content: text.clone(),
                                                 is_streaming: false,
                                             });
-                                            let _ = context.assistant_update_block(id, block).await;
+                                            if let Err(err) =
+                                                context.assistant_update_block(id, block).await
+                                            {
+                                                warn!(
+                                                    "Failed to finalize text block '{}' in UI: {}",
+                                                    id, err
+                                                );
+                                            }
                                         }
                                     }
                                     if !text.is_empty() {
@@ -577,7 +610,14 @@ impl ReactOrchestrator {
                                                 is_streaming: false,
                                                 metadata: metadata.clone(),
                                             });
-                                            let _ = context.assistant_update_block(id, block).await;
+                                            if let Err(err) =
+                                                context.assistant_update_block(id, block).await
+                                            {
+                                                warn!(
+                                                    "Failed to finalize thinking block '{}' in UI: {}",
+                                                    id, err
+                                                );
+                                            }
                                         }
                                     }
 
@@ -601,8 +641,10 @@ impl ReactOrchestrator {
                             }
                         }
                     }
-                    Ok(StreamEvent::MessageDelta { delta, usage }) => {
-                        let _ = usage;
+                    Ok(StreamEvent::MessageDelta {
+                        delta,
+                        usage: _usage,
+                    }) => {
                         if let Some(reason) = delta.stop_reason {
                             stop_reason = Some(reason);
                         }
@@ -747,13 +789,16 @@ impl ReactOrchestrator {
 
                         let builder = PromptBuilder::new(None);
                         let warning = builder.get_duplicate_tools_warning(duplicates_count);
-                        let _ = context
+                        if let Err(err) = context
                             .set_system_prompt_overlay(Some(
                                 crate::llm::anthropic_types::SystemPrompt::Text(format!(
                                     "<system-reminder type=\"duplicate-tools\">\n{warning}\n</system-reminder>"
                                 )),
                             ))
-                            .await;
+                            .await
+                        {
+                            warn!("Failed to apply duplicate-tools reminder overlay: {}", err);
+                        }
                     }
 
                     let results = handler
@@ -801,11 +846,14 @@ impl ReactOrchestrator {
                             .await
                     {
                         warn!("Loop pattern detected in iteration {}", iteration);
-                        let _ = context
+                        if let Err(err) = context
                             .set_system_prompt_overlay(Some(
                                 crate::llm::anthropic_types::SystemPrompt::Text(loop_warning),
                             ))
-                            .await;
+                            .await
+                        {
+                            warn!("Failed to set loop-detection prompt overlay: {}", err);
+                        }
                     }
 
                     let snapshot = iter_ctx.finalize();
@@ -836,14 +884,17 @@ impl ReactOrchestrator {
 
                     if empty_response_count == 1 {
                         warn!("Iteration {}: empty response - retrying once", iteration);
-                        let _ = context
+                        if let Err(err) = context
                             .set_system_prompt_overlay(Some(
                                 crate::llm::anthropic_types::SystemPrompt::Text(
                                     "<system-reminder type=\"empty-response\">\nYou returned an empty response (no text and no tool calls). Please either (1) call an appropriate tool, or (2) provide a short text response describing your next step.\n</system-reminder>"
                                         .to_string(),
                                 ),
                             ))
-                            .await;
+                            .await
+                        {
+                            warn!("Failed to set empty-response prompt overlay: {}", err);
+                        }
 
                         let snapshot = iter_ctx.finalize();
                         Self::update_session_stats(context, &snapshot).await;
@@ -927,6 +978,27 @@ impl ReactOrchestrator {
 
         Ok(())
     }
+}
+
+async fn load_allowed_task_profiles(cwd: &str, agent_type: &str) -> Vec<String> {
+    let workspace_root = PathBuf::from(cwd);
+    let Ok(configs) = AgentConfigLoader::load_for_workspace(&workspace_root).await else {
+        tracing::warn!(
+            "Failed to load agent configs for workspace {}, cannot resolve task profiles for {}",
+            workspace_root.display(),
+            agent_type
+        );
+        return Vec::new();
+    };
+    let Some(caller) = configs.get(agent_type) else {
+        tracing::warn!(
+            "Agent config `{}` not found in workspace {}, no task profiles exposed",
+            agent_type,
+            workspace_root.display()
+        );
+        return Vec::new();
+    };
+    visible_task_profiles(caller, &configs)
 }
 
 fn contains_fabricated_tool_output(text: &str, tool_names: &HashSet<String>) -> bool {

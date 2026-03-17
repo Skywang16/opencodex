@@ -173,15 +173,21 @@ fn parse_cwd(data: &str) -> Option<String> {
     if data.is_empty() {
         return None;
     }
-    let value = data.strip_prefix("file://").unwrap_or(data);
+    let value = match data.strip_prefix("file://") {
+        Some(path) => path,
+        None => data,
+    };
     let path = match value.find('/') {
         Some(pos) => &value[pos..],
         None => value,
     };
-    percent_decode_str(path)
-        .decode_utf8()
-        .ok()
-        .map(Cow::into_owned)
+    match percent_decode_str(path).decode_utf8() {
+        Ok(decoded) => Some(Cow::into_owned(decoded)),
+        Err(err) => {
+            tracing::warn!("Failed to decode OSC cwd '{}': {}", path, err);
+            None
+        }
+    }
 }
 
 fn parse_windows_cwd(data: &str) -> Option<String> {
@@ -246,12 +252,21 @@ fn parse_exit_code(data: &str) -> Option<i32> {
     if data.is_empty() {
         return None;
     }
-    if let Ok(code) = data.parse::<i32>() {
-        return Some(code);
+    match data.parse::<i32>() {
+        Ok(code) => return Some(code),
+        Err(err) => {
+            tracing::debug!("Failed to parse direct OSC exit code '{}': {}", data, err);
+        }
     }
     for token in data.split(|c: char| c == ';' || c == '=' || c.is_whitespace()) {
-        if let Ok(code) = token.parse::<i32>() {
-            return Some(code);
+        if token.is_empty() {
+            continue;
+        }
+        match token.parse::<i32>() {
+            Ok(code) => return Some(code),
+            Err(err) => {
+                tracing::trace!("Failed to parse OSC exit code token '{}': {}", token, err);
+            }
         }
     }
     None

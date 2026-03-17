@@ -72,7 +72,10 @@ impl IterationOutcome {
     /// Prefer returning output, if not available then return thinking.
     pub fn get_output_for_persistence(&self) -> Option<String> {
         match self {
-            Self::Complete { thinking, output } => output.clone().or_else(|| thinking.clone()),
+            Self::Complete { thinking, output } => match output {
+                Some(output) => Some(output.clone()),
+                None => thinking.clone(),
+            },
             _ => None,
         }
     }

@@ -60,7 +60,6 @@
   .node-version-tag {
     display: inline-block;
     vertical-align: middle;
-    margin-right: 8px;
     margin-bottom: 8px;
   }
 
@@ -68,20 +67,21 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background-color: var(--bg-400);
-    border: 1px solid var(--border-300);
-    border-radius: var(--border-radius-sm);
-    padding: 4px 8px;
+    padding: 4px 10px 4px 8px;
+    background: var(--bg-200);
+    border: none;
+    border-radius: var(--border-radius-md);
     font-size: 12px;
     color: var(--text-300);
     max-width: 100%;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition:
+      background 0.15s ease,
+      color 0.15s ease;
   }
 
   .tag-content:hover {
-    background-color: var(--bg-500);
-    border-color: var(--border-200);
+    background: var(--bg-300);
     color: var(--text-200);
   }
 
@@ -96,13 +96,11 @@
   }
 
   .tag-text {
+    line-height: 1;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     flex: 1;
-    font-family: var(--font-family-mono);
-    font-size: 11px;
     pointer-events: none;
-    transition: color 0.1s ease;
   }
 </style>

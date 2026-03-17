@@ -3,6 +3,7 @@ import { useAIChatStore } from '@/components/AIChatSidebar/store'
 import { useLayoutStore } from '@/stores/layout'
 import { useTerminalStore } from '@/stores/Terminal'
 import { useWindowStore } from '@/stores/Window'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 export class ShortcutActionsService {
   private get layoutStore() {
@@ -32,11 +33,11 @@ export class ShortcutActionsService {
     return true
   }
 
-  newTerminal = (): boolean => {
+  newTerminal = async (): Promise<boolean> => {
     const terminalStore = useTerminalStore()
-    const layoutStore = useLayoutStore()
-    terminalStore.createTerminalPane()
-    layoutStore.openTerminalPanel()
+    const workspaceStore = useWorkspaceStore()
+    await terminalStore.createTerminalPane(workspaceStore.currentWorkspacePath || undefined)
+    this.layoutStore.openTerminalPanel()
     return true
   }
 

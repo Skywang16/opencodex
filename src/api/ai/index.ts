@@ -1,10 +1,18 @@
-import type { AIModelConfig } from '@/types'
+import type { AIModelConfig, AIModelsConfig } from '@/types'
 import { invoke } from '@/utils/request'
 import type { AIModelCreateInput, AIModelTestConnectionInput, AIModelUpdateInput } from './types'
 
 export class AiApi {
   getModels = async (): Promise<AIModelConfig[]> => {
     return await invoke<AIModelConfig[]>('ai_models_get')
+  }
+
+  getModelsConfig = async (): Promise<AIModelsConfig> => {
+    return await invoke<AIModelsConfig>('ai_models_get_config')
+  }
+
+  getModelsConfigPath = async (): Promise<string> => {
+    return await invoke<string>('ai_models_get_config_path')
   }
 
   addModel = async (model: AIModelCreateInput): Promise<AIModelConfig> => {
@@ -20,7 +28,6 @@ export class AiApi {
       modelType: model.modelType,
       options: model.options,
       oauthConfig: model.oauthConfig,
-      useCustomBaseUrl: model.useCustomBaseUrl,
       createdAt: timestamp,
       updatedAt: timestamp,
     }
@@ -49,7 +56,6 @@ export class AiApi {
       model: config.model,
       modelType: config.modelType,
       options: config.options,
-      useCustomBaseUrl: config.useCustomBaseUrl,
       createdAt: new Date(),
       updatedAt: new Date(),
     }

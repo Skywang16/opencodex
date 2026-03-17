@@ -28,7 +28,10 @@ use async_trait::async_trait;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
 use once_cell::sync::Lazy;
-use reqwest::{Client, StatusCode};
+use reqwest::{
+    header::{HeaderMap, HeaderValue, CONTENT_TYPE},
+    Client, StatusCode,
+};
 use std::pin::Pin;
 use std::time::Duration;
 use tokio_stream::Stream;
@@ -82,12 +85,16 @@ impl AnthropicProvider {
     }
 
     /// Build request headers
-    fn build_headers(&self) -> reqwest::header::HeaderMap {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("x-api-key", self.api_key.parse().unwrap());
-        headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
-        headers.insert("content-type", "application/json".parse().unwrap());
-        headers
+    fn build_headers(&self) -> AnthropicResult<HeaderMap> {
+        let mut headers = HeaderMap::new();
+        let api_key =
+            HeaderValue::from_str(&self.api_key).map_err(|err| AnthropicError::Configuration {
+                message: format!("Invalid Anthropic API key header value: {err}"),
+            })?;
+        headers.insert("x-api-key", api_key);
+        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        Ok(headers)
     }
 
     /// Internal non-streaming call implementation
@@ -95,7 +102,7 @@ impl AnthropicProvider {
         let response = self
             .client()
             .post(self.get_endpoint())
-            .headers(self.build_headers())
+            .headers(self.build_headers()?)
             .json(&request)
             .send()
             .await
@@ -137,7 +144,7 @@ impl AnthropicProvider {
         let response = self
             .client()
             .post(self.get_endpoint())
-            .headers(self.build_headers())
+            .headers(self.build_headers()?)
             .json(&request)
             .send()
             .await
@@ -187,14 +194,26 @@ impl AnthropicProvider {
 
     /// Parse error response
     fn parse_error_response(&self, status: StatusCode, body: &str) -> AnthropicError {
-        if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(body) {
-            if let Some(error_obj) = error_json["error"].as_object() {
-                let error_message = error_obj["message"].as_str().unwrap_or("Unknown error");
+        match serde_json::from_str::<serde_json::Value>(body) {
+            Ok(error_json) => {
+                if let Some(error_obj) = error_json["error"].as_object() {
+                    let error_message = match error_obj["message"].as_str() {
+                        Some(message) if !message.trim().is_empty() => message.to_string(),
+                        _ => body.to_string(),
+                    };
 
-                return AnthropicError::Api {
-                    status,
-                    message: error_message.to_string(),
-                };
+                    return AnthropicError::Api {
+                        status,
+                        message: error_message,
+                    };
+                }
+            }
+            Err(err) => {
+                tracing::debug!(
+                    status = %status,
+                    error = %err,
+                    "Failed to parse Anthropic error response as JSON"
+                );
             }
         }
 
@@ -279,6 +298,10 @@ pub fn apply_prompt_caching(mut request: CreateMessageRequest) -> CreateMessageR
 
 #[async_trait]
 impl LLMProvider for AnthropicProvider {
+    fn provider_name(&self) -> &'static str {
+        "anthropic"
+    }
+
     /// Non-streaming call - directly returns Anthropic native types
     async fn call(&self, request: CreateMessageRequest) -> LlmProviderResult<Message> {
         self.call_internal(request)
@@ -319,6 +342,7 @@ mod tests {
             messages: vec![MessageParam::user("Hello")],
             max_tokens: 1024,
             system: Some(SystemPrompt::Text("You are helpful".to_string())),
+            developer_context: None,
             tools: None,
             temperature: None,
             stop_sequences: None,
@@ -353,6 +377,7 @@ mod tests {
             ],
             max_tokens: 1024,
             system: None,
+            developer_context: None,
             tools: None,
             temperature: None,
             stop_sequences: None,
@@ -395,7 +420,9 @@ mod tests {
         };
 
         let provider = AnthropicProvider::new(config);
-        let headers = provider.build_headers();
+        let headers = provider
+            .build_headers()
+            .expect("test config should build valid headers");
 
         assert_eq!(headers.get("x-api-key").unwrap(), "test-key");
         assert_eq!(headers.get("anthropic-version").unwrap(), "2023-06-01");

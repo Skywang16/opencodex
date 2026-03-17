@@ -174,7 +174,10 @@ pub async fn shortcuts_execute_action(
     state: State<'_, ShortcutManagerState>,
 ) -> TauriApiResult<OperationResult<serde_json::Value>> {
     let parts: Vec<&str> = key_combination.split('+').collect();
-    let key = parts.last().map(|s| s.to_string()).unwrap_or_default();
+    let key = match parts.last() {
+        Some(key) => (*key).to_string(),
+        None => String::new(),
+    };
     let modifiers: Vec<String> = parts
         .iter()
         .take(parts.len().saturating_sub(1))

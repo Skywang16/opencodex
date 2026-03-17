@@ -1,7 +1,7 @@
 ---
 name: research
 description: Research agent for fetching external documentation and web resources
-mode: subagent
+mode: task_profile
 max_steps: 15
 tools: web_fetch, web_search, read_file, grep, glob, list_files
 ---

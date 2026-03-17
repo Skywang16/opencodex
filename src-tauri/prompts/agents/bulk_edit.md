@@ -1,7 +1,7 @@
 ---
 name: bulk_edit
 description: Fast agent for bulk edits across many files
-mode: subagent
+mode: task_profile
 max_steps: 80
 tools: read_file, grep, glob, list_files, multi_edit_file
 ---

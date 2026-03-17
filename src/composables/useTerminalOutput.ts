@@ -48,8 +48,10 @@ export const useTerminalOutput = () => {
           queuedText.length = 0
           terminal.write(merged)
         }
-      } catch {
-        // ignore
+      } catch (error) {
+        console.warn('Failed to flush terminal output batch:', error)
+        queuedBytes = []
+        queuedText = []
       }
     }
 

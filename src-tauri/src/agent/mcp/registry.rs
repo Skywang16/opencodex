@@ -31,9 +31,17 @@ pub struct McpRegistry {
 
 impl McpRegistry {
     async fn canonicalize_workspace_root(&self, workspace_root: &Path) -> PathBuf {
-        tokio::fs::canonicalize(workspace_root)
-            .await
-            .unwrap_or_else(|_| workspace_root.to_path_buf())
+        match tokio::fs::canonicalize(workspace_root).await {
+            Ok(path) => path,
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to canonicalize MCP workspace root '{}': {}",
+                    workspace_root.display(),
+                    err
+                );
+                workspace_root.to_path_buf()
+            }
+        }
     }
 
     fn workspace_key(workspace_root: &Path) -> Arc<str> {
@@ -41,10 +49,17 @@ impl McpRegistry {
     }
 
     fn normalize_workspace_key(workspace_key: &str) -> String {
-        std::fs::canonicalize(Path::new(workspace_key))
-            .unwrap_or_else(|_| PathBuf::from(workspace_key))
-            .to_string_lossy()
-            .to_string()
+        match std::fs::canonicalize(Path::new(workspace_key)) {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to canonicalize MCP workspace key '{}': {}",
+                    workspace_key,
+                    err
+                );
+                PathBuf::from(workspace_key).to_string_lossy().to_string()
+            }
+        }
     }
 
     /// Initialize workspace MCP servers (effective = merged result of global + workspace)
@@ -168,23 +183,21 @@ impl McpRegistry {
 
         if let Some(workspace) = self.workspaces.get(workspace_key) {
             for (name, client_entry) in workspace.value().servers.iter() {
-                let tools: Vec<McpToolInfo> = client_entry
-                    .client
-                    .as_ref()
-                    .map(|c| {
-                        c.tools()
-                            .iter()
-                            .map(|t| McpToolInfo {
-                                name: t.name.clone(),
-                                description: if t.description.is_empty() {
-                                    None
-                                } else {
-                                    Some(t.description.clone())
-                                },
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
+                let tools: Vec<McpToolInfo> = match client_entry.client.as_ref() {
+                    Some(client) => client
+                        .tools()
+                        .iter()
+                        .map(|tool| McpToolInfo {
+                            name: tool.name.clone(),
+                            description: if tool.description.is_empty() {
+                                None
+                            } else {
+                                Some(tool.description.clone())
+                            },
+                        })
+                        .collect(),
+                    None => Vec::new(),
+                };
 
                 statuses.push(McpServerStatus {
                     name: name.clone(),

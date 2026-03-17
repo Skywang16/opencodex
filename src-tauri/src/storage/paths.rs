@@ -133,15 +133,18 @@ impl StoragePathsBuilder {
             return Err(StoragePathsError::AppDirectoryMissing);
         };
 
-        let config_dir = self
-            .custom_config_dir
-            .unwrap_or_else(|| app_dir.join(super::CONFIG_DIR_NAME));
-        let state_dir = self
-            .custom_state_dir
-            .unwrap_or_else(|| app_dir.join(super::STATE_DIR_NAME));
-        let data_dir = self
-            .custom_data_dir
-            .unwrap_or_else(|| app_dir.join(super::DATA_DIR_NAME));
+        let config_dir = match self.custom_config_dir {
+            Some(path) => path,
+            None => app_dir.join(super::CONFIG_DIR_NAME),
+        };
+        let state_dir = match self.custom_state_dir {
+            Some(path) => path,
+            None => app_dir.join(super::STATE_DIR_NAME),
+        };
+        let data_dir = match self.custom_data_dir {
+            Some(path) => path,
+            None => app_dir.join(super::DATA_DIR_NAME),
+        };
 
         let backups_dir = app_dir.join(super::BACKUPS_DIR_NAME);
         let logs_dir = app_dir.join("logs");

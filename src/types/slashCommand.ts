@@ -42,6 +42,13 @@ export const createSlashCommands = (t: TranslateFn): SlashCommand[] => [
     type: 'action',
   },
   {
+    id: 'orchestrate-mode',
+    icon: 'sparkles',
+    label: t('slash_commands.orchestrate_mode'),
+    description: t('slash_commands.orchestrate_mode_description'),
+    type: 'action',
+  },
+  {
     id: 'skill-creator',
     icon: 'wand',
     label: t('slash_commands.skill_creator'),

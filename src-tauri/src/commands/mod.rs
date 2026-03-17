@@ -53,7 +53,13 @@ pub async fn open_in_editor(path: String) -> TauriApiResult<()> {
     // Fallback: open with system default handler
     #[cfg(target_os = "macos")]
     {
-        let _ = std::process::Command::new("open").arg(&path).spawn();
+        if let Err(err) = std::process::Command::new("open").arg(&path).spawn() {
+            warn!(
+                "Failed to open path with macOS default handler '{}': {}",
+                path, err
+            );
+            return Ok(api_error!("common.system_error"));
+        }
     }
 
     Ok(api_success!(()))
@@ -71,7 +77,7 @@ pub fn register_all_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> t
         crate::workspace::commands::workspace_remove_recent,
         crate::workspace::commands::workspace_maintain,
         crate::workspace::commands::workspace_get_or_create,
-        crate::workspace::commands::workspace_list_sessions,
+        crate::workspace::commands::workspace_list_session_views,
         crate::workspace::commands::workspace_get_messages,
         crate::workspace::commands::workspace_get_active_session,
         crate::workspace::commands::workspace_create_session,
@@ -103,10 +109,6 @@ pub fn register_all_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> t
         crate::ai::tool::shell::terminal_get_default_shell,
         crate::ai::tool::shell::terminal_validate_shell_path,
         crate::ai::tool::shell::terminal_create_with_shell,
-        // Agent terminal commands
-        crate::agent::terminal::commands::agent_terminal_list,
-        crate::agent::terminal::commands::agent_terminal_abort,
-        crate::agent::terminal::commands::agent_terminal_remove,
         // Terminal context management commands
         crate::terminal::commands::pane::terminal_context_set_active_pane,
         crate::terminal::commands::pane::terminal_context_get_active_pane,
@@ -159,6 +161,13 @@ pub fn register_all_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> t
         // MCP management commands
         crate::agent::mcp::commands::list_mcp_servers,
         crate::agent::mcp::commands::test_mcp_server,
+        crate::lsp::commands::lsp_status,
+        crate::lsp::commands::lsp_document_symbols,
+        crate::lsp::commands::lsp_workspace_symbols,
+        crate::lsp::commands::lsp_hover,
+        crate::lsp::commands::lsp_definition,
+        crate::lsp::commands::lsp_references,
+        crate::lsp::commands::lsp_diagnostics,
         crate::agent::mcp::commands::reload_mcp_servers,
         // Terminal configuration commands
         crate::config::terminal_commands::terminal_config_get,
@@ -188,6 +197,8 @@ pub fn register_all_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> t
         crate::utils::i18n::commands::language_get_app_language,
         // AI model management commands
         crate::ai::commands::ai_models_get,
+        crate::ai::commands::ai_models_get_config,
+        crate::ai::commands::ai_models_get_config_path,
         crate::ai::commands::ai_models_add,
         crate::ai::commands::ai_models_update,
         crate::ai::commands::ai_models_remove,

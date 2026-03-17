@@ -156,11 +156,14 @@ impl ReadFileTool {
             match self.find_symbol_range(content, language, symbol_name) {
                 Ok(Some((start_line, end_line))) => {
                     let lines: Vec<&str> = content.lines().collect();
-                    // Safe slicing
-                    let symbol_lines = if start_line <= end_line && end_line < lines.len() {
-                        lines.get(start_line..=end_line).unwrap_or(&[])
-                    } else {
-                        &[]
+                    let Some(symbol_lines) = (start_line <= end_line && end_line < lines.len())
+                        .then(|| lines.get(start_line..=end_line))
+                        .flatten()
+                    else {
+                        return validation_error(format!(
+                            "Invalid symbol range resolved for '{symbol_name}' in {}",
+                            path.display()
+                        ));
                     };
                     let result_text = symbol_lines.join("\n");
 
@@ -366,9 +369,13 @@ impl ReadFileTool {
             let start_byte = node.start_byte();
             let end_byte = node.end_byte().min(start_byte + 200); // Limit preview length
 
-            // Safe slicing
-            let preview = source.get(start_byte..end_byte).unwrap_or("");
-            let first_line = preview.lines().next().unwrap_or("").trim();
+            let Some(preview) = source.get(start_byte..end_byte) else {
+                return;
+            };
+            let Some(first_line) = preview.lines().next() else {
+                return;
+            };
+            let first_line = first_line.trim();
 
             let indent = "  ".repeat(depth);
             outline.push(format!(
@@ -602,8 +609,12 @@ impl ReadFileTool {
         }
 
         // Extract symbol name and compare - safe slicing
-        let text = source.get(node.start_byte()..node.end_byte()).unwrap_or("");
-        let first_line = text.lines().next().unwrap_or("");
+        let Some(text) = source.get(node.start_byte()..node.end_byte()) else {
+            return false;
+        };
+        let Some(first_line) = text.lines().next() else {
+            return false;
+        };
 
         // Simple name matching (can be further optimized)
         first_line.contains(symbol_name)
@@ -767,7 +778,9 @@ Examples:
                 }
             }
             "full" => Ok(self.read_full(&raw_content, args.offset, args.limit)),
-            _ => Ok(self.read_full(&raw_content, args.offset, args.limit)),
+            _ => Ok(validation_error(format!(
+                "Unsupported mode '{mode}'. Expected one of: full, outline, symbol"
+            ))),
         }
     }
 }

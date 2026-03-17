@@ -280,6 +280,188 @@ fn role_to_string(role: MessageRole) -> &'static str {
 }
 
 // ============================================================
+// Responses API Conversion (Anthropic → OpenAI Responses API)
+// ============================================================
+
+/// Convert Anthropic messages directly to OpenAI Responses API `input` format.
+///
+/// This is a direct one-step conversion: Anthropic types → Responses API.
+/// Do NOT route through `convert_to_openai_messages` (Chat Completions format)
+/// as an intermediate step — they are sibling conversions, not a pipeline.
+///
+/// ## Responses API item types emitted
+/// - `{"role":"user","content":[{"type":"input_text",...}]}` — user text/image
+/// - `{"type":"function_call_output","call_id":...,"output":...}` — tool result
+/// - `{"type":"function_call","call_id":...,"name":...,"arguments":...}` — assistant tool call
+/// - `{"role":"assistant","content":[{"type":"output_text",...}]}` — assistant text
+/// - `{"type":"item_reference","id":...}` — reasoning trace reference
+pub fn convert_to_responses_api_input(messages: &[MessageParam]) -> Vec<JsonValue> {
+    let mut out = Vec::new();
+
+    for msg in messages {
+        match msg.role {
+            MessageRole::User => responses_user_message(&msg.content, &mut out),
+            MessageRole::Assistant => responses_assistant_message(&msg.content, &mut out),
+        }
+    }
+
+    out
+}
+
+fn responses_user_message(content: &MessageContent, out: &mut Vec<JsonValue>) {
+    match content {
+        MessageContent::Text(text) => {
+            out.push(json!({
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": text }],
+            }));
+        }
+        MessageContent::Blocks(blocks) => {
+            let mut content_items: Vec<JsonValue> = Vec::new();
+
+            for block in blocks {
+                match block {
+                    ContentBlock::Text { text, .. } => {
+                        content_items.push(json!({ "type": "input_text", "text": text }));
+                    }
+                    ContentBlock::Image { source, .. } => {
+                        content_items.push(responses_image_item(source));
+                    }
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        content,
+                        ..
+                    } => {
+                        // Tool results are top-level items, not nested in user content.
+                        // Flush any pending user content first to preserve ordering.
+                        if !content_items.is_empty() {
+                            out.push(json!({
+                                "type": "message",
+                                "role": "user",
+                                "content": content_items,
+                            }));
+                            content_items = Vec::new();
+                        }
+                        let output = tool_result_to_string(content);
+                        out.push(json!({
+                            "type": "function_call_output",
+                            "call_id": tool_use_id,
+                            "output": output,
+                        }));
+                    }
+                    // ToolUse and Thinking cannot appear in user messages
+                    ContentBlock::ToolUse { .. } | ContentBlock::Thinking { .. } => {}
+                }
+            }
+
+            if !content_items.is_empty() {
+                out.push(json!({
+                    "type": "message",
+                    "role": "user",
+                    "content": content_items,
+                }));
+            }
+        }
+    }
+}
+
+fn responses_assistant_message(content: &MessageContent, out: &mut Vec<JsonValue>) {
+    match content {
+        MessageContent::Text(text) => {
+            out.push(json!({
+                "type": "message",
+                "role": "assistant",
+                "content": [{ "type": "output_text", "text": text }],
+            }));
+        }
+        MessageContent::Blocks(blocks) => {
+            let mut text_parts: Vec<&str> = Vec::new();
+
+            for block in blocks {
+                match block {
+                    ContentBlock::Text { text, .. } => {
+                        text_parts.push(text.as_str());
+                    }
+                    ContentBlock::ToolUse { id, name, input } => {
+                        // Flush accumulated text before the function_call item.
+                        if !text_parts.is_empty() {
+                            let joined = text_parts.join("\n");
+                            out.push(json!({
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [{ "type": "output_text", "text": joined }],
+                            }));
+                            text_parts = Vec::new();
+                        }
+                        out.push(json!({
+                            "type": "function_call",
+                            "call_id": id,
+                            "name": name,
+                            "arguments": input.to_string(),
+                        }));
+                    }
+                    ContentBlock::Thinking {
+                        reasoning_metadata, ..
+                    } => {
+                        // Emit item_reference when we have the OpenAI item_id.
+                        if let Some(item_id) = reasoning_metadata
+                            .as_ref()
+                            .and_then(|m| m.item_id.as_deref())
+                        {
+                            out.push(json!({ "type": "item_reference", "id": item_id }));
+                        }
+                        // No structured metadata → skip; the model will re-reason.
+                    }
+                    ContentBlock::Image { .. } | ContentBlock::ToolResult { .. } => {}
+                }
+            }
+
+            if !text_parts.is_empty() {
+                let joined = text_parts.join("\n");
+                out.push(json!({
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{ "type": "output_text", "text": joined }],
+                }));
+            }
+        }
+    }
+}
+
+fn responses_image_item(source: &ImageSource) -> JsonValue {
+    match source {
+        ImageSource::Base64 { media_type, data } => json!({
+            "type": "input_image",
+            "image_url": format!("data:{};base64,{}", media_type, data),
+        }),
+        ImageSource::Url { url } => json!({
+            "type": "input_image",
+            "image_url": url,
+        }),
+        ImageSource::FileId { file_id } => json!({
+            "type": "input_image",
+            "file_id": file_id,
+        }),
+    }
+}
+
+fn tool_result_to_string(content: &Option<ToolResultContent>) -> String {
+    match content {
+        Some(ToolResultContent::Text(text)) => text.clone(),
+        Some(ToolResultContent::Blocks(blocks)) => blocks
+            .iter()
+            .map(|b| match b {
+                ToolResultBlock::Text { text } => text.as_str(),
+                ToolResultBlock::Image { .. } => "(image not supported in tool result)",
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        None => String::new(),
+    }
+}
+
+// ============================================================
 // Reverse Conversion (OpenAI → Anthropic)
 // ============================================================
 
@@ -314,7 +496,8 @@ pub fn convert_openai_response_to_anthropic(
             let args_str = tool_call["function"]["arguments"]
                 .as_str()
                 .ok_or("Missing arguments")?;
-            let input: JsonValue = serde_json::from_str(args_str).unwrap_or(json!({}));
+            let input: JsonValue = serde_json::from_str(args_str)
+                .map_err(|err| format!("Invalid tool call arguments JSON: {err}"))?;
 
             content_blocks.push(ContentBlock::ToolUse {
                 id: id.to_string(),
@@ -325,18 +508,25 @@ pub fn convert_openai_response_to_anthropic(
     }
 
     // Construct Message
+    let id = openai_response["id"]
+        .as_str()
+        .ok_or("Missing OpenAI response id")?;
+    let model = openai_response["model"]
+        .as_str()
+        .ok_or("Missing OpenAI response model")?;
+    let input_tokens = openai_response["usage"]["prompt_tokens"]
+        .as_u64()
+        .ok_or("Missing OpenAI prompt token usage")?;
+    let output_tokens = openai_response["usage"]["completion_tokens"]
+        .as_u64()
+        .ok_or("Missing OpenAI completion token usage")?;
+
     Ok(Message {
-        id: openai_response["id"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string(),
+        id: id.to_string(),
         message_type: "message".to_string(),
         role: MessageRole::Assistant,
         content: content_blocks,
-        model: openai_response["model"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string(),
+        model: model.to_string(),
         stop_reason: match choice["finish_reason"].as_str() {
             Some("stop") => Some(StopReason::EndTurn),
             Some("length") => Some(StopReason::MaxTokens),
@@ -345,12 +535,8 @@ pub fn convert_openai_response_to_anthropic(
         },
         stop_sequence: None,
         usage: Usage {
-            input_tokens: openai_response["usage"]["prompt_tokens"]
-                .as_u64()
-                .unwrap_or(0) as u32,
-            output_tokens: openai_response["usage"]["completion_tokens"]
-                .as_u64()
-                .unwrap_or(0) as u32,
+            input_tokens: input_tokens as u32,
+            output_tokens: output_tokens as u32,
             cache_creation_input_tokens: None,
             cache_read_input_tokens: openai_response["usage"]["prompt_tokens_details"]
                 ["cached_tokens"]
@@ -512,5 +698,36 @@ mod tests {
         assert_eq!(result.stop_reason, Some(StopReason::EndTurn));
         assert_eq!(result.usage.input_tokens, 10);
         assert_eq!(result.usage.output_tokens, 5);
+    }
+
+    #[test]
+    fn test_responses_api_messages_include_type() {
+        let messages = vec![MessageParam::user("Hello!"), MessageParam::assistant("Hi!")];
+
+        let result = convert_to_responses_api_input(&messages);
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0]["type"], "message");
+        assert_eq!(result[0]["role"], "user");
+        assert_eq!(result[1]["type"], "message");
+        assert_eq!(result[1]["role"], "assistant");
+    }
+
+    #[test]
+    fn test_responses_api_flushes_user_message_before_tool_output() {
+        let messages = vec![MessageParam::user_blocks(vec![
+            ContentBlock::text("before"),
+            ContentBlock::tool_result("call_123", "done"),
+            ContentBlock::text("after"),
+        ])];
+
+        let result = convert_to_responses_api_input(&messages);
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0]["type"], "message");
+        assert_eq!(result[0]["role"], "user");
+        assert_eq!(result[1]["type"], "function_call_output");
+        assert_eq!(result[2]["type"], "message");
+        assert_eq!(result[2]["role"], "user");
     }
 }

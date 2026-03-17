@@ -102,7 +102,8 @@
         dialogContentLoading.value = true
         try {
           dialogContent.value = stripFrontmatter(await readTextFile(`${skill.skillDir}/SKILL.md`))
-        } catch {
+        } catch (error) {
+          console.warn(`Failed to load skill content from '${skill.skillDir}':`, error)
           dialogContent.value = '*Failed to load skill content.*'
         } finally {
           dialogContentLoading.value = false

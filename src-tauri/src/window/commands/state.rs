@@ -8,11 +8,11 @@ pub async fn window_state_get(
     refresh: Option<bool>,
     state: State<'_, AppWindowState>,
 ) -> TauriApiResult<WindowStateSnapshot> {
-    let refresh = refresh.unwrap_or(false);
+    let refresh = refresh.unwrap_or_default();
 
     if refresh {
-        let _ = state.cache.remove("current_dir").await;
-        let _ = state.cache.remove("home_dir").await;
+        state.cache.remove("current_dir").await;
+        state.cache.remove("home_dir").await;
     }
 
     let always_on_top = match state
@@ -23,36 +23,54 @@ pub async fn window_state_get(
         Err(_) => return Ok(api_error!("window.get_state_failed")),
     };
 
-    let current_directory = if let Some(cached_dir) = state.cache.get("current_dir").await {
-        cached_dir.as_str().unwrap_or("/").to_string()
-    } else {
-        let dir = env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "/".to_string());
-        if let Err(e) = state
-            .cache
-            .set("current_dir", serde_json::Value::String(dir.clone()))
-            .await
-        {
-            warn!("Failed to update current directory cache: {}", e);
+    let current_directory = match load_cached_directory(&state, "current_dir").await {
+        Ok(Some(dir)) => dir,
+        Ok(None) => {
+            let dir = match env::current_dir() {
+                Ok(path) => path.to_string_lossy().to_string(),
+                Err(err) => {
+                    warn!("Failed to get current directory: {}", err);
+                    return Ok(api_error!("common.operation_failed"));
+                }
+            };
+            if let Err(err) = state
+                .cache
+                .set("current_dir", serde_json::Value::String(dir.clone()))
+                .await
+            {
+                warn!("Failed to update current directory cache: {}", err);
+            }
+            dir
         }
-        dir
+        Err(err) => {
+            warn!("Invalid current directory cache value: {}", err);
+            return Ok(api_error!("common.operation_failed"));
+        }
     };
 
-    let home_directory = if let Some(cached_dir) = state.cache.get("home_dir").await {
-        cached_dir.as_str().unwrap_or("/").to_string()
-    } else {
-        let dir = env::var("HOME")
-            .or_else(|_| env::current_dir().map(|p| p.to_string_lossy().to_string()))
-            .unwrap_or_else(|_| "/".to_string());
-        if let Err(e) = state
-            .cache
-            .set("home_dir", serde_json::Value::String(dir.clone()))
-            .await
-        {
-            warn!("Failed to update home directory cache: {}", e);
+    let home_directory = match load_cached_directory(&state, "home_dir").await {
+        Ok(Some(dir)) => dir,
+        Ok(None) => {
+            let dir = match env::var("HOME") {
+                Ok(dir) => dir,
+                Err(err) => {
+                    warn!("Failed to get HOME: {}", err);
+                    return Ok(api_error!("common.operation_failed"));
+                }
+            };
+            if let Err(err) = state
+                .cache
+                .set("home_dir", serde_json::Value::String(dir.clone()))
+                .await
+            {
+                warn!("Failed to update home directory cache: {}", err);
+            }
+            dir
         }
-        dir
+        Err(err) => {
+            warn!("Invalid home directory cache value: {}", err);
+            return Ok(api_error!("common.operation_failed"));
+        }
     };
 
     let platform_info = match state
@@ -67,13 +85,24 @@ pub async fn window_state_get(
                 os_version: detect_os_version(),
                 is_mac: cfg!(target_os = "macos"),
             };
-            let _ = state
+            if let Err(err) = state
                 .with_config_manager_mut(|config| {
                     config.set_platform_info(info.clone());
                     Ok(())
                 })
-                .await;
+                .await
+            {
+                warn!("Failed to persist platform info: {}", err);
+            }
             info
+        }
+    };
+
+    let timestamp = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs(),
+        Err(err) => {
+            warn!("System clock is before UNIX_EPOCH: {}", err);
+            return Ok(api_error!("common.operation_failed"));
         }
     };
 
@@ -82,10 +111,7 @@ pub async fn window_state_get(
         current_directory,
         home_directory,
         platform_info,
-        timestamp: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
+        timestamp,
     }))
 }
 
@@ -132,50 +158,73 @@ pub async fn window_state_update<R: Runtime>(
         }
     }
 
-    if update.refresh_directories.unwrap_or(false) {
-        let _ = state.cache.remove("current_dir").await;
-        let _ = state.cache.remove("home_dir").await;
+    if update.refresh_directories.unwrap_or_default() {
+        state.cache.remove("current_dir").await;
+        state.cache.remove("home_dir").await;
     }
 
     window_state_get(Some(false), state).await
 }
 
+async fn load_cached_directory(
+    state: &AppWindowState,
+    key: &str,
+) -> Result<Option<String>, String> {
+    let Some(value) = state.cache.get(key).await else {
+        return Ok(None);
+    };
+    let Some(dir) = value.as_str() else {
+        return Err(format!("cache key '{key}' is not a string"));
+    };
+    if dir.trim().is_empty() {
+        return Err(format!("cache key '{key}' is empty"));
+    }
+    Ok(Some(dir.to_string()))
+}
+
 fn detect_os_version() -> String {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(output) = std::process::Command::new("sw_vers")
+        match std::process::Command::new("sw_vers")
             .arg("-productVersion")
             .output()
         {
-            if let Ok(version) = String::from_utf8(output.stdout) {
-                return version.trim().to_string();
-            }
+            Ok(output) => match String::from_utf8(output.stdout) {
+                Ok(version) => return version.trim().to_string(),
+                Err(err) => tracing::warn!("failed to decode macOS version output: {}", err),
+            },
+            Err(err) => tracing::warn!("failed to execute sw_vers: {}", err),
         }
         "macOS Unknown".to_string()
     }
 
     #[cfg(target_os = "linux")]
     {
-        if let Ok(contents) = std::fs::read_to_string("/etc/os-release") {
-            for line in contents.lines() {
-                if line.starts_with("PRETTY_NAME=") {
-                    let version = line.trim_start_matches("PRETTY_NAME=").trim_matches('\"');
-                    return version.to_string();
+        match std::fs::read_to_string("/etc/os-release") {
+            Ok(contents) => {
+                for line in contents.lines() {
+                    if line.starts_with("PRETTY_NAME=") {
+                        let version = line.trim_start_matches("PRETTY_NAME=").trim_matches('\"');
+                        return version.to_string();
+                    }
                 }
             }
+            Err(err) => tracing::warn!("failed to read /etc/os-release: {}", err),
         }
         "Linux Unknown".to_string()
     }
 
     #[cfg(target_os = "windows")]
     {
-        if let Ok(output) = std::process::Command::new("cmd")
-            .args(&["/C", "ver"])
+        match std::process::Command::new("cmd")
+            .args(["/C", "ver"])
             .output()
         {
-            if let Ok(version) = String::from_utf8(output.stdout) {
-                return version.trim().to_string();
-            }
+            Ok(output) => match String::from_utf8(output.stdout) {
+                Ok(version) => return version.trim().to_string(),
+                Err(err) => tracing::warn!("failed to decode Windows version output: {}", err),
+            },
+            Err(err) => tracing::warn!("failed to execute cmd /C ver: {}", err),
         }
         "Windows Unknown".to_string()
     }

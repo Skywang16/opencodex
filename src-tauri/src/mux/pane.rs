@@ -50,7 +50,8 @@ struct SpawnedProcess {
 
 impl LocalPane {
     pub fn new(pane_id: PaneId, size: PtySize) -> PaneResult<Self> {
-        Self::new_with_config(pane_id, size, &MuxSessionConfig::default())
+        let config = MuxSessionConfig::with_default_shell().map_err(PaneError::Internal)?;
+        Self::new_with_config(pane_id, size, &config)
     }
 
     /// Create a new local panel
@@ -174,16 +175,14 @@ impl LocalPane {
         let mut file = std::fs::File::create(&temp_zshrc)
             .map_err(|e| PaneError::Internal(format!("Failed to create .zshrc: {e}")))?;
 
-        use std::io::Write;
-        writeln!(file, "# Load user zshrc FIRST (so nvm etc. loads)").ok();
-        writeln!(file, "[[ -f ~/.zshrc ]] && source ~/.zshrc").ok();
-        writeln!(file).ok();
-        writeln!(
-            file,
-            "# OpenCodex Shell Integration (after user env loaded)"
-        )
-        .ok();
-        writeln!(file, "{integration_script}").ok();
+        write_shell_init_line(&mut file, "# Load user zshrc FIRST (so nvm etc. loads)")?;
+        write_shell_init_line(&mut file, "[[ -f ~/.zshrc ]] && source ~/.zshrc")?;
+        write_shell_init_line(&mut file, "")?;
+        write_shell_init_line(
+            &mut file,
+            "# OpenCodex Shell Integration (after user env loaded)",
+        )?;
+        write_shell_init_line(&mut file, integration_script)?;
 
         if let Some(original_zdotdir) = std::env::var_os("ZDOTDIR") {
             cmd.env("OPENCODEX_ORIGINAL_ZDOTDIR", original_zdotdir);
@@ -208,16 +207,14 @@ impl LocalPane {
         let mut file = std::fs::File::create(&temp_bashrc)
             .map_err(|e| PaneError::Internal(format!("Failed to create .bashrc: {e}")))?;
 
-        use std::io::Write;
-        writeln!(file, "# Load user bashrc FIRST (so nvm etc. loads)").ok();
-        writeln!(file, "[[ -f ~/.bashrc ]] && source ~/.bashrc").ok();
-        writeln!(file).ok();
-        writeln!(
-            file,
-            "# OpenCodex Shell Integration (after user env loaded)"
-        )
-        .ok();
-        writeln!(file, "{integration_script}").ok();
+        write_shell_init_line(&mut file, "# Load user bashrc FIRST (so nvm etc. loads)")?;
+        write_shell_init_line(&mut file, "[[ -f ~/.bashrc ]] && source ~/.bashrc")?;
+        write_shell_init_line(&mut file, "")?;
+        write_shell_init_line(
+            &mut file,
+            "# OpenCodex Shell Integration (after user env loaded)",
+        )?;
+        write_shell_init_line(&mut file, integration_script)?;
 
         cmd.env("BASH_ENV", temp_bashrc);
 
@@ -253,6 +250,14 @@ impl LocalPane {
             slave,
         })
     }
+}
+
+fn write_shell_init_line(file: &mut std::fs::File, line: &str) -> PaneResult<()> {
+    use std::io::Write;
+
+    writeln!(file, "{line}")
+        .map_err(|err| PaneError::Internal(format!("Failed to write shell init file: {err}")))?;
+    Ok(())
 }
 
 impl Pane for LocalPane {

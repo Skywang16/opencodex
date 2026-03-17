@@ -1,16 +1,22 @@
 /*!
- * AI model data access
+ * AI model data access backed by a JSON config file.
  */
 
 use crate::storage::database::DatabaseManager;
-use crate::storage::error::RepositoryResult;
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
+use crate::storage::error::{RepositoryError, RepositoryResult};
 use chrono::{DateTime, Utc};
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::Row;
-use tracing::error;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use tokio::fs;
+use tokio::sync::Mutex;
+
+static MODELS_FILE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+const MODELS_FILE_NAME: &str = "models.json";
+const MODELS_FILE_VERSION: u32 = 1;
 
 fn default_timestamp() -> DateTime<Utc> {
     Utc::now()
@@ -64,9 +70,9 @@ impl std::str::FromStr for AuthType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum OAuthProvider {
-    OpenAiCodex,    // OpenAI ChatGPT Plus/Pro
-    ClaudePro,      // Claude Pro subscription
-    GeminiAdvanced, // Google Gemini Advanced
+    OpenAiCodex,
+    ClaudePro,
+    GeminiAdvanced,
 }
 
 impl std::fmt::Display for OAuthProvider {
@@ -104,7 +110,6 @@ pub struct OAuthConfig {
     pub access_token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<i64>,
-    /// Provider-specific data (OpenAI's account_id, Claude's organization_id, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Value>,
 }
@@ -142,26 +147,16 @@ pub struct AIModelConfig {
     pub display_name: Option<String>,
     #[serde(default)]
     pub model_type: ModelType,
-
-    // Authentication configuration
     #[serde(default)]
     pub auth_type: AuthType,
-
-    // API Key authentication
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
-
-    // OAuth authentication
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oauth_config: Option<OAuthConfig>,
-
-    // General configuration
     #[serde(default)]
     pub options: Option<Value>,
-    #[serde(default)]
-    pub use_custom_base_url: Option<bool>,
     #[serde(default = "default_timestamp")]
     pub created_at: DateTime<Utc>,
     #[serde(default = "default_timestamp")]
@@ -183,9 +178,156 @@ impl AIModelConfig {
             api_key: Some(api_key),
             oauth_config: None,
             options: None,
-            use_custom_base_url: None,
             created_at: now,
             updated_at: now,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AIModelsConfig {
+    #[serde(default = "default_file_version")]
+    pub version: u32,
+    #[serde(default, skip_serializing_if = "ModelDefaults::is_empty")]
+    pub defaults: ModelDefaults,
+    #[serde(default, skip_serializing_if = "AgentModelConfig::is_empty")]
+    pub agents: AgentModelConfig,
+    #[serde(default)]
+    pub providers: BTreeMap<String, ProviderModels>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDefaults {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_model_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_model_id: Option<String>,
+}
+
+impl ModelDefaults {
+    fn is_empty(&self) -> bool {
+        self.chat_model_id.is_none() && self.embedding_model_id.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentModelConfig {
+    #[serde(default, skip_serializing_if = "AgentModelDefaults::is_empty")]
+    pub defaults: AgentModelDefaults,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bindings: BTreeMap<String, String>,
+}
+
+impl AgentModelConfig {
+    fn is_empty(&self) -> bool {
+        self.defaults.is_empty() && self.bindings.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentModelDefaults {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<String>,
+}
+
+impl AgentModelDefaults {
+    fn is_empty(&self) -> bool {
+        self.subagent.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderModels {
+    #[serde(default)]
+    pub models: Vec<ModelEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelEntry {
+    pub id: String,
+    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub model_type: ModelType,
+    #[serde(default)]
+    pub auth_type: AuthType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_config: Option<OAuthConfig>,
+    #[serde(default)]
+    pub options: Option<Value>,
+    #[serde(default = "default_timestamp")]
+    pub created_at: DateTime<Utc>,
+    #[serde(default = "default_timestamp")]
+    pub updated_at: DateTime<Utc>,
+}
+
+fn default_file_version() -> u32 {
+    MODELS_FILE_VERSION
+}
+
+impl Default for ModelEntry {
+    fn default() -> Self {
+        let now = Utc::now();
+        Self {
+            id: String::new(),
+            model: String::new(),
+            display_name: None,
+            model_type: ModelType::default(),
+            auth_type: AuthType::default(),
+            api_url: None,
+            api_key: None,
+            oauth_config: None,
+            options: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
+impl ModelEntry {
+    fn into_config(self, provider: String) -> AIModelConfig {
+        AIModelConfig {
+            id: self.id,
+            provider,
+            model: self.model,
+            display_name: self.display_name,
+            model_type: self.model_type,
+            auth_type: self.auth_type,
+            api_url: self.api_url,
+            api_key: self.api_key,
+            oauth_config: self.oauth_config,
+            options: self.options,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
+impl From<&AIModelConfig> for ModelEntry {
+    fn from(model: &AIModelConfig) -> Self {
+        Self {
+            id: model.id.clone(),
+            model: model.model.clone(),
+            display_name: model.display_name.clone(),
+            model_type: model.model_type.clone(),
+            auth_type: model.auth_type.clone(),
+            api_url: model.api_url.clone(),
+            api_key: model.api_key.clone(),
+            oauth_config: model.oauth_config.clone(),
+            options: model.options.clone(),
+            created_at: model.created_at,
+            updated_at: model.updated_at,
         }
     }
 }
@@ -200,317 +342,218 @@ impl<'a> AIModels<'a> {
         Self { db }
     }
 
-    /// Query all models (including decrypted keys)
     pub async fn find_all(&self) -> RepositoryResult<Vec<AIModelConfig>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT id, provider, api_url, api_key_encrypted, model_name, display_name, model_type,
-                   config_json, use_custom_base_url, created_at, updated_at,
-                   auth_type, oauth_provider, oauth_refresh_token_encrypted,
-                   oauth_access_token_encrypted, oauth_token_expires_at, oauth_metadata
-            FROM ai_models
-            ORDER BY created_at ASC
-            "#,
-        )
-        .fetch_all(self.db.pool())
-        .await?;
-
-        let mut models = Vec::new();
-        for row in rows {
-            let id: String = row.try_get("id")?;
-            let provider: String = row.try_get("provider")?;
-            let model_type_str: String = row.try_get("model_type")?;
-            let model_type = model_type_str.parse()?;
-
-            let auth_type_str: String = row.try_get("auth_type")?;
-            let auth_type = auth_type_str.parse()?;
-
-            let options = row
-                .try_get::<Option<String>, _>("config_json")?
-                .and_then(|s| serde_json::from_str(&s).ok());
-
-            let use_custom_base_url = row
-                .try_get::<Option<i64>, _>("use_custom_base_url")?
-                .map(|v| v != 0);
-
-            // Decrypt API key
-            let api_key = if let Some(encrypted_base64) =
-                row.try_get::<Option<String>, _>("api_key_encrypted")?
-            {
-                if !encrypted_base64.is_empty() {
-                    match BASE64.decode(&encrypted_base64) {
-                        Ok(encrypted_bytes) => self
-                            .db
-                            .decrypt_data(&encrypted_bytes)
-                            .await
-                            .unwrap_or_else(|e| {
-                                error!("Failed to decrypt API key ({}): {}", id, e);
-                                String::new()
-                            }),
-                        Err(e) => {
-                            error!("Base64 decode failed ({}): {}", id, e);
-                            String::new()
-                        }
-                    }
-                } else {
-                    String::new()
-                }
-            } else {
-                String::new()
-            };
-
-            // Decrypt OAuth tokens
-            let oauth_config = if auth_type == AuthType::OAuth {
-                let provider_str: Option<String> = row.try_get("oauth_provider")?;
-                if let Some(provider_str) = provider_str {
-                    let oauth_provider: OAuthProvider = provider_str.parse()?;
-
-                    // Decrypt refresh token
-                    let refresh_token = if let Some(encrypted_base64) =
-                        row.try_get::<Option<String>, _>("oauth_refresh_token_encrypted")?
-                    {
-                        if !encrypted_base64.is_empty() {
-                            match BASE64.decode(&encrypted_base64) {
-                                Ok(encrypted_bytes) => {
-                                    self.db.decrypt_data(&encrypted_bytes).await.unwrap_or_else(
-                                        |e| {
-                                            error!(
-                                                "Failed to decrypt OAuth refresh token ({}): {}",
-                                                id, e
-                                            );
-                                            String::new()
-                                        },
-                                    )
-                                }
-                                Err(e) => {
-                                    error!("Base64 decode failed ({}): {}", id, e);
-                                    String::new()
-                                }
-                            }
-                        } else {
-                            String::new()
-                        }
-                    } else {
-                        String::new()
-                    };
-
-                    // Decrypt access token
-                    let access_token = if let Some(encrypted_base64) =
-                        row.try_get::<Option<String>, _>("oauth_access_token_encrypted")?
-                    {
-                        if !encrypted_base64.is_empty() {
-                            match BASE64.decode(&encrypted_base64) {
-                                Ok(encrypted_bytes) => Some(
-                                    self.db.decrypt_data(&encrypted_bytes).await.unwrap_or_else(
-                                        |e| {
-                                            error!(
-                                                "Failed to decrypt OAuth access token ({}): {}",
-                                                id, e
-                                            );
-                                            String::new()
-                                        },
-                                    ),
-                                ),
-                                Err(e) => {
-                                    error!("Base64 decode failed ({}): {}", id, e);
-                                    None
-                                }
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    let expires_at = row.try_get("oauth_token_expires_at")?;
-                    let metadata = row
-                        .try_get::<Option<String>, _>("oauth_metadata")?
-                        .and_then(|s| serde_json::from_str(&s).ok());
-
-                    Some(OAuthConfig {
-                        provider: oauth_provider,
-                        refresh_token,
-                        access_token,
-                        expires_at,
-                        metadata,
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            models.push(AIModelConfig {
-                id,
-                provider,
-                auth_type,
-                api_url: row.try_get("api_url")?,
-                api_key: if api_key.is_empty() {
-                    None
-                } else {
-                    Some(api_key)
-                },
-                model: row.try_get("model_name")?,
-                display_name: row.try_get("display_name")?,
-                model_type,
-                oauth_config,
-                options,
-                use_custom_base_url,
-                created_at: row.try_get("created_at")?,
-                updated_at: row.try_get("updated_at")?,
-            });
-        }
-
-        Ok(models)
+        let file = self.load_config_file().await?;
+        Ok(flatten_models(file))
     }
 
-    /// Save model (automatically encrypt keys)
-    ///
-    /// UPSERT based on primary key (id):
-    /// - If id doesn't exist, insert new record
-    /// - If id exists, update existing record
+    pub async fn get_config(&self) -> RepositoryResult<AIModelsConfig> {
+        self.load_config_file().await
+    }
+
+    pub async fn get_agent_model_binding(
+        &self,
+        agent_name: &str,
+        _is_subagent: bool,
+    ) -> RepositoryResult<Option<String>> {
+        let config = self.load_config_file().await?;
+        let binding = config.agents.bindings.get(agent_name).cloned();
+        Ok(binding.filter(|value| !value.trim().is_empty()))
+    }
+
+    pub fn config_path(&self) -> PathBuf {
+        self.db.config_dir().join(MODELS_FILE_NAME)
+    }
+
     pub async fn save(&self, model: &AIModelConfig) -> RepositoryResult<()> {
-        use crate::storage::error::RepositoryError;
+        let _guard = MODELS_FILE_LOCK.lock().await;
+        let file = self.load_config_file_locked().await?;
+        let defaults = file.defaults.clone();
+        let agents = file.agents.clone();
+        let mut models = flatten_models(file);
 
-        // Encrypt API key
-        let encrypted_key = if let Some(api_key) = &model.api_key {
-            if !api_key.is_empty() {
-                let encrypted_bytes = self.db.encrypt_data(api_key).await?;
-                Some(BASE64.encode(&encrypted_bytes))
-            } else {
-                None
-            }
+        if let Some(existing) = models.iter_mut().find(|entry| entry.id == model.id) {
+            *existing = model.clone();
         } else {
-            None
-        };
-
-        // Encrypt OAuth tokens
-        let (
-            oauth_provider,
-            oauth_refresh_token_encrypted,
-            oauth_access_token_encrypted,
-            oauth_expires_at,
-            oauth_metadata,
-        ) = if let Some(oauth_config) = &model.oauth_config {
-            let refresh_token_encrypted = if !oauth_config.refresh_token.is_empty() {
-                let encrypted_bytes = self.db.encrypt_data(&oauth_config.refresh_token).await?;
-                Some(BASE64.encode(&encrypted_bytes))
-            } else {
-                None
-            };
-
-            let access_token_encrypted = if let Some(access_token) = &oauth_config.access_token {
-                if !access_token.is_empty() {
-                    let encrypted_bytes = self.db.encrypt_data(access_token).await?;
-                    Some(BASE64.encode(&encrypted_bytes))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            let metadata_json = oauth_config
-                .metadata
-                .as_ref()
-                .map(|m| serde_json::to_string(m).unwrap_or_default());
-
-            (
-                Some(oauth_config.provider.to_string()),
-                refresh_token_encrypted,
-                access_token_encrypted,
-                oauth_config.expires_at,
-                metadata_json,
-            )
-        } else {
-            (None, None, None, None, None)
-        };
-
-        let config_json = model
-            .options
-            .as_ref()
-            .map(|opts| serde_json::to_string(opts).unwrap_or_default());
-
-        // UPSERT based on primary key (id)
-        let result = sqlx::query(
-            r#"
-            INSERT INTO ai_models
-            (id, provider, api_url, api_key_encrypted, model_name, display_name, model_type,
-             config_json, use_custom_base_url, created_at, updated_at,
-             auth_type, oauth_provider, oauth_refresh_token_encrypted,
-             oauth_access_token_encrypted, oauth_token_expires_at, oauth_metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                provider = excluded.provider,
-                api_url = excluded.api_url,
-                api_key_encrypted = excluded.api_key_encrypted,
-                model_name = excluded.model_name,
-                display_name = excluded.display_name,
-                model_type = excluded.model_type,
-                config_json = excluded.config_json,
-                use_custom_base_url = excluded.use_custom_base_url,
-                auth_type = excluded.auth_type,
-                oauth_provider = excluded.oauth_provider,
-                oauth_refresh_token_encrypted = excluded.oauth_refresh_token_encrypted,
-                oauth_access_token_encrypted = excluded.oauth_access_token_encrypted,
-                oauth_token_expires_at = excluded.oauth_token_expires_at,
-                oauth_metadata = excluded.oauth_metadata,
-                updated_at = excluded.updated_at
-            "#,
-        )
-        .bind(&model.id)
-        .bind(model.provider.to_string())
-        .bind(&model.api_url)
-        .bind(encrypted_key)
-        .bind(&model.model)
-        .bind(&model.display_name)
-        .bind(model.model_type.to_string())
-        .bind(config_json)
-        .bind(model.use_custom_base_url.map(|v| v as i64))
-        .bind(model.created_at)
-        .bind(model.updated_at)
-        .bind(model.auth_type.to_string())
-        .bind(oauth_provider)
-        .bind(oauth_refresh_token_encrypted)
-        .bind(oauth_access_token_encrypted)
-        .bind(oauth_expires_at)
-        .bind(oauth_metadata)
-        .execute(self.db.pool())
-        .await;
-
-        match result {
-            Ok(_) => Ok(()),
-            Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
-                Err(RepositoryError::AiModelAlreadyExists {
-                    provider: model.provider.to_string(),
-                    model: model.model.clone(),
-                })
-            }
-            Err(e) => Err(e.into()),
+            models.push(model.clone());
         }
+
+        let file = build_models_file(models, defaults, agents);
+        self.write_config_file_locked(&file).await
     }
 
-    /// Find model by ID
     pub async fn find_by_id(&self, id: &str) -> RepositoryResult<Option<AIModelConfig>> {
         let models = self.find_all().await?;
-        Ok(models.into_iter().find(|m| m.id == id))
+        Ok(models.into_iter().find(|model| model.id == id))
     }
 
-    /// Delete model
     pub async fn delete(&self, id: &str) -> RepositoryResult<()> {
-        let result = sqlx::query("DELETE FROM ai_models WHERE id = ?")
-            .bind(id)
-            .execute(self.db.pool())
-            .await?;
+        let _guard = MODELS_FILE_LOCK.lock().await;
+        let file = self.load_config_file_locked().await?;
+        let defaults = file.defaults.clone();
+        let agents = file.agents.clone();
+        let mut models = flatten_models(file);
+        let before = models.len();
+        models.retain(|model| model.id != id);
 
-        if result.rows_affected() == 0 {
-            return Err(crate::storage::error::RepositoryError::AiModelNotFound {
-                id: id.to_string(),
-            });
+        if models.len() == before {
+            return Err(RepositoryError::AiModelNotFound { id: id.to_string() });
         }
 
-        Ok(())
+        let file = build_models_file(models, defaults, agents);
+        self.write_config_file_locked(&file).await
     }
+
+    async fn load_config_file(&self) -> RepositoryResult<AIModelsConfig> {
+        let _guard = MODELS_FILE_LOCK.lock().await;
+        self.load_config_file_locked().await
+    }
+
+    async fn load_config_file_locked(&self) -> RepositoryResult<AIModelsConfig> {
+        let path = self.config_path();
+        ensure_parent_dir(&path).await?;
+
+        match fs::read_to_string(&path).await {
+            Ok(raw) => {
+                let mut file: AIModelsConfig = serde_json::from_str(&raw)?;
+                if file.version == 0 {
+                    file.version = MODELS_FILE_VERSION;
+                }
+                Ok(file)
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                let file = AIModelsConfig {
+                    version: MODELS_FILE_VERSION,
+                    defaults: ModelDefaults::default(),
+                    agents: AgentModelConfig::default(),
+                    providers: BTreeMap::new(),
+                };
+                self.write_config_file_locked(&file).await?;
+                Ok(file)
+            }
+            Err(err) => Err(RepositoryError::internal(format!(
+                "Failed to read models config {}: {err}",
+                path.display()
+            ))),
+        }
+    }
+
+    async fn write_config_file_locked(&self, file: &AIModelsConfig) -> RepositoryResult<()> {
+        let path = self.config_path();
+        ensure_parent_dir(&path).await?;
+        let json = serde_json::to_string_pretty(file)?;
+        fs::write(&path, format!("{json}\n")).await.map_err(|err| {
+            RepositoryError::internal(format!(
+                "Failed to write models config {}: {err}",
+                path.display()
+            ))
+        })
+    }
+}
+
+fn flatten_models(file: AIModelsConfig) -> Vec<AIModelConfig> {
+    let mut models = Vec::new();
+
+    for (provider, group) in file.providers {
+        for model in group.models {
+            models.push(model.into_config(provider.clone()));
+        }
+    }
+
+    models.sort_by(|left, right| {
+        left.provider
+            .cmp(&right.provider)
+            .then_with(|| {
+                display_name_or_model(left.display_name.as_deref(), left.model.as_str()).cmp(
+                    display_name_or_model(right.display_name.as_deref(), right.model.as_str()),
+                )
+            })
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    models
+}
+
+fn build_models_file(
+    models: Vec<AIModelConfig>,
+    defaults: ModelDefaults,
+    agents: AgentModelConfig,
+) -> AIModelsConfig {
+    let mut providers: BTreeMap<String, ProviderModels> = BTreeMap::new();
+    let mut available_chat = Vec::new();
+    let mut available_embedding = Vec::new();
+
+    for model in models {
+        if model.model_type == ModelType::Chat {
+            available_chat.push(model.id.clone());
+        }
+        if model.model_type == ModelType::Embedding {
+            available_embedding.push(model.id.clone());
+        }
+
+        let provider = model.provider.clone();
+        providers
+            .entry(provider)
+            .or_default()
+            .models
+            .push(ModelEntry::from(&model));
+    }
+
+    for group in providers.values_mut() {
+        group.models.sort_by(|left, right| {
+            display_name_or_model(left.display_name.as_deref(), left.model.as_str())
+                .cmp(display_name_or_model(
+                    right.display_name.as_deref(),
+                    right.model.as_str(),
+                ))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+    }
+
+    let defaults = normalize_defaults(defaults, &available_chat, &available_embedding);
+
+    AIModelsConfig {
+        version: MODELS_FILE_VERSION,
+        defaults,
+        agents,
+        providers,
+    }
+}
+
+fn display_name_or_model<'a>(display_name: Option<&'a str>, model: &'a str) -> &'a str {
+    match display_name {
+        Some(name) => name,
+        None => model,
+    }
+}
+
+fn normalize_defaults(
+    defaults: ModelDefaults,
+    available_chat: &[String],
+    available_embedding: &[String],
+) -> ModelDefaults {
+    let chat_model_id = defaults
+        .chat_model_id
+        .filter(|id| available_chat.iter().any(|candidate| candidate == id));
+
+    let embedding_model_id = defaults
+        .embedding_model_id
+        .filter(|id| available_embedding.iter().any(|candidate| candidate == id));
+
+    ModelDefaults {
+        chat_model_id,
+        embedding_model_id,
+    }
+}
+
+async fn ensure_parent_dir(path: &Path) -> RepositoryResult<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).await.map_err(|err| {
+            RepositoryError::internal(format!(
+                "Failed to create models config directory {}: {err}",
+                parent.display()
+            ))
+        })?;
+    }
+    Ok(())
 }

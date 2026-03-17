@@ -38,12 +38,22 @@ pub struct ChunkMetadata {
 }
 
 impl IndexManifest {
+    fn current_timestamp() -> u64 {
+        match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs(),
+            Err(err) => {
+                tracing::warn!(
+                    "System clock is before UNIX_EPOCH while generating vector index timestamp: {}",
+                    err
+                );
+                0
+            }
+        }
+    }
+
     /// Create a new index manifest
     pub fn new(embedding_model: String, vector_dimension: usize) -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = Self::current_timestamp();
 
         Self {
             version: "1.0.0".to_string(),
@@ -99,10 +109,7 @@ impl IndexManifest {
 
     /// Update timestamp
     fn update_timestamp(&mut self) {
-        self.updated_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        self.updated_at = Self::current_timestamp();
     }
 
     /// Get all chunks for a file

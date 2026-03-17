@@ -11,7 +11,6 @@ CREATE TABLE IF NOT EXISTS ai_models (
     display_name TEXT,
     model_type TEXT DEFAULT 'chat' CHECK (model_type IN ('chat', 'embedding')),
     config_json TEXT,
-    use_custom_base_url INTEGER DEFAULT 0,
 
     -- OAuth 支持
     auth_type TEXT NOT NULL DEFAULT 'api_key' CHECK (auth_type IN ('api_key', 'oauth')),
@@ -117,6 +116,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     model_id TEXT,
     provider_id TEXT,
 
+    worktree_path TEXT,
+
     status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'running', 'completed', 'error', 'cancelled')),
     is_archived INTEGER NOT NULL DEFAULT 0,
 
@@ -168,6 +169,35 @@ CREATE TABLE IF NOT EXISTS tool_executions (
     started_at INTEGER NOT NULL,
     finished_at INTEGER,
     duration_ms INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    trigger_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    root_node_id INTEGER REFERENCES agent_nodes(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'completed', 'error', 'cancelled')),
+    summary TEXT,
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    finished_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS agent_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    parent_node_id INTEGER REFERENCES agent_nodes(id) ON DELETE CASCADE,
+    backing_session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
+    trigger_tool_call_id TEXT,
+    role TEXT NOT NULL CHECK (role IN ('root', 'fork', 'branch')),
+    profile TEXT NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'completed', 'error', 'cancelled')),
+    worktree_path TEXT,
+    model_id TEXT,
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    finished_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS checkpoint_blobs (

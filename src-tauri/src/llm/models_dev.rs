@@ -152,19 +152,27 @@ static MODELS_CACHE: Lazy<RwLock<Option<HashMap<String, ProviderDef>>>> =
     Lazy::new(|| RwLock::new(None));
 
 /// Get cache file path
-fn get_cache_path() -> PathBuf {
+fn get_cache_path() -> Option<PathBuf> {
+    let Some(data_dir) = dirs::data_dir() else {
+        warn!("System data directory is unavailable; models.dev disk cache disabled");
+        return None;
+    };
+
     // Use data directory for cache storage
-    let cache_dir = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("OpenCodex")
-        .join("cache");
+    let cache_dir = data_dir.join("OpenCodex").join("cache");
 
     // Ensure directory exists
     if !cache_dir.exists() {
-        let _ = std::fs::create_dir_all(&cache_dir);
+        if let Err(err) = std::fs::create_dir_all(&cache_dir) {
+            warn!(
+                "Failed to create models.dev cache directory '{}': {}",
+                cache_dir.display(),
+                err
+            );
+        }
     }
 
-    cache_dir.join(CACHE_FILE_NAME)
+    Some(cache_dir.join(CACHE_FILE_NAME))
 }
 
 /// Check if cache is still valid
@@ -176,7 +184,7 @@ fn is_cache_valid(timestamp: i64) -> bool {
 
 /// Load cached data from disk
 async fn load_from_disk() -> Option<HashMap<String, ProviderDef>> {
-    let path = get_cache_path();
+    let path = get_cache_path()?;
     if !path.exists() {
         return None;
     }
@@ -209,11 +217,20 @@ async fn load_from_disk() -> Option<HashMap<String, ProviderDef>> {
 
 /// Save data to disk cache
 async fn save_to_disk(providers: &HashMap<String, ProviderDef>) {
-    let path = get_cache_path();
+    let Some(path) = get_cache_path() else {
+        return;
+    };
 
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent).await;
+        if let Err(err) = fs::create_dir_all(parent).await {
+            error!(
+                "Failed to create models.dev cache parent directory '{}': {}",
+                parent.display(),
+                err
+            );
+            return;
+        }
     }
 
     let cached = CachedData {
@@ -268,7 +285,7 @@ async fn fetch_from_api() -> Result<HashMap<String, ProviderDef>, String> {
 }
 
 /// Get all providers with their models
-pub async fn get_providers() -> HashMap<String, ProviderDef> {
+pub async fn get_providers() -> Result<HashMap<String, ProviderDef>, String> {
     // Check memory cache first
     {
         let cache = MODELS_CACHE.read().unwrap_or_else(|e| {
@@ -276,7 +293,7 @@ pub async fn get_providers() -> HashMap<String, ProviderDef> {
             e.into_inner()
         });
         if let Some(ref providers) = *cache {
-            return providers.clone();
+            return Ok(providers.clone());
         }
     }
 
@@ -287,29 +304,25 @@ pub async fn get_providers() -> HashMap<String, ProviderDef> {
             e.into_inner()
         });
         *cache = Some(providers.clone());
-        return providers;
+        return Ok(providers);
     }
 
     // Fetch from API
-    match fetch_from_api().await {
-        Ok(providers) => {
-            // Save to disk cache
-            save_to_disk(&providers).await;
+    let providers = fetch_from_api().await.map_err(|err| {
+        error!("Failed to fetch models: {}", err);
+        err
+    })?;
 
-            // Update memory cache
-            let mut cache = MODELS_CACHE.write().unwrap_or_else(|e| {
-                warn!("Models cache poisoned, recovering: {}", e);
-                e.into_inner()
-            });
-            *cache = Some(providers.clone());
-            providers
-        }
-        Err(e) => {
-            error!("Failed to fetch models: {}", e);
-            // Return empty map on error
-            HashMap::new()
-        }
-    }
+    // Save to disk cache
+    save_to_disk(&providers).await;
+
+    // Update memory cache
+    let mut cache = MODELS_CACHE.write().unwrap_or_else(|e| {
+        warn!("Models cache poisoned, recovering: {}", e);
+        e.into_inner()
+    });
+    *cache = Some(providers.clone());
+    Ok(providers)
 }
 
 /// Force refresh models from API
@@ -327,15 +340,15 @@ pub async fn refresh() -> Result<(), String> {
 }
 
 /// Get a specific provider by ID
-pub async fn get_provider(provider_id: &str) -> Option<ProviderDef> {
-    let providers = get_providers().await;
-    providers.get(provider_id).cloned()
+pub async fn get_provider(provider_id: &str) -> Result<Option<ProviderDef>, String> {
+    let providers = get_providers().await?;
+    Ok(providers.get(provider_id).cloned())
 }
 
 /// Get a specific model by provider and model ID
-pub async fn get_model(provider_id: &str, model_id: &str) -> Option<ModelDef> {
+pub async fn get_model(provider_id: &str, model_id: &str) -> Result<Option<ModelDef>, String> {
     let provider = get_provider(provider_id).await?;
-    provider.models.get(model_id).cloned()
+    Ok(provider.and_then(|provider| provider.models.get(model_id).cloned()))
 }
 
 /// Filter providers to only include commonly used ones
@@ -413,10 +426,10 @@ impl From<&ProviderDef> for ProviderInfo {
 }
 
 /// Get simplified provider info for frontend
-pub async fn get_provider_infos() -> Vec<ProviderInfo> {
-    let providers = get_providers().await;
+pub async fn get_provider_infos() -> Result<Vec<ProviderInfo>, String> {
+    let providers = get_providers().await?;
     let common = filter_common_providers(&providers);
-    common.into_iter().map(ProviderInfo::from).collect()
+    Ok(common.into_iter().map(ProviderInfo::from).collect())
 }
 
 #[cfg(test)]

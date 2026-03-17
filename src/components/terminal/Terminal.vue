@@ -144,7 +144,9 @@
     }
 
     lastEmittedResize = { rows, cols }
-    terminalStore.resizeTerminal(props.terminalId, rows, cols).catch(() => {})
+    terminalStore.resizeTerminal(props.terminalId, rows, cols).catch(error => {
+      console.warn(`Failed to resize terminal ${props.terminalId}:`, error)
+    })
   }
 
   const processBinaryChunk = (paneId: number, bytes: Uint8Array) => {
@@ -195,7 +197,9 @@
     if (channelSub) {
       const sub = channelSub
       channelSub = null
-      await sub.unsubscribe().catch(() => {})
+      await sub.unsubscribe().catch(error => {
+        console.warn('Failed to unsubscribe terminal channel:', error)
+      })
     }
   }
 
@@ -332,7 +336,9 @@
       terminal.value.loadAddon(
         new WebLinksAddon((event, uri) => {
           if (event.ctrlKey || event.metaKey) {
-            openUrl(uri).catch(() => {})
+            openUrl(uri).catch(error => {
+              console.warn(`Failed to open terminal link '${uri}':`, error)
+            })
           }
         })
       )
@@ -357,8 +363,8 @@
         if (terminal.value.rows > 0) {
           terminal.value.refresh(0, terminal.value.rows - 1)
         }
-      } catch {
-        // ignore
+      } catch (error) {
+        console.warn('Failed to refresh terminal theme after initialization:', error)
       }
 
       // Only active terminals send resize events to avoid API calls from inactive terminals
@@ -366,7 +372,9 @@
 
       trackDisposable(
         terminal.value.onData(data => {
-          terminalStore.writeToTerminal(props.terminalId, data).catch(() => {})
+          terminalStore.writeToTerminal(props.terminalId, data).catch(error => {
+            console.warn(`Failed to write terminal input to pane ${props.terminalId}:`, error)
+          })
           updateInputLine(data)
           scheduleCursorPositionUpdate()
         })
@@ -393,18 +401,19 @@
         rows: terminal.value.rows,
         cols: terminal.value.cols,
       })
-    } catch {
+    } catch (error) {
       if (!hasDisposed && terminal.value) {
         try {
           terminal.value.dispose()
-        } catch {
-          // ignore
+        } catch (disposeError) {
+          console.warn('Failed to dispose terminal after initialization error:', disposeError)
         }
         terminal.value = null
         hasDisposed = true
       }
       fitAddon.value = null
       isXtermReady = false
+      console.error('Failed to initialize xterm terminal:', error)
       logTerminalEvent('initXterm:error')
     }
   }
@@ -429,8 +438,8 @@
       if (terminal.value.rows > 0) {
         terminal.value.refresh(0, terminal.value.rows - 1)
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      console.warn('Failed to update terminal theme:', error)
     }
   }
 
@@ -450,7 +459,8 @@
   const initPlatformInfo = async () => {
     try {
       terminalEnv.isMac = await windowApi.isMac()
-    } catch {
+    } catch (error) {
+      console.warn('Failed to query macOS platform state, using browser fallback:', error)
       terminalEnv.isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
     }
   }
@@ -501,8 +511,8 @@
       if (terminal.value && terminal.value.element) {
         terminal.value.focus()
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      console.warn('Failed to focus terminal:', error)
     }
   }
 
@@ -556,13 +566,13 @@
           try {
             fitAddon.value?.fit()
             commitResize()
-          } catch {
-            // ignore
+          } catch (error) {
+            console.warn('Failed to fit terminal after resize:', error)
           }
         })
       })
-    } catch {
-      // ignore
+    } catch (error) {
+      console.warn('Failed to resize terminal:', error)
     }
   }
 
@@ -598,7 +608,8 @@
       const y = screenRect.top + buffer.cursorY * lineHeight
 
       terminalEnv.cursorPosition = { x, y }
-    } catch {
+    } catch (error) {
+      console.warn('Failed to update terminal cursor position, resetting to origin:', error)
       terminalEnv.cursorPosition = { x: 0, y: 0 }
     }
   }
@@ -663,7 +674,8 @@
         try {
           const dir: string = await windowApi.getHomeDirectory()
           terminalEnv.workingDirectory = dir
-        } catch {
+        } catch (error) {
+          console.warn('Failed to read home directory for terminal, using /tmp:', error)
           terminalEnv.workingDirectory = '/tmp'
         }
       }
@@ -725,20 +737,22 @@
     // Prevent async Shell Integration calls after component unmount
     try {
       shellIntegration.dispose()
-    } catch {
-      // ignore
+    } catch (error) {
+      console.warn('Failed to dispose shell integration:', error)
     }
 
     // Cancel Tauri Channel subscription to avoid backend channel residue
-    disposeChannelSubscription().catch(() => {})
+    disposeChannelSubscription().catch(error => {
+      console.warn('Failed to dispose terminal channel subscription:', error)
+    })
     subscribedPaneId = null
     isXtermReady = false
     fitRetryCount = 0
     if (keyListener) {
       try {
         keyListener.dispose()
-      } catch (_) {
-        // ignore
+      } catch (error) {
+        console.warn('Failed to dispose terminal key listener:', error)
       }
       keyListener = null
     }
@@ -746,8 +760,8 @@
     if (terminal.value) {
       try {
         terminal.value.dispose()
-      } catch {
-        // ignore
+      } catch (error) {
+        console.warn('Failed to dispose terminal instance:', error)
       }
       terminal.value = null
     }
@@ -800,15 +814,15 @@
       if (typeof oldId === 'number' && typeof newId === 'number' && oldId !== newId) {
         try {
           terminal.value?.reset()
-        } catch {
-          // ignore
+        } catch (error) {
+          console.warn('Failed to reset terminal during pane switch:', error)
         }
 
         // Reset decoder and shell integration state when switching panes to avoid history/prompt stacking
         try {
           binaryDecoder.decode()
-        } catch {
-          // ignore
+        } catch (error) {
+          console.warn('Failed to flush terminal decoder during pane switch:', error)
         }
         binaryDecoder = new TextDecoder('utf-8', { fatal: false })
         shellIntegration.resetState()
@@ -823,8 +837,8 @@
         terminalSelection.clearSelection()
         try {
           terminal.value?.reset()
-        } catch {
-          // ignore
+        } catch (error) {
+          console.warn('Failed to reset terminal after clearing pane binding:', error)
         }
       }
 

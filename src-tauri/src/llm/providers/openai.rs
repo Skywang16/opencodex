@@ -32,25 +32,19 @@ pub struct OpenAIProvider {
 }
 
 type OpenAiResult<T> = Result<T, OpenAiError>;
+const OPENAI_API_BASE_URL: &str = "https://api.openai.com/v1";
 
 fn build_openai_chat_body(
     req: &crate::llm::anthropic_types::CreateMessageRequest,
     stream: bool,
 ) -> Value {
-    use crate::llm::anthropic_types::SystemPrompt;
     let mut chat_messages: Vec<Value> = Vec::new();
-    if let Some(system) = &req.system {
-        let sys_text = match system {
-            SystemPrompt::Text(t) => t.clone(),
-            SystemPrompt::Blocks(blocks) => blocks
-                .iter()
-                .map(|b| b.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        };
-        if !sys_text.is_empty() {
-            chat_messages.push(json!({"role":"system","content":sys_text}));
-        }
+    let system_sections = collect_openai_instruction_sections(req);
+    if !system_sections.is_empty() {
+        chat_messages.push(json!({
+            "role": "system",
+            "content": system_sections.join("\n\n"),
+        }));
     }
     let converted = crate::llm::transform::openai::convert_to_openai_messages(&req.messages);
     chat_messages.extend(converted);
@@ -86,10 +80,22 @@ fn build_openai_responses_body(
     enable_deep_thinking: bool,
     reasoning_effort: Option<&str>,
 ) -> Value {
-    use crate::llm::anthropic_types::SystemPrompt;
-
-    // Responses API accepts the same message format as Chat Completions
-    let input_items = crate::llm::transform::openai::convert_to_openai_messages(&req.messages);
+    let mut input_items = Vec::new();
+    if let Some(dev_ctx) = &req.developer_context {
+        for text in dev_ctx
+            .iter()
+            .map(|text| text.trim())
+            .filter(|text| !text.is_empty())
+        {
+            input_items.push(json!({
+                "type": "message",
+                "role": "developer",
+                "content": [{ "type": "input_text", "text": text }],
+            }));
+        }
+    }
+    input_items
+        .extend(crate::llm::transform::openai::convert_to_responses_api_input(&req.messages));
 
     // Build tools for Responses API
     let tools_val = req.tools.as_ref().map(|tools| {
@@ -115,18 +121,8 @@ fn build_openai_responses_body(
     });
 
     // Add instructions (system prompt)
-    if let Some(system) = &req.system {
-        let sys_text = match system {
-            SystemPrompt::Text(t) => t.clone(),
-            SystemPrompt::Blocks(blocks) => blocks
-                .iter()
-                .map(|b| b.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        };
-        if !sys_text.is_empty() {
-            body["instructions"] = json!(sys_text);
-        }
+    if let Some(instructions) = extract_openai_system_prompt(&req.system) {
+        body["instructions"] = json!(instructions);
     }
 
     if let Some(temp) = req.temperature {
@@ -141,11 +137,51 @@ fn build_openai_responses_body(
 
     // Add reasoning configuration when deep thinking is enabled
     if enable_deep_thinking {
-        let effort = reasoning_effort.unwrap_or("medium");
-        body["reasoning"] = json!({"effort": effort});
+        body["reasoning"] = match reasoning_effort {
+            Some(effort) => json!({ "effort": effort }),
+            None => json!({}),
+        };
     }
 
     body
+}
+
+fn extract_openai_system_prompt(
+    system: &Option<crate::llm::anthropic_types::SystemPrompt>,
+) -> Option<String> {
+    use crate::llm::anthropic_types::SystemPrompt;
+
+    system.as_ref().and_then(|system| {
+        let text = match system {
+            SystemPrompt::Text(text) => text.clone(),
+            SystemPrompt::Blocks(blocks) => blocks
+                .iter()
+                .map(|block| block.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        let trimmed = text.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
+
+fn collect_openai_instruction_sections(
+    req: &crate::llm::anthropic_types::CreateMessageRequest,
+) -> Vec<String> {
+    let mut sections = Vec::new();
+    if let Some(system) = extract_openai_system_prompt(&req.system) {
+        sections.push(system);
+    }
+    if let Some(developer_context) = &req.developer_context {
+        sections.extend(
+            developer_context
+                .iter()
+                .map(|item| item.trim())
+                .filter(|item| !item.is_empty())
+                .map(ToOwned::to_owned),
+        );
+    }
+    sections
 }
 
 impl OpenAIProvider {
@@ -188,34 +224,26 @@ impl OpenAIProvider {
         }
     }
 
+    fn base_url(&self) -> &str {
+        match self.config.api_url.as_deref() {
+            Some(api_url) => api_url,
+            None => OPENAI_API_BASE_URL,
+        }
+    }
+
     /// Get Chat Completions endpoint
     fn get_chat_endpoint(&self) -> String {
-        let base = self
-            .config
-            .api_url
-            .as_deref()
-            .unwrap_or("https://api.openai.com/v1");
-        format!("{base}/chat/completions")
+        format!("{}/chat/completions", self.base_url())
     }
 
     /// Get Responses API endpoint
     fn get_responses_endpoint(&self) -> String {
-        let base = self
-            .config
-            .api_url
-            .as_deref()
-            .unwrap_or("https://api.openai.com/v1");
-        format!("{base}/responses")
+        format!("{}/responses", self.base_url())
     }
 
     /// Get Embedding API endpoint
     fn get_embedding_endpoint(&self) -> String {
-        let base = self
-            .config
-            .api_url
-            .as_deref()
-            .unwrap_or("https://api.openai.com/v1");
-        format!("{base}/embeddings")
+        format!("{}/embeddings", self.base_url())
     }
 
     /// Get request headers
@@ -226,38 +254,150 @@ impl OpenAIProvider {
             format!("Bearer {}", self.config.api_key),
         );
         headers.insert("Content-Type".to_string(), "application/json".to_string());
+        headers.insert("User-Agent".to_string(), "openai-codex/1.0.0".to_string());
         headers
     }
 
     /// Handle API error response
     fn handle_error_response(&self, status: StatusCode, body: &str) -> OpenAiError {
-        if let Ok(error_json) = serde_json::from_str::<Value>(body) {
-            if let Some(error_obj) = error_json.get("error").and_then(|v| v.as_object()) {
-                let error_type = error_obj
-                    .get("type")
-                    .or_else(|| error_obj.get("code"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
+        match serde_json::from_str::<Value>(body) {
+            Ok(error_json) => {
+                if let Some(error_obj) = error_json.get("error").and_then(|v| v.as_object()) {
+                    let error_type = error_obj
+                        .get("type")
+                        .or_else(|| error_obj.get("code"))
+                        .and_then(|v| v.as_str());
 
-                let error_message = error_obj
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown error");
+                    let error_message = error_obj.get("message").and_then(|v| v.as_str());
 
-                let message = match error_type {
-                    "insufficient_quota" => format!("Quota exceeded: {error_message}"),
-                    "invalid_request_error" => format!("Request error: {error_message}"),
-                    "authentication_error" => format!("Authentication failed: {error_message}"),
-                    _ => error_message.to_string(),
-                };
+                    if let Some(error_message) = error_message {
+                        let message = match error_type {
+                            Some("insufficient_quota") => {
+                                format!("Quota exceeded: {error_message}")
+                            }
+                            Some("invalid_request_error") => {
+                                format!("Request error: {error_message}")
+                            }
+                            Some("authentication_error") => {
+                                format!("Authentication failed: {error_message}")
+                            }
+                            _ => error_message.to_string(),
+                        };
 
-                return OpenAiError::Api { status, message };
+                        return OpenAiError::Api { status, message };
+                    }
+
+                    return OpenAiError::Api {
+                        status,
+                        message: body.to_string(),
+                    };
+                }
+            }
+            Err(err) => {
+                tracing::debug!(
+                    status = %status,
+                    error = %err,
+                    "Failed to parse OpenAI error response as JSON"
+                );
             }
         }
         OpenAiError::Api {
             status,
             message: format!("Unexpected response: {body}"),
         }
+    }
+
+    async fn read_error_body(response: reqwest::Response) -> String {
+        match response.text().await {
+            Ok(text) => text,
+            Err(err) => {
+                tracing::warn!("Failed to read OpenAI error response body: {}", err);
+                format!("<failed to read error response body: {err}>")
+            }
+        }
+    }
+
+    fn require_stream_string<'a>(value: &'a Value, field: &'static str) -> OpenAiResult<&'a str> {
+        value.as_str().ok_or(OpenAiError::MissingField { field })
+    }
+
+    fn parse_responses_stream_usage(
+        response_json: &Value,
+    ) -> OpenAiResult<crate::llm::anthropic_types::Usage> {
+        use crate::llm::anthropic_types::Usage;
+
+        let usage =
+            response_json["response"]["usage"]
+                .as_object()
+                .ok_or(OpenAiError::MissingField {
+                    field: "response.usage",
+                })?;
+
+        Ok(Usage {
+            input_tokens: usage
+                .get("input_tokens")
+                .and_then(|value| value.as_u64())
+                .ok_or(OpenAiError::MissingField {
+                    field: "response.usage.input_tokens",
+                })? as u32,
+            output_tokens: usage
+                .get("output_tokens")
+                .and_then(|value| value.as_u64())
+                .ok_or(OpenAiError::MissingField {
+                    field: "response.usage.output_tokens",
+                })? as u32,
+            cache_creation_input_tokens: None,
+            cache_read_input_tokens: None,
+        })
+    }
+
+    fn parse_chat_completion_message(
+        response_json: &Value,
+    ) -> OpenAiResult<(String, crate::llm::anthropic_types::Usage, String)> {
+        use crate::llm::anthropic_types::Usage;
+
+        let id = response_json["id"]
+            .as_str()
+            .ok_or(OpenAiError::MissingField { field: "id" })?
+            .to_string();
+        let choices = response_json["choices"]
+            .as_array()
+            .ok_or(OpenAiError::MissingField { field: "choices" })?;
+        let first_choice = choices.first().ok_or(OpenAiError::MissingField {
+            field: "choices[0]",
+        })?;
+        let content = first_choice["message"]["content"]
+            .as_str()
+            .ok_or(OpenAiError::MissingField {
+                field: "choices[0].message.content",
+            })?
+            .to_string();
+        let usage_obj = response_json["usage"]
+            .as_object()
+            .ok_or(OpenAiError::MissingField { field: "usage" })?;
+        let prompt_tokens = usage_obj
+            .get("prompt_tokens")
+            .and_then(|v| v.as_u64())
+            .ok_or(OpenAiError::MissingField {
+                field: "usage.prompt_tokens",
+            })?;
+        let completion_tokens = usage_obj
+            .get("completion_tokens")
+            .and_then(|v| v.as_u64())
+            .ok_or(OpenAiError::MissingField {
+                field: "usage.completion_tokens",
+            })?;
+
+        Ok((
+            content,
+            Usage {
+                input_tokens: prompt_tokens as u32,
+                output_tokens: completion_tokens as u32,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            },
+            id,
+        ))
     }
 
     /// Parse embedding response
@@ -267,26 +407,43 @@ impl OpenAIProvider {
             .ok_or(OpenAiError::EmbeddingField { field: "data" })?;
 
         let mut embedding_data = Vec::new();
-        for (i, item) in data_array.iter().enumerate() {
+        for item in data_array {
             let embedding_vec = item["embedding"]
                 .as_array()
                 .ok_or(OpenAiError::EmbeddingField {
                     field: "data[].embedding",
                 })?
                 .iter()
-                .map(|v| v.as_f64().unwrap_or(0.0) as f32)
-                .collect::<Vec<f32>>();
+                .map(|value| {
+                    value
+                        .as_f64()
+                        .ok_or(OpenAiError::EmbeddingField {
+                            field: "data[].embedding[]",
+                        })
+                        .map(|number| number as f32)
+                })
+                .collect::<OpenAiResult<Vec<f32>>>()?;
 
             embedding_data.push(EmbeddingData {
                 embedding: embedding_vec,
-                index: item["index"].as_u64().unwrap_or(i as u64) as usize,
-                object: item["object"].as_str().unwrap_or("embedding").to_string(),
+                index: item["index"]
+                    .as_u64()
+                    .ok_or(OpenAiError::EmbeddingField {
+                        field: "data[].index",
+                    })
+                    .map(|value| value as usize)?,
+                object: item["object"]
+                    .as_str()
+                    .ok_or(OpenAiError::EmbeddingField {
+                        field: "data[].object",
+                    })?
+                    .to_string(),
             });
         }
 
         let model = response_json["model"]
             .as_str()
-            .unwrap_or("unknown")
+            .ok_or(OpenAiError::EmbeddingField { field: "model" })?
             .to_string();
 
         let usage = Self::extract_usage_static(response_json);
@@ -300,72 +457,64 @@ impl OpenAIProvider {
 
     // Static version of extract_usage
     fn extract_usage_static(response_json: &Value) -> Option<LLMUsage> {
-        response_json["usage"]
-            .as_object()
-            .map(|usage_obj| LLMUsage {
-                prompt_tokens: usage_obj
-                    .get("prompt_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32,
-                completion_tokens: usage_obj
-                    .get("completion_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32,
-                total_tokens: usage_obj
-                    .get("total_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32,
-            })
+        let usage_obj = response_json["usage"].as_object()?;
+        Some(LLMUsage {
+            prompt_tokens: usage_obj.get("prompt_tokens")?.as_u64()? as u32,
+            completion_tokens: usage_obj.get("completion_tokens")?.as_u64()? as u32,
+            total_tokens: usage_obj.get("total_tokens")?.as_u64()? as u32,
+        })
     }
 
     /// Extract text content from Responses API response
-    fn extract_responses_text(response_json: &Value) -> String {
+    fn extract_responses_text(response_json: &Value) -> OpenAiResult<String> {
         // Responses API returns output array with message items
         // Each message has content array with output_text items
-        if let Some(output) = response_json["output"].as_array() {
-            let mut text_parts = Vec::new();
-            for item in output {
-                if item["type"].as_str() == Some("message") {
-                    if let Some(content) = item["content"].as_array() {
-                        for block in content {
-                            if block["type"].as_str() == Some("output_text") {
-                                if let Some(text) = block["text"].as_str() {
-                                    text_parts.push(text.to_string());
-                                }
-                            }
-                        }
+        let output = response_json["output"]
+            .as_array()
+            .ok_or(OpenAiError::MissingField { field: "output" })?;
+        let mut text_parts = Vec::new();
+        for item in output {
+            if item["type"].as_str() == Some("message") {
+                let content = item["content"]
+                    .as_array()
+                    .ok_or(OpenAiError::MissingField {
+                        field: "output[].content",
+                    })?;
+                for block in content {
+                    if block["type"].as_str() == Some("output_text") {
+                        let text = block["text"].as_str().ok_or(OpenAiError::MissingField {
+                            field: "output[].content[].text",
+                        })?;
+                        text_parts.push(text.to_string());
                     }
                 }
             }
-            return text_parts.join("");
         }
-        String::new()
+        Ok(text_parts.join(""))
     }
 
     /// Extract usage from Responses API response
-    fn extract_responses_usage(response_json: &Value) -> crate::llm::anthropic_types::Usage {
+    fn extract_responses_usage(
+        response_json: &Value,
+    ) -> OpenAiResult<crate::llm::anthropic_types::Usage> {
         use crate::llm::anthropic_types::Usage;
-        if let Some(usage) = response_json["usage"].as_object() {
-            Usage {
-                input_tokens: usage
-                    .get("input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32,
-                output_tokens: usage
-                    .get("output_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            }
-        } else {
-            Usage {
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            }
-        }
+        let usage = response_json["usage"]
+            .as_object()
+            .ok_or(OpenAiError::MissingField { field: "usage" })?;
+        Ok(Usage {
+            input_tokens: usage.get("input_tokens").and_then(|v| v.as_u64()).ok_or(
+                OpenAiError::MissingField {
+                    field: "usage.input_tokens",
+                },
+            )? as u32,
+            output_tokens: usage.get("output_tokens").and_then(|v| v.as_u64()).ok_or(
+                OpenAiError::MissingField {
+                    field: "usage.output_tokens",
+                },
+            )? as u32,
+            cache_creation_input_tokens: None,
+            cache_read_input_tokens: None,
+        })
     }
 
     /// Handle Responses API streaming
@@ -457,22 +606,24 @@ impl OpenAIProvider {
                                     // Response created - send MessageStart
                                     "response.created" => {
                                         if !state.message_started {
+                                            let response_id = match Self::require_stream_string(
+                                                &value["response"]["id"],
+                                                "response.id",
+                                            ) {
+                                                Ok(response_id) => response_id.to_string(),
+                                                Err(err) => {
+                                                    return Some((
+                                                        Err(LlmProviderError::OpenAi(err)),
+                                                        (stream, state),
+                                                    ));
+                                                }
+                                            };
                                             state.message_started = true;
-                                            state.response_id = value["response"]["id"]
-                                                .as_str()
-                                                .map(|s| s.to_string());
+                                            state.response_id = Some(response_id.clone());
                                             state.pending_events.push_back(
                                                 StreamEvent::MessageStart {
                                                     message: MessageStartData {
-                                                        id: state
-                                                            .response_id
-                                                            .clone()
-                                                            .unwrap_or_else(|| {
-                                                                format!(
-                                                                    "resp_{}",
-                                                                    uuid::Uuid::new_v4()
-                                                                )
-                                                            }),
+                                                        id: response_id,
                                                         message_type: "message".to_string(),
                                                         role: MessageRole::Assistant,
                                                         model: model.clone(),
@@ -507,14 +658,24 @@ impl OpenAIProvider {
                                     "response.output_text.delta" => {
                                         // Ensure message and content block have started
                                         if !state.message_started {
+                                            let response_id = match Self::require_stream_string(
+                                                &value["response_id"],
+                                                "response_id",
+                                            ) {
+                                                Ok(response_id) => response_id.to_string(),
+                                                Err(err) => {
+                                                    return Some((
+                                                        Err(LlmProviderError::OpenAi(err)),
+                                                        (stream, state),
+                                                    ));
+                                                }
+                                            };
                                             state.message_started = true;
+                                            state.response_id = Some(response_id.clone());
                                             state.pending_events.push_back(
                                                 StreamEvent::MessageStart {
                                                     message: MessageStartData {
-                                                        id: format!(
-                                                            "resp_{}",
-                                                            uuid::Uuid::new_v4()
-                                                        ),
+                                                        id: response_id,
                                                         message_type: "message".to_string(),
                                                         role: MessageRole::Assistant,
                                                         model: model.clone(),
@@ -557,18 +718,21 @@ impl OpenAIProvider {
                                     // Output item added - check for reasoning type
                                     "response.output_item.added" => {
                                         let item = &value["item"];
-                                        let item_type = item["type"].as_str().unwrap_or("");
+                                        let Some(item_type) = item["type"].as_str() else {
+                                            continue;
+                                        };
 
                                         if item_type == "reasoning" {
                                             // Extract reasoning item metadata
-                                            let item_id =
-                                                item["id"].as_str().unwrap_or("").to_string();
+                                            let Some(item_id) = item["id"].as_str() else {
+                                                continue;
+                                            };
                                             let encrypted_content = item["encrypted_content"]
                                                 .as_str()
                                                 .map(|s| s.to_string());
 
                                             state.active_reasoning = Some(ActiveReasoning {
-                                                item_id: item_id.clone(),
+                                                item_id: item_id.to_string(),
                                                 encrypted_content: encrypted_content.clone(),
                                             });
 
@@ -587,7 +751,9 @@ impl OpenAIProvider {
                                                                 thinking: String::new(),
                                                                 metadata: Some(
                                                                     ReasoningBlockMetadata {
-                                                                        item_id: Some(item_id),
+                                                                        item_id: Some(
+                                                                            item_id.to_string(),
+                                                                        ),
                                                                         encrypted_content,
                                                                         signature: None,
                                                                         provider: Some(
@@ -604,44 +770,43 @@ impl OpenAIProvider {
                                             //
                                             // Map function_call output items to Anthropic-style ToolUse blocks so the
                                             // ReAct orchestrator can execute tools even when the assistant emits no text.
-                                            let item_id =
-                                                item["id"].as_str().unwrap_or("").to_string();
-                                            let name =
-                                                item["name"].as_str().unwrap_or("").to_string();
+                                            let Some(item_id) = item["id"].as_str() else {
+                                                continue;
+                                            };
+                                            let Some(name) = item["name"].as_str() else {
+                                                continue;
+                                            };
 
-                                            // Some gateways may omit id/name; be defensive to avoid panics.
-                                            if !item_id.is_empty() && !name.is_empty() {
-                                                let index = state.next_block_index;
-                                                state.next_block_index =
-                                                    state.next_block_index.saturating_add(1);
-                                                state
-                                                    .tool_block_index_by_item_id
-                                                    .insert(item_id.clone(), index);
-                                                state.active_tool_item_id = Some(item_id.clone());
-                                                state.open_tool_block_indices.insert(index);
+                                            let index = state.next_block_index;
+                                            state.next_block_index =
+                                                state.next_block_index.saturating_add(1);
+                                            state
+                                                .tool_block_index_by_item_id
+                                                .insert(item_id.to_string(), index);
+                                            state.active_tool_item_id = Some(item_id.to_string());
+                                            state.open_tool_block_indices.insert(index);
 
-                                                state.pending_events.push_back(
-                                                    StreamEvent::ContentBlockStart {
-                                                        index,
-                                                        content_block: ContentBlockStart::ToolUse {
-                                                            id: item_id.clone(),
-                                                            name: name.clone(),
-                                                        },
+                                            state.pending_events.push_back(
+                                                StreamEvent::ContentBlockStart {
+                                                    index,
+                                                    content_block: ContentBlockStart::ToolUse {
+                                                        id: item_id.to_string(),
+                                                        name: name.to_string(),
                                                     },
-                                                );
+                                                },
+                                            );
 
-                                                // If the item already contains arguments, emit them as a delta.
-                                                if let Some(args) = item["arguments"].as_str() {
-                                                    if !args.is_empty() {
-                                                        state.pending_events.push_back(
-                                                            StreamEvent::ContentBlockDelta {
-                                                                index,
-                                                                delta: ContentDelta::InputJson {
-                                                                    partial_json: args.to_string(),
-                                                                },
+                                            // If the item already contains arguments, emit them as a delta.
+                                            if let Some(args) = item["arguments"].as_str() {
+                                                if !args.is_empty() {
+                                                    state.pending_events.push_back(
+                                                        StreamEvent::ContentBlockDelta {
+                                                            index,
+                                                            delta: ContentDelta::InputJson {
+                                                                partial_json: args.to_string(),
                                                             },
-                                                        );
-                                                    }
+                                                        },
+                                                    );
                                                 }
                                             }
                                         }
@@ -712,8 +877,11 @@ impl OpenAIProvider {
 
                                         if let Some(delta) = value["delta"].as_str() {
                                             if !delta.is_empty() {
-                                                let index =
-                                                    state.active_reasoning_block_index.unwrap_or(1);
+                                                let Some(index) =
+                                                    state.active_reasoning_block_index
+                                                else {
+                                                    continue;
+                                                };
                                                 state.pending_events.push_back(
                                                     StreamEvent::ContentBlockDelta {
                                                         index,
@@ -729,7 +897,9 @@ impl OpenAIProvider {
                                     // Output item done - finalize reasoning if applicable
                                     "response.output_item.done" => {
                                         let item = &value["item"];
-                                        let item_type = item["type"].as_str().unwrap_or("");
+                                        let Some(item_type) = item["type"].as_str() else {
+                                            continue;
+                                        };
 
                                         if item_type == "reasoning" {
                                             // Update encrypted_content from final item
@@ -743,11 +913,12 @@ impl OpenAIProvider {
                                             }
                                         } else if item_type == "function_call" {
                                             // Close tool use block once the tool output item is complete.
-                                            let item_id =
-                                                item["id"].as_str().unwrap_or("").to_string();
+                                            let Some(item_id) = item["id"].as_str() else {
+                                                continue;
+                                            };
                                             if let Some(index) = state
                                                 .tool_block_index_by_item_id
-                                                .get(&item_id)
+                                                .get(item_id)
                                                 .copied()
                                             {
                                                 state.pending_events.push_back(
@@ -755,8 +926,7 @@ impl OpenAIProvider {
                                                 );
                                                 state.open_tool_block_indices.remove(&index);
                                             }
-                                            if state.active_tool_item_id.as_deref()
-                                                == Some(item_id.as_str())
+                                            if state.active_tool_item_id.as_deref() == Some(item_id)
                                             {
                                                 state.active_tool_item_id = None;
                                             }
@@ -817,30 +987,14 @@ impl OpenAIProvider {
                                             state.active_tool_item_id = None;
                                         }
 
-                                        // Extract usage if available
-                                        let usage = if let Some(usage_obj) =
-                                            value["response"]["usage"].as_object()
+                                        let usage = match Self::parse_responses_stream_usage(&value)
                                         {
-                                            Usage {
-                                                input_tokens: usage_obj
-                                                    .get("input_tokens")
-                                                    .and_then(|v| v.as_u64())
-                                                    .unwrap_or(0)
-                                                    as u32,
-                                                output_tokens: usage_obj
-                                                    .get("output_tokens")
-                                                    .and_then(|v| v.as_u64())
-                                                    .unwrap_or(0)
-                                                    as u32,
-                                                cache_creation_input_tokens: None,
-                                                cache_read_input_tokens: None,
-                                            }
-                                        } else {
-                                            Usage {
-                                                input_tokens: 0,
-                                                output_tokens: 0,
-                                                cache_creation_input_tokens: None,
-                                                cache_read_input_tokens: None,
+                                            Ok(usage) => usage,
+                                            Err(err) => {
+                                                return Some((
+                                                    Err(LlmProviderError::OpenAi(err)),
+                                                    (stream, state),
+                                                ));
                                             }
                                         };
 
@@ -858,7 +1012,7 @@ impl OpenAIProvider {
                                     "response.function_call_arguments.delta" => {
                                         if let Some(delta) = value["delta"].as_str() {
                                             if !delta.is_empty() {
-                                                let index = value
+                                                let index_from_item = value
                                                     .get("item_id")
                                                     .and_then(|v| v.as_str())
                                                     .and_then(|id| {
@@ -866,18 +1020,19 @@ impl OpenAIProvider {
                                                             .tool_block_index_by_item_id
                                                             .get(id)
                                                             .copied()
-                                                    })
-                                                    .or_else(|| {
-                                                        state
-                                                            .active_tool_item_id
-                                                            .as_deref()
-                                                            .and_then(|id| {
-                                                                state
-                                                                    .tool_block_index_by_item_id
-                                                                    .get(id)
-                                                                    .copied()
-                                                            })
                                                     });
+                                                let index = match index_from_item {
+                                                    Some(index) => Some(index),
+                                                    None => state
+                                                        .active_tool_item_id
+                                                        .as_deref()
+                                                        .and_then(|id| {
+                                                            state
+                                                                .tool_block_index_by_item_id
+                                                                .get(id)
+                                                                .copied()
+                                                        }),
+                                                };
                                                 let Some(index) = index else {
                                                     // If we can't associate this delta with a tool output item,
                                                     // do not emit it into an arbitrary block index.
@@ -924,12 +1079,16 @@ impl OpenAIProvider {
 
 #[async_trait]
 impl LLMProvider for OpenAIProvider {
+    fn provider_name(&self) -> &'static str {
+        "openai"
+    }
+
     /// Non-streaming call (Anthropic native interface)
     async fn call(
         &self,
         request: crate::llm::anthropic_types::CreateMessageRequest,
     ) -> LlmProviderResult<crate::llm::anthropic_types::Message> {
-        use crate::llm::anthropic_types::{ContentBlock, Message, MessageRole, Usage};
+        use crate::llm::anthropic_types::{ContentBlock, Message, MessageRole};
 
         let use_responses = self.use_responses_api();
         let enable_deep_thinking = self.enable_deep_thinking();
@@ -962,10 +1121,7 @@ impl LLMProvider for OpenAIProvider {
             .map_err(|source| LlmProviderError::OpenAi(OpenAiError::Http { source }))?;
         let status = resp.status();
         if !status.is_success() {
-            let txt = resp
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
+            let txt = Self::read_error_body(resp).await;
             return Err(LlmProviderError::from(
                 self.handle_error_response(status, &txt),
             ));
@@ -976,43 +1132,22 @@ impl LLMProvider for OpenAIProvider {
             .map_err(|source| LlmProviderError::OpenAi(OpenAiError::Http { source }))?;
 
         // Parse response based on API type
-        let (content, usage) = if use_responses {
+        let (content, usage, message_id) = if use_responses {
             // Parse Responses API format
-            let text = Self::extract_responses_text(&json);
-            let usage = Self::extract_responses_usage(&json);
-            (text, usage)
-        } else {
-            // Parse Chat Completions format
-            let text = json["choices"][0]["message"]["content"]
+            let text = Self::extract_responses_text(&json)?;
+            let usage = Self::extract_responses_usage(&json)?;
+            let id = json["id"]
                 .as_str()
-                .unwrap_or("")
+                .ok_or(OpenAiError::MissingField { field: "id" })?
                 .to_string();
-            let usage_obj = json.get("usage");
-            let usage = usage_obj
-                .map(|u| Usage {
-                    input_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
-                        as u32,
-                    output_tokens: u
-                        .get("completion_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0) as u32,
-                    cache_creation_input_tokens: None,
-                    cache_read_input_tokens: None,
-                })
-                .unwrap_or(Usage {
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cache_creation_input_tokens: None,
-                    cache_read_input_tokens: None,
-                });
-            (text, usage)
+            (text, usage, id)
+        } else {
+            let (text, usage, id) = Self::parse_chat_completion_message(&json)?;
+            (text, usage, id)
         };
 
         let message = Message {
-            id: json["id"]
-                .as_str()
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("msg_{}", uuid::Uuid::new_v4())),
+            id: message_id,
             message_type: "message".to_string(),
             role: MessageRole::Assistant,
             content: vec![ContentBlock::Text {
@@ -1076,10 +1211,7 @@ impl LLMProvider for OpenAIProvider {
 
         let status = resp.status();
         if !status.is_success() {
-            let txt = resp
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
+            let txt = Self::read_error_body(resp).await;
             return Err(LlmProviderError::from(
                 self.handle_error_response(status, &txt),
             ));
@@ -1169,10 +1301,20 @@ impl LLMProvider for OpenAIProvider {
 
                                 // First event: MessageStart
                                 if !state.message_started {
+                                    let message_id =
+                                        match Self::require_stream_string(&value["id"], "id") {
+                                            Ok(message_id) => message_id.to_string(),
+                                            Err(err) => {
+                                                return Some((
+                                                    Err(LlmProviderError::OpenAi(err)),
+                                                    (stream, state),
+                                                ));
+                                            }
+                                        };
                                     state.message_started = true;
                                     state.pending_events.push_back(StreamEvent::MessageStart {
                                         message: MessageStartData {
-                                            id: format!("msg_{}", uuid::Uuid::new_v4()),
+                                            id: message_id,
                                             message_type: "message".to_string(),
                                             role: MessageRole::Assistant,
                                             model: model.clone(),
@@ -1218,9 +1360,12 @@ impl LLMProvider for OpenAIProvider {
                                     delta.get("tool_calls").and_then(|v| v.as_array())
                                 {
                                     for tc in tc_arr {
-                                        let raw_index =
-                                            tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
-                                                as usize;
+                                        let Some(raw_index) =
+                                            tc.get("index").and_then(|v| v.as_u64())
+                                        else {
+                                            continue;
+                                        };
+                                        let raw_index = raw_index as usize;
                                         let event_index = raw_index + 1; // Offset tool block index from text block (0)
 
                                         let func = tc.get("function");
@@ -1233,19 +1378,17 @@ impl LLMProvider for OpenAIProvider {
 
                                         if !state.tool_use_started.contains(&event_index) {
                                             if let Some(name) = name_opt {
-                                                let id = tc
-                                                    .get("id")
-                                                    .and_then(|v| v.as_str())
-                                                    .map(|s| s.to_string())
-                                                    .unwrap_or_else(|| {
-                                                        format!("call_{}", uuid::Uuid::new_v4())
-                                                    });
+                                                let Some(id) =
+                                                    tc.get("id").and_then(|v| v.as_str())
+                                                else {
+                                                    continue;
+                                                };
                                                 state.tool_use_started.insert(event_index);
                                                 state.pending_events.push_back(
                                                     StreamEvent::ContentBlockStart {
                                                         index: event_index,
                                                         content_block: ContentBlockStart::ToolUse {
-                                                            id,
+                                                            id: id.to_string(),
                                                             name: name.to_string(),
                                                         },
                                                     },
@@ -1278,13 +1421,12 @@ impl LLMProvider for OpenAIProvider {
 
                                     if !state.tool_use_started.contains(&event_index) {
                                         if let Some(name) = name_opt {
-                                            let id = format!("call_{}", uuid::Uuid::new_v4());
                                             state.tool_use_started.insert(event_index);
                                             state.pending_events.push_back(
                                                 StreamEvent::ContentBlockStart {
                                                     index: event_index,
                                                     content_block: ContentBlockStart::ToolUse {
-                                                        id,
+                                                        id: "legacy_function_call".to_string(),
                                                         name: name.to_string(),
                                                     },
                                                 },
@@ -1416,10 +1558,7 @@ impl LLMProvider for OpenAIProvider {
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
+            let error_text = Self::read_error_body(response).await;
             let error = self.handle_error_response(status, &error_text);
             return Err(LlmProviderError::from(error));
         }
@@ -1430,5 +1569,74 @@ impl LLMProvider for OpenAIProvider {
             .map_err(|source| LlmProviderError::OpenAi(OpenAiError::Http { source }))?;
         self.parse_embedding_response(&response_json)
             .map_err(LlmProviderError::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::anthropic_types::{CreateMessageRequest, MessageParam};
+
+    #[test]
+    fn test_build_openai_responses_body_includes_developer_messages() {
+        let request = CreateMessageRequest {
+            model: "gpt-5".to_string(),
+            messages: vec![MessageParam::user("hello")],
+            max_tokens: 128,
+            system: Some(crate::llm::anthropic_types::SystemPrompt::Text(
+                "core instructions".to_string(),
+            )),
+            developer_context: Some(vec!["env block".to_string(), "rule block".to_string()]),
+            tools: None,
+            temperature: None,
+            stop_sequences: None,
+            stream: false,
+            top_p: None,
+            top_k: None,
+            metadata: None,
+            thinking: None,
+        };
+
+        let body = build_openai_responses_body(&request, false, false, None);
+        let input = body["input"].as_array().unwrap();
+
+        assert_eq!(body["instructions"], "core instructions");
+        assert_eq!(input[0]["type"], "message");
+        assert_eq!(input[0]["role"], "developer");
+        assert_eq!(input[0]["content"][0]["text"], "env block");
+        assert_eq!(input[1]["type"], "message");
+        assert_eq!(input[1]["role"], "developer");
+        assert_eq!(input[2]["type"], "message");
+        assert_eq!(input[2]["role"], "user");
+    }
+
+    #[test]
+    fn test_build_openai_chat_body_merges_instruction_layers() {
+        let request = CreateMessageRequest {
+            model: "gpt-4o".to_string(),
+            messages: vec![MessageParam::user("hello")],
+            max_tokens: 128,
+            system: Some(crate::llm::anthropic_types::SystemPrompt::Text(
+                "core instructions".to_string(),
+            )),
+            developer_context: Some(vec!["env block".to_string(), "rule block".to_string()]),
+            tools: None,
+            temperature: None,
+            stop_sequences: None,
+            stream: false,
+            top_p: None,
+            top_k: None,
+            metadata: None,
+            thinking: None,
+        };
+
+        let body = build_openai_chat_body(&request, false);
+        let messages = body["messages"].as_array().unwrap();
+
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(
+            messages[0]["content"],
+            "core instructions\n\nenv block\n\nrule block"
+        );
     }
 }

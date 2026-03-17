@@ -16,9 +16,16 @@
   const { t } = useI18n()
 
   const lightboxStore = useImageLightboxStore()
+  const slashCommands = computed(() => createSlashCommands(t))
 
   const COMMAND_MARKER_RE = /^<!--\s*command:(\S+)\s*-->\n?/
-  const LEGACY_PREFIX_RE = /^\/(code-review|skill-creator|skill-installer|plan-mode)\n/
+  const LEGACY_PREFIX_RE = /^\/(code-review|skill-creator|skill-installer|plan-mode|orchestrate-mode)\n/
+  const LEADING_IMAGE_PLACEHOLDER_RE = /^(?:\s*\[Image #\d+\]\s*)+/
+  const XML_MODE_RE = /^<([a-z][\w-]*-mode)(?:\s+[^>]*)?>\s*/i
+  const XML_MODE_CLOSE_RE = /\s*<\/([a-z][\w-]*-mode)>$/i
+  const XML_MODE_SELF_CLOSING_RE = /^<([a-z][\w-]*-mode)(?:\s+[^>]*)?\s*\/>\s*/i
+
+  const formatCommandLabel = (id: string) => id.replace(/[-_]+/g, ' ').replace(/\b\w/g, char => char.toUpperCase())
 
   const parsedContent = computed(() => {
     const block = props.message.blocks.find(b => b.type === 'user_text')
@@ -27,19 +34,37 @@
     let commandId: string | null = null
     let text = raw
 
-    const markerMatch = raw.match(COMMAND_MARKER_RE)
+    text = text.replace(LEADING_IMAGE_PLACEHOLDER_RE, '').trimStart()
+
+    const markerMatch = text.match(COMMAND_MARKER_RE)
     if (markerMatch) {
       commandId = markerMatch[1]
-      text = raw.slice(markerMatch[0].length)
+      text = text.slice(markerMatch[0].length)
     } else {
-      const legacyMatch = raw.match(LEGACY_PREFIX_RE)
+      const legacyMatch = text.match(LEGACY_PREFIX_RE)
       if (legacyMatch) {
         commandId = legacyMatch[1]
-        text = raw.slice(legacyMatch[0].length)
+        text = text.slice(legacyMatch[0].length)
+      } else {
+        const selfClosingXmlMatch = text.match(XML_MODE_SELF_CLOSING_RE)
+        if (selfClosingXmlMatch) {
+          commandId = selfClosingXmlMatch[1]
+          text = text.slice(selfClosingXmlMatch[0].length)
+        } else {
+          const xmlMatch = text.match(XML_MODE_RE)
+          if (xmlMatch) {
+            commandId = xmlMatch[1]
+            text = text.slice(xmlMatch[0].length)
+            const closeMatch = text.match(XML_MODE_CLOSE_RE)
+            if (closeMatch && closeMatch[1].toLowerCase() === commandId.toLowerCase()) {
+              text = text.slice(0, closeMatch.index)
+            }
+          }
+        }
       }
     }
 
-    return { commandId, text }
+    return { commandId, text: text.trim() }
   })
 
   const userText = computed(() => parsedContent.value.text)
@@ -47,14 +72,22 @@
   const commandInfo = computed(() => {
     const id = parsedContent.value.commandId
     if (!id) return null
-    const cmd = createSlashCommands(t).find(c => c.id === id)
-    if (!cmd) return { id, label: `/${id}`, icon: '' }
+    const cmd = slashCommands.value.find(c => c.id === id)
+    if (!cmd) {
+      return {
+        id,
+        label: formatCommandLabel(id),
+        icon: SLASH_COMMAND_ICONS.sparkles || '',
+      }
+    }
     return {
       id,
       label: cmd.label,
       icon: SLASH_COMMAND_ICONS[cmd.icon] || '',
     }
   })
+
+  const isModeTag = computed(() => (commandInfo.value?.id || '').endsWith('-mode'))
 
   const userImages = computed(() => {
     return props.message.blocks.filter(b => b.type === 'user_image')
@@ -72,10 +105,10 @@
 </script>
 
 <template>
-  <div class="user-message">
+  <div class="user-message" :data-user-message-id="message.id">
     <div class="user-message-content">
       <div class="user-message-bubble">
-        <div v-if="commandInfo" class="command-indicator">
+        <div v-if="commandInfo" class="command-indicator" :class="{ 'command-indicator-mode': isModeTag }">
           <span class="command-indicator-icon" v-html="commandInfo.icon" />
           <span class="command-indicator-label">{{ commandInfo.label }}</span>
         </div>
@@ -143,11 +176,18 @@
     padding: 2px 8px 2px 5px;
     margin-bottom: 6px;
     background: color-mix(in srgb, var(--text-100) 8%, transparent);
+    border: 1px solid transparent;
     border-radius: var(--border-radius-md);
     font-size: 11px;
     font-weight: 500;
     color: var(--text-200);
     line-height: 1;
+  }
+
+  .command-indicator-mode {
+    background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+    border-color: color-mix(in srgb, var(--color-primary) 36%, transparent);
+    color: var(--color-primary);
   }
 
   .command-indicator-icon {

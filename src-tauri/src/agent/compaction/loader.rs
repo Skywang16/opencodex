@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
+use tracing::warn;
 
 use crate::agent::error::AgentResult;
 use crate::agent::persistence::AgentPersistence;
@@ -227,7 +228,18 @@ fn tool_output_text(block: &crate::agent::types::ToolBlock) -> String {
 
     let rendered = match &output.content {
         JsonValue::String(s) => s.clone(),
-        other => serde_json::to_string(other).unwrap_or_default(),
+        other => match serde_json::to_string(other) {
+            Ok(serialized) => serialized,
+            Err(err) => {
+                warn!(
+                    tool_name = %block.name,
+                    tool_call_id = %block.call_id,
+                    "Failed to serialize tool output content: {}",
+                    err
+                );
+                format!("[failed to serialize tool output: {err}]")
+            }
+        },
     };
 
     let rendered = rendered.trim().to_string();

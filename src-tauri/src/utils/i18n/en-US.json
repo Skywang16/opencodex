@@ -94,6 +94,7 @@
     "too_many_active_tasks_global": "At most 5 agent tasks can run concurrently in the app",
     "execute_tree_failed": "Failed to execute task tree",
     "list_failed": "Failed to list tasks",
+    "list_skills_failed": "Failed to list skills",
     "pause_failed": "Failed to pause task",
     "switch_failed": "Failed to switch agent",
     "terminal_manager_not_initialized": "Agent terminal not ready",
@@ -192,7 +193,8 @@
     "get_active_context_failed": "Failed to get active terminal context",
     "set_active_pane_failed": "Failed to set active pane",
     "clear_active_pane_failed": "Failed to clear active pane",
-    "pane_not_found": "Terminal pane not found"
+    "pane_not_found": "Terminal pane not found",
+    "cwd_unavailable": "Terminal working directory is unavailable"
   },
   "window": {
     "get_current_directory_failed": "Failed to get current directory",

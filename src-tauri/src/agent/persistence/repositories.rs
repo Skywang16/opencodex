@@ -8,7 +8,8 @@ use crate::agent::types::{Block, Message, MessageRole, MessageStatus, TokenUsage
 use crate::storage::database::DatabaseManager;
 
 use super::models::{
-    build_session, build_tool_execution, build_workspace, Session, ToolExecution, Workspace,
+    build_agent_node, build_run, build_session, build_tool_execution, build_workspace, AgentNode,
+    AgentNodeRole, Run, RunStatus, Session, ToolExecution, Workspace,
 };
 use super::{
     bool_to_sql, now_timestamp, opt_datetime_to_timestamp, opt_timestamp_to_datetime,
@@ -38,13 +39,228 @@ impl WorkspaceRepository {
         .fetch_optional(self.pool())
         .await?;
 
-        Ok(row.map(|r| build_workspace(&r)))
+        row.map(|r| build_workspace(&r)).transpose()
     }
 }
 
 #[derive(Debug)]
 pub struct SessionRepository {
     database: Arc<DatabaseManager>,
+}
+
+#[derive(Debug)]
+pub struct RunRepository {
+    database: Arc<DatabaseManager>,
+}
+
+pub struct CreateRunParams<'a> {
+    pub session_id: i64,
+    pub status: RunStatus,
+    pub summary: Option<&'a str>,
+}
+
+impl RunRepository {
+    pub fn new(database: Arc<DatabaseManager>) -> Self {
+        Self { database }
+    }
+
+    fn pool(&self) -> &sqlx::SqlitePool {
+        self.database.pool()
+    }
+
+    pub async fn get(&self, id: i64) -> AgentResult<Option<Run>> {
+        let row = sqlx::query("SELECT * FROM runs WHERE id = ?")
+            .bind(id)
+            .fetch_optional(self.pool())
+            .await?;
+        row.map(|r| build_run(&r)).transpose()
+    }
+
+    pub async fn create(&self, params: CreateRunParams<'_>) -> AgentResult<Run> {
+        let ts = now_timestamp();
+        let result: SqliteQueryResult = sqlx::query(
+            "INSERT INTO runs (session_id, status, summary, created_at, started_at, finished_at)
+             VALUES (?, ?, ?, ?, ?, NULL)",
+        )
+        .bind(params.session_id)
+        .bind(params.status.as_str())
+        .bind(params.summary)
+        .bind(ts)
+        .bind(if matches!(params.status, RunStatus::Running) {
+            Some(ts)
+        } else {
+            None
+        })
+        .execute(self.pool())
+        .await?;
+
+        self.get(result.last_insert_rowid())
+            .await?
+            .ok_or_else(|| AgentError::Internal("Failed to create run".to_string()))
+    }
+
+    pub async fn update_status(&self, id: i64, status: RunStatus) -> AgentResult<()> {
+        let ts = now_timestamp();
+        let finished_at = if matches!(
+            status,
+            RunStatus::Completed | RunStatus::Error | RunStatus::Cancelled
+        ) {
+            Some(ts)
+        } else {
+            None
+        };
+        sqlx::query(
+            "UPDATE runs
+             SET status = ?, started_at = COALESCE(started_at, ?), finished_at = COALESCE(?, finished_at)
+             WHERE id = ?",
+        )
+        .bind(status.as_str())
+        .bind(if matches!(status, RunStatus::Running) {
+            Some(ts)
+        } else {
+            None
+        })
+        .bind(finished_at)
+        .bind(id)
+        .execute(self.pool())
+        .await?;
+        Ok(())
+    }
+
+    pub async fn set_root_node_id(&self, id: i64, root_node_id: i64) -> AgentResult<()> {
+        sqlx::query("UPDATE runs SET root_node_id = ? WHERE id = ?")
+            .bind(root_node_id)
+            .bind(id)
+            .execute(self.pool())
+            .await?;
+        Ok(())
+    }
+
+    pub async fn list_by_session(&self, session_id: i64) -> AgentResult<Vec<Run>> {
+        let rows = sqlx::query(
+            "SELECT * FROM runs WHERE session_id = ? ORDER BY created_at DESC, id DESC",
+        )
+        .bind(session_id)
+        .fetch_all(self.pool())
+        .await?;
+        rows.into_iter().map(|row| build_run(&row)).collect()
+    }
+}
+
+#[derive(Debug)]
+pub struct AgentNodeRepository {
+    database: Arc<DatabaseManager>,
+}
+
+pub struct CreateAgentNodeParams<'a> {
+    pub run_id: i64,
+    pub parent_node_id: Option<i64>,
+    pub backing_session_id: Option<i64>,
+    pub trigger_tool_call_id: Option<&'a str>,
+    pub role: AgentNodeRole,
+    pub profile: &'a str,
+    pub title: &'a str,
+    pub status: RunStatus,
+    pub worktree_path: Option<&'a str>,
+    pub model_id: Option<&'a str>,
+}
+
+impl AgentNodeRepository {
+    pub fn new(database: Arc<DatabaseManager>) -> Self {
+        Self { database }
+    }
+
+    fn pool(&self) -> &sqlx::SqlitePool {
+        self.database.pool()
+    }
+
+    pub async fn get(&self, id: i64) -> AgentResult<Option<AgentNode>> {
+        let row = sqlx::query("SELECT * FROM agent_nodes WHERE id = ?")
+            .bind(id)
+            .fetch_optional(self.pool())
+            .await?;
+        row.map(|r| build_agent_node(&r)).transpose()
+    }
+
+    pub async fn create(&self, params: CreateAgentNodeParams<'_>) -> AgentResult<AgentNode> {
+        let ts = now_timestamp();
+        let result: SqliteQueryResult = sqlx::query(
+            "INSERT INTO agent_nodes (
+                run_id, parent_node_id, backing_session_id, trigger_tool_call_id,
+                role, profile, title, status, worktree_path, model_id,
+                created_at, started_at, finished_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+        )
+        .bind(params.run_id)
+        .bind(params.parent_node_id)
+        .bind(params.backing_session_id)
+        .bind(params.trigger_tool_call_id)
+        .bind(params.role.as_str())
+        .bind(params.profile)
+        .bind(params.title)
+        .bind(params.status.as_str())
+        .bind(params.worktree_path)
+        .bind(params.model_id)
+        .bind(ts)
+        .bind(if matches!(params.status, RunStatus::Running) {
+            Some(ts)
+        } else {
+            None
+        })
+        .execute(self.pool())
+        .await?;
+
+        self.get(result.last_insert_rowid())
+            .await?
+            .ok_or_else(|| AgentError::Internal("Failed to create agent node".to_string()))
+    }
+
+    pub async fn update_status(&self, id: i64, status: RunStatus) -> AgentResult<()> {
+        let ts = now_timestamp();
+        let finished_at = if matches!(
+            status,
+            RunStatus::Completed | RunStatus::Error | RunStatus::Cancelled
+        ) {
+            Some(ts)
+        } else {
+            None
+        };
+        sqlx::query(
+            "UPDATE agent_nodes
+             SET status = ?, started_at = COALESCE(started_at, ?), finished_at = COALESCE(?, finished_at)
+             WHERE id = ?",
+        )
+        .bind(status.as_str())
+        .bind(if matches!(status, RunStatus::Running) {
+            Some(ts)
+        } else {
+            None
+        })
+        .bind(finished_at)
+        .bind(id)
+        .execute(self.pool())
+        .await?;
+        Ok(())
+    }
+
+    pub async fn update_worktree_path(&self, id: i64, worktree_path: &str) -> AgentResult<()> {
+        sqlx::query("UPDATE agent_nodes SET worktree_path = ? WHERE id = ?")
+            .bind(worktree_path)
+            .bind(id)
+            .execute(self.pool())
+            .await?;
+        Ok(())
+    }
+
+    pub async fn list_by_run(&self, run_id: i64) -> AgentResult<Vec<AgentNode>> {
+        let rows = sqlx::query(
+            "SELECT * FROM agent_nodes WHERE run_id = ? ORDER BY created_at ASC, id ASC",
+        )
+        .bind(run_id)
+        .fetch_all(self.pool())
+        .await?;
+        rows.into_iter().map(|row| build_agent_node(&row)).collect()
+    }
 }
 
 impl SessionRepository {
@@ -149,6 +365,36 @@ impl SessionRepository {
         Ok(())
     }
 
+    pub async fn set_worktree_path(&self, id: i64, worktree_path: &str) -> AgentResult<()> {
+        let ts = now_timestamp();
+        sqlx::query("UPDATE sessions SET worktree_path = ?, updated_at = ? WHERE id = ?")
+            .bind(worktree_path)
+            .bind(ts)
+            .bind(id)
+            .execute(self.pool())
+            .await?;
+        Ok(())
+    }
+
+    pub async fn update_model_selection(
+        &self,
+        id: i64,
+        model_id: &str,
+        provider_id: Option<&str>,
+    ) -> AgentResult<()> {
+        let ts = now_timestamp();
+        sqlx::query(
+            "UPDATE sessions SET model_id = ?, provider_id = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(model_id)
+        .bind(provider_id)
+        .bind(ts)
+        .bind(id)
+        .execute(self.pool())
+        .await?;
+        Ok(())
+    }
+
     pub async fn list_children(&self, parent_id: i64) -> AgentResult<Vec<Session>> {
         let rows = sqlx::query("SELECT * FROM sessions WHERE parent_id = ? ORDER BY id ASC")
             .bind(parent_id)
@@ -171,6 +417,19 @@ impl SessionRepository {
 #[derive(Debug)]
 pub struct MessageRepository {
     database: Arc<DatabaseManager>,
+}
+
+pub struct CreateMessageParams<'a> {
+    pub session_id: i64,
+    pub role: MessageRole,
+    pub status: MessageStatus,
+    pub blocks: Vec<Block>,
+    pub is_summary: bool,
+    pub is_internal: bool,
+    pub agent_type: &'a str,
+    pub parent_message_id: Option<i64>,
+    pub model_id: Option<&'a str>,
+    pub provider_id: Option<&'a str>,
 }
 
 impl MessageRepository {
@@ -257,19 +516,19 @@ impl MessageRepository {
         Ok(messages)
     }
 
-    pub async fn create(
-        &self,
-        session_id: i64,
-        role: MessageRole,
-        status: MessageStatus,
-        blocks: Vec<Block>,
-        is_summary: bool,
-        is_internal: bool,
-        agent_type: &str,
-        parent_message_id: Option<i64>,
-        model_id: Option<&str>,
-        provider_id: Option<&str>,
-    ) -> AgentResult<Message> {
+    pub async fn create(&self, params: CreateMessageParams<'_>) -> AgentResult<Message> {
+        let CreateMessageParams {
+            session_id,
+            role,
+            status,
+            blocks,
+            is_summary,
+            is_internal,
+            agent_type,
+            parent_message_id,
+            model_id,
+            provider_id,
+        } = params;
         let ts = now_timestamp();
         let blocks_json = serde_json::to_string(&blocks).map_err(|e| {
             AgentError::Internal(format!("Failed to serialize message blocks: {e}"))

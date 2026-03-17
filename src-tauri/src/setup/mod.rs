@@ -20,6 +20,31 @@ use tauri::{Emitter, Manager};
 use tracing::warn;
 use tracing_subscriber::{self, EnvFilter};
 
+fn resolve_app_data_dir() -> SetupResult<std::path::PathBuf> {
+    use std::env;
+
+    match env::var("OPENCODEX_DATA_DIR") {
+        Ok(dir) => {
+            let trimmed = dir.trim();
+            if trimmed.is_empty() {
+                return Err(SetupError::Environment(
+                    "OPENCODEX_DATA_DIR is set but empty".to_string(),
+                ));
+            }
+            Ok(std::path::PathBuf::from(trimmed))
+        }
+        Err(env::VarError::NotPresent) => {
+            let data_dir = dirs::data_dir().ok_or_else(|| {
+                SetupError::Environment("system data_dir unavailable".to_string())
+            })?;
+            Ok(data_dir.join("OpenCodex"))
+        }
+        Err(err) => Err(SetupError::Environment(format!(
+            "Failed to read OPENCODEX_DATA_DIR: {err}"
+        ))),
+    }
+}
+
 pub fn init_logging() {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         #[cfg(debug_assertions)]
@@ -59,7 +84,9 @@ pub fn initialize_app_states<R: tauri::Runtime>(app: &tauri::App<R>) -> SetupRes
 
     // Ensure config.json exists before ConfigManager initialization (no migration: only write default template if missing)
     tauri::async_runtime::block_on(async {
-        let _ = copy_config_from_resources(app.handle()).await;
+        if let Err(err) = copy_config_from_resources(app.handle()).await {
+            warn!("Failed to copy default config from resources: {}", err);
+        }
     });
 
     let config_manager = Arc::new(tauri::async_runtime::block_on(async {
@@ -76,18 +103,13 @@ pub fn initialize_app_states<R: tauri::Runtime>(app: &tauri::App<R>) -> SetupRes
     app.manage(Arc::new(SettingsManager::new()?));
     // Initialize MCP Registry (cache MCP clients by workspace)
     app.manage(Arc::new(crate::agent::mcp::McpRegistry::default()));
+    app.manage(Arc::new(crate::lsp::LspManager::new()));
 
     // Initialize DatabaseManager
     let database_manager = {
         use crate::storage::{DatabaseManager, StoragePaths};
-        use std::env;
 
-        let app_dir = if let Ok(dir) = env::var("OPENCODEX_DATA_DIR") {
-            std::path::PathBuf::from(dir)
-        } else {
-            let data_dir = dirs::data_dir().ok_or("Failed to get system data directory")?;
-            data_dir.join("OpenCodex")
-        };
+        let app_dir = resolve_app_data_dir()?;
 
         let paths = StoragePaths::new(app_dir)?;
         let options = crate::storage::DatabaseOptions::default();
@@ -106,7 +128,9 @@ pub fn initialize_app_states<R: tauri::Runtime>(app: &tauri::App<R>) -> SetupRes
 
     // Copy theme files before ThemeManager initialization
     tauri::async_runtime::block_on(async {
-        let _ = copy_themes_from_resources(app.handle()).await;
+        if let Err(err) = copy_themes_from_resources(app.handle()).await {
+            warn!("Failed to copy themes from resources: {}", err);
+        }
     });
 
     let theme_service = tauri::async_runtime::block_on(async {
@@ -131,7 +155,7 @@ pub fn initialize_app_states<R: tauri::Runtime>(app: &tauri::App<R>) -> SetupRes
     // Initialize global Mux
     let global_mux =
         crate::mux::singleton::init_mux_with_shell_integration(shell_integration.clone())
-            .expect("Failed to initialize global TerminalMux");
+            .map_err(|err| SetupError::TerminalState(err.to_string()))?;
 
     let terminal_context_state = {
         let registry = Arc::new(ActiveTerminalContextRegistry::new());
@@ -271,16 +295,20 @@ pub fn initialize_app_states<R: tauri::Runtime>(app: &tauri::App<R>) -> SetupRes
             .state::<Arc<crate::agent::mcp::McpRegistry>>()
             .inner()
             .clone();
+        let lsp_manager = app.state::<Arc<crate::lsp::LspManager>>().inner().clone();
 
         let executor = Arc::new(crate::agent::core::TaskExecutor::with_checkpoint_service(
-            Arc::clone(&database_manager),
-            Arc::clone(&cache),
-            Arc::clone(&agent_persistence),
-            settings_manager,
-            mcp_registry,
-            Arc::clone(&checkpoint_service),
-            std::sync::Arc::clone(&workspace_changes),
-            vector_search_engine,
+            crate::agent::core::executor::TaskExecutorServices {
+                database: Arc::clone(&database_manager),
+                cache: Arc::clone(&cache),
+                agent_persistence: Arc::clone(&agent_persistence),
+                settings_manager,
+                mcp_registry,
+                lsp_manager,
+                checkpoint_service: Some(Arc::clone(&checkpoint_service)),
+                workspace_changes: std::sync::Arc::clone(&workspace_changes),
+                vector_search_engine,
+            },
         ));
 
         crate::agent::core::commands::TaskExecutorState::new(executor)
@@ -310,7 +338,7 @@ pub fn initialize_app_states<R: tauri::Runtime>(app: &tauri::App<R>) -> SetupRes
 /// Setup application events and listeners
 pub fn setup_app_events<R: tauri::Runtime>(app: &tauri::App<R>) {
     setup_unified_terminal_events(app.handle().clone());
-    crate::agent::terminal::AgentTerminalManager::init(app.handle().clone());
+    crate::agent::terminal::AgentTerminalManager::init();
 
     // Start system theme listener
     start_system_theme_listener(app.handle().clone());
@@ -369,7 +397,9 @@ pub fn setup_deep_links<R: tauri::Runtime>(app: &tauri::App<R>) {
 
                             // Send to frontend
                             if let Some(window) = app_handle.get_webview_window("main") {
-                                let _ = window.emit("file-dropped", path_str);
+                                if let Err(err) = window.emit("file-dropped", path_str) {
+                                    warn!("Failed to emit deep-link file event: {}", err);
+                                }
                             }
                         }
                         Err(e) => {
@@ -377,11 +407,21 @@ pub fn setup_deep_links<R: tauri::Runtime>(app: &tauri::App<R>) {
 
                             // Fallback: manually decode URL path
                             let file_path = url.path();
-                            if let Ok(decoded_path) = urlencoding::decode(file_path) {
-                                let path_str = decoded_path.to_string();
+                            match urlencoding::decode(file_path) {
+                                Ok(decoded_path) => {
+                                    let path_str = decoded_path.to_string();
 
-                                if let Some(window) = app_handle.get_webview_window("main") {
-                                    let _ = window.emit("file-dropped", path_str);
+                                    if let Some(window) = app_handle.get_webview_window("main") {
+                                        if let Err(err) = window.emit("file-dropped", path_str) {
+                                            warn!(
+                                                "Failed to emit fallback deep-link file event: {}",
+                                                err
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    warn!("Failed to decode fallback deep-link path: {}", err);
                                 }
                             }
                         }
@@ -407,7 +447,9 @@ pub fn handle_startup_args<R: tauri::Runtime>(app: &tauri::App<R>) {
         let file_path = &env.args_os[1];
         if let Some(window) = app.get_webview_window("main") {
             let path_str = file_path.to_string_lossy().to_string();
-            let _ = window.emit("startup-file", path_str);
+            if let Err(err) = window.emit("startup-file", path_str) {
+                warn!("Failed to emit startup file event: {}", err);
+            }
         }
     }
 }
@@ -419,19 +461,30 @@ pub fn ensure_main_window_visible<R: tauri::Runtime>(app: &tauri::App<R>) {
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-            if let Ok(position) = window_clone.outer_position() {
-                let x = position.x;
-                let y = position.y;
+            match window_clone.outer_position() {
+                Ok(position) => {
+                    let x = position.x;
+                    let y = position.y;
 
-                if x < -500 || y < -500 || x > 5000 || y > 5000 {
-                    let _ = window_clone.set_position(tauri::Position::Logical(
-                        tauri::LogicalPosition { x: 100.0, y: 100.0 },
-                    ));
+                    if x < -500 || y < -500 || x > 5000 || y > 5000 {
+                        if let Err(err) = window_clone.set_position(tauri::Position::Logical(
+                            tauri::LogicalPosition { x: 100.0, y: 100.0 },
+                        )) {
+                            warn!("Failed to reset off-screen window position: {}", err);
+                        }
+                    }
+                }
+                Err(err) => {
+                    warn!("Failed to inspect main window position: {}", err);
                 }
             }
 
-            let _ = window_clone.show();
-            let _ = window_clone.set_focus();
+            if let Err(err) = window_clone.show() {
+                warn!("Failed to show main window: {}", err);
+            }
+            if let Err(err) = window_clone.set_focus() {
+                warn!("Failed to focus main window: {}", err);
+            }
         });
     }
 }
@@ -460,7 +513,14 @@ fn setup_unified_terminal_events<R: tauri::Runtime>(app_handle: tauri::AppHandle
         shell_event_receiver,
     ) {
         Ok(handler) => {
-            let _ = app_handle.manage(handler);
+            if app_handle
+                .try_state::<crate::terminal::event_handler::TerminalEventHandler>()
+                .is_none()
+            {
+                app_handle.manage(handler);
+            } else {
+                tracing::warn!("Terminal event handler state was already registered");
+            }
         }
         Err(e) => {
             tracing::error!("Failed to start unified terminal event handler: {}", e);
@@ -509,16 +569,27 @@ fn get_fallback_theme_list() -> Vec<String> {
     ]
 }
 
+fn resolve_debug_resource_root() -> Result<std::path::PathBuf, std::io::Error> {
+    Ok(std::env::current_dir()?.join("..").join("config"))
+}
+
 /// Dynamically get all theme files from resource directory
 async fn get_theme_files_from_resources<R: tauri::Runtime>(
     app_handle: &tauri::AppHandle<R>,
 ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    use std::path::PathBuf;
     use tauri::path::BaseDirectory;
 
     let themes_resource_path = if cfg!(debug_assertions) {
-        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        current_dir.join("..").join("config").join("themes")
+        match resolve_debug_resource_root() {
+            Ok(resource_root) => resource_root.join("themes"),
+            Err(err) => {
+                warn!(
+                    "Failed to resolve debug theme resource root: {}. Falling back to bundled theme list.",
+                    err
+                );
+                return Ok(get_fallback_theme_list());
+            }
+        }
     } else {
         app_handle
             .path()
@@ -549,7 +620,14 @@ async fn get_theme_files_from_resources<R: tauri::Runtime>(
                 theme_files
             })
         }
-        Err(_) => Ok(get_fallback_theme_list()),
+        Err(err) => {
+            warn!(
+                "Failed to read theme resource directory '{}': {}. Falling back to bundled theme list.",
+                themes_resource_path.display(),
+                err
+            );
+            Ok(get_fallback_theme_list())
+        }
     }
 }
 
@@ -574,13 +652,10 @@ async fn copy_themes_from_resources<R: tauri::Runtime>(
         let dest_path = themes_dir.join(theme_file);
 
         let source_path = if cfg!(debug_assertions) {
-            let current_dir =
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            current_dir
-                .join("..")
-                .join("config")
-                .join("themes")
-                .join(theme_file)
+            let resource_root = resolve_debug_resource_root().map_err(|err| {
+                format!("Failed to resolve debug theme resource root for '{theme_file}': {err}")
+            })?;
+            resource_root.join("themes").join(theme_file)
         } else {
             app_handle.path().resolve(
                 format!("_up_/config/themes/{theme_file}"),
@@ -588,8 +663,25 @@ async fn copy_themes_from_resources<R: tauri::Runtime>(
             )?
         };
 
-        if let Ok(content) = std::fs::read_to_string(&source_path) {
-            let _ = std::fs::write(&dest_path, content);
+        match std::fs::read_to_string(&source_path) {
+            Ok(content) => {
+                if let Err(err) = std::fs::write(&dest_path, content) {
+                    warn!(
+                        "Failed to write theme '{}' to '{}': {}",
+                        theme_file,
+                        dest_path.display(),
+                        err
+                    );
+                }
+            }
+            Err(err) => {
+                warn!(
+                    "Failed to read theme resource '{}' from '{}': {}",
+                    theme_file,
+                    source_path.display(),
+                    err
+                );
+            }
         }
     }
 
@@ -599,16 +691,11 @@ async fn copy_themes_from_resources<R: tauri::Runtime>(
 async fn copy_config_from_resources<R: tauri::Runtime>(
     app_handle: &tauri::AppHandle<R>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use std::env;
     use std::fs;
     use tauri::path::BaseDirectory;
 
-    let app_dir = if let Ok(dir) = env::var("OPENCODEX_DATA_DIR") {
-        std::path::PathBuf::from(dir)
-    } else {
-        let data_dir = dirs::data_dir().ok_or("system data_dir unavailable")?;
-        data_dir.join("OpenCodex")
-    };
+    let app_dir = resolve_app_data_dir()
+        .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> { Box::new(err) })?;
 
     fs::create_dir_all(&app_dir)?;
 
@@ -618,23 +705,43 @@ async fn copy_config_from_resources<R: tauri::Runtime>(
     }
 
     let source_path = if cfg!(debug_assertions) {
-        let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        current_dir.join("..").join("config").join("config.json")
+        match resolve_debug_resource_root() {
+            Ok(resource_root) => resource_root.join("config.json"),
+            Err(err) => {
+                warn!(
+                    "Failed to resolve debug config resource root: {}. Falling back to compiled defaults.",
+                    err
+                );
+                let default_config = crate::config::defaults::create_default_config();
+                let json = serde_json::to_string_pretty(&default_config)?;
+                std::fs::write(&dest_path, format!("{json}\n"))?;
+                return Ok(());
+            }
+        }
     } else {
         app_handle
             .path()
             .resolve("_up_/config/config.json", BaseDirectory::Resource)?
     };
 
-    if let Ok(content) = std::fs::read_to_string(&source_path) {
-        let _ = std::fs::write(&dest_path, content);
-        return Ok(());
+    match std::fs::read_to_string(&source_path) {
+        Ok(content) => {
+            std::fs::write(&dest_path, content)?;
+            return Ok(());
+        }
+        Err(err) => {
+            warn!(
+                "Failed to read config template from '{}': {}. Falling back to compiled defaults.",
+                source_path.display(),
+                err
+            );
+        }
     }
 
     // Fallback: serialize the compiled defaults.
     let default_config = crate::config::defaults::create_default_config();
     let json = serde_json::to_string_pretty(&default_config)?;
-    let _ = std::fs::write(&dest_path, format!("{json}\n"));
+    std::fs::write(&dest_path, format!("{json}\n"))?;
     Ok(())
 }
 

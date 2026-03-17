@@ -102,7 +102,10 @@ async fn get_execution_mode(registry: &ToolRegistry, name: &str) -> ExecutionMod
     registry
         .get_tool_metadata(name)
         .await
-        .map(|m| m.category.execution_mode())
+        .map(|m| {
+            m.execution_mode
+                .unwrap_or_else(|| m.category.execution_mode())
+        })
         .unwrap_or(ExecutionMode::Sequential)
 }
 
@@ -195,6 +198,10 @@ mod tests {
         );
         assert_eq!(
             ToolCategory::Execution.execution_mode(),
+            ExecutionMode::Sequential
+        );
+        assert_eq!(
+            ToolCategory::Delegation.execution_mode(),
             ExecutionMode::Sequential
         );
     }

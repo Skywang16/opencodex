@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tauri::Emitter;
-use tauri::{AppHandle, Runtime};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
@@ -19,37 +17,28 @@ struct AgentTerminalEntry {
     notify: Arc<Notify>,
 }
 
-type EventEmitter = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
-
 pub struct AgentTerminalManager {
     terminals: RwLock<HashMap<TerminalId, AgentTerminalEntry>>,
     pane_index: RwLock<HashMap<u32, TerminalId>>,
     pending_completed: RwLock<HashMap<i64, Vec<TerminalId>>>,
-    session_index: RwLock<HashMap<i64, TerminalId>>,
     mux: Arc<TerminalMux>,
-    emitter: EventEmitter,
 }
 
 static AGENT_TERMINAL_MANAGER: OnceLock<Arc<AgentTerminalManager>> = OnceLock::new();
 
 impl AgentTerminalManager {
-    pub fn init<R: Runtime>(app_handle: AppHandle<R>) -> Arc<Self> {
+    pub fn init() -> Arc<Self> {
         if let Some(manager) = AGENT_TERMINAL_MANAGER.get() {
             return Arc::clone(manager);
         }
 
         let mux = get_mux();
-        let emitter: EventEmitter = Arc::new(move |event, payload| {
-            let _ = app_handle.emit(event, payload);
-        });
 
         let manager = Arc::new(Self {
             terminals: RwLock::new(HashMap::new()),
             pane_index: RwLock::new(HashMap::new()),
             pending_completed: RwLock::new(HashMap::new()),
-            session_index: RwLock::new(HashMap::new()),
             mux: Arc::clone(&mux),
-            emitter,
         });
 
         if AGENT_TERMINAL_MANAGER.set(Arc::clone(&manager)).is_err() {
@@ -72,36 +61,9 @@ impl AgentTerminalManager {
         cwd: Option<String>,
         label: Option<String>,
     ) -> Result<AgentTerminal, String> {
-        let terminal_id = {
-            let session_index = self
-                .session_index
-                .read()
-                .map_err(|_| "session index poisoned".to_string())?;
-            session_index
-                .get(&session_id)
-                .cloned()
-                .unwrap_or_else(|| Uuid::new_v4().to_string())
-        };
-
-        let existing_pane_id = {
-            let terminals = self
-                .terminals
-                .read()
-                .map_err(|_| "terminal map poisoned".to_string())?;
-            terminals.get(&terminal_id).map(|e| e.terminal.pane_id)
-        };
-
+        let terminal_id = Uuid::new_v4().to_string();
         let notify = Arc::new(Notify::new());
-
-        let pane_id = if let Some(pane_id) = existing_pane_id.map(PaneId::new) {
-            if self.mux.pane_exists(pane_id) {
-                pane_id
-            } else {
-                self.create_agent_pane(cwd.as_deref()).await?
-            }
-        } else {
-            self.create_agent_pane(cwd.as_deref()).await?
-        };
+        let pane_id = self.create_agent_pane(cwd.as_deref()).await?;
 
         let now_ms_value = now_ms();
 
@@ -116,66 +78,40 @@ impl AgentTerminalManager {
                 command.clone()
             };
 
-        let (is_new_terminal, previous_pane_id, terminal) = {
+        let terminal = {
             let mut terminals = self
                 .terminals
                 .write()
                 .map_err(|_| "terminal map poisoned".to_string())?;
 
-            let is_new_terminal = !terminals.contains_key(&terminal_id);
-            let entry =
-                terminals
-                    .entry(terminal_id.clone())
-                    .or_insert_with(|| AgentTerminalEntry {
-                        terminal: AgentTerminal {
-                            id: terminal_id.clone(),
-                            command: command.clone(),
-                            pane_id: pane_id.as_u32(),
-                            mode: mode.clone(),
-                            status: TerminalStatus::Initializing,
-                            session_id,
-                            created_at_ms: now_ms_value,
-                            completed_at_ms: None,
-                            label: label.clone(),
-                        },
-                        notify: Arc::clone(&notify),
-                    });
+            let terminal = AgentTerminal {
+                id: terminal_id.clone(),
+                command: command.clone(),
+                pane_id: pane_id.as_u32(),
+                mode: mode.clone(),
+                status: TerminalStatus::Running,
+                session_id,
+                created_at_ms: now_ms_value,
+                completed_at_ms: None,
+                label: label.clone(),
+            };
 
-            if matches!(entry.terminal.status, TerminalStatus::Running) {
-                return Err("Agent terminal is busy (a command is still running).".to_string());
-            }
+            terminals.insert(
+                terminal_id.clone(),
+                AgentTerminalEntry {
+                    terminal: terminal.clone(),
+                    notify: Arc::clone(&notify),
+                },
+            );
 
-            let previous_pane_id = entry.terminal.pane_id;
-
-            entry.terminal.command = command.clone();
-            entry.terminal.pane_id = pane_id.as_u32();
-            entry.terminal.mode = mode.clone();
-            entry.terminal.status = TerminalStatus::Running;
-            entry.terminal.session_id = session_id;
-            entry.terminal.created_at_ms = now_ms_value;
-            entry.terminal.completed_at_ms = None;
-            entry.terminal.label = label.clone();
-            entry.notify = Arc::clone(&notify);
-
-            (is_new_terminal, previous_pane_id, entry.terminal.clone())
+            terminal
         };
-
-        {
-            let mut session_index = self
-                .session_index
-                .write()
-                .map_err(|_| "session index poisoned".to_string())?;
-            session_index.insert(session_id, terminal_id.clone());
-        }
 
         {
             let mut pane_index = self
                 .pane_index
                 .write()
                 .map_err(|_| "pane index poisoned".to_string())?;
-            if previous_pane_id != pane_id.as_u32() {
-                pane_index.remove(&previous_pane_id);
-            }
             pane_index.insert(pane_id.as_u32(), terminal_id.clone());
         }
 
@@ -191,27 +127,9 @@ impl AgentTerminalManager {
                 };
                 entry.terminal.completed_at_ms = Some(now_ms());
                 entry.notify.notify_waiters();
-
-                (self.emitter)(
-                    "agent_terminal_updated",
-                    serde_json::to_value(&entry.terminal).unwrap_or_else(|_| serde_json::json!({})),
-                );
-                (self.emitter)(
-                    "agent_terminal_completed",
-                    serde_json::to_value(&entry.terminal).unwrap_or_else(|_| serde_json::json!({})),
-                );
             }
             return Err(format!("write command failed: {err}"));
         }
-
-        (self.emitter)(
-            if is_new_terminal {
-                "agent_terminal_created"
-            } else {
-                "agent_terminal_updated"
-            },
-            serde_json::to_value(&terminal).unwrap_or_else(|_| serde_json::json!({})),
-        );
 
         Ok(terminal)
     }
@@ -219,16 +137,18 @@ impl AgentTerminalManager {
     pub fn list_terminals(&self, session_id: Option<i64>) -> Vec<AgentTerminal> {
         let terminals = match self.terminals.read() {
             Ok(guard) => guard,
-            Err(_) => return Vec::new(),
+            Err(err) => {
+                tracing::error!("terminal map poisoned while listing terminals: {err}");
+                return Vec::new();
+            }
         };
 
         let mut list: Vec<AgentTerminal> = terminals
             .values()
             .map(|entry| entry.terminal.clone())
-            .filter(|terminal| {
-                session_id
-                    .map(|id| terminal.session_id == id)
-                    .unwrap_or(true)
+            .filter(|terminal| match session_id {
+                Some(id) => terminal.session_id == id,
+                None => true,
             })
             .collect();
 
@@ -237,10 +157,33 @@ impl AgentTerminalManager {
     }
 
     pub fn get_terminal(&self, terminal_id: &str) -> Option<AgentTerminal> {
-        let terminals = self.terminals.read().ok()?;
+        let terminals = match self.terminals.read() {
+            Ok(guard) => guard,
+            Err(err) => {
+                tracing::error!(
+                    "terminal map poisoned while reading terminal {terminal_id}: {err}"
+                );
+                return None;
+            }
+        };
         terminals
             .get(terminal_id)
             .map(|entry| entry.terminal.clone())
+    }
+
+    pub fn get_terminal_by_pane_id(&self, pane_id: u32) -> Option<AgentTerminal> {
+        let terminal_id = {
+            let pane_index = match self.pane_index.read() {
+                Ok(guard) => guard,
+                Err(err) => {
+                    tracing::error!("pane index poisoned while reading pane {pane_id}: {err}");
+                    return None;
+                }
+            };
+            pane_index.get(&pane_id).cloned()?
+        };
+
+        self.get_terminal(&terminal_id)
     }
 
     pub fn get_terminal_status(&self, terminal_id: &str) -> Option<TerminalStatus> {
@@ -295,9 +238,9 @@ impl AgentTerminalManager {
             .get_terminal(terminal_id)
             .ok_or_else(|| "terminal not found".to_string())?;
 
-        Ok(TerminalScrollback::global()
+        TerminalScrollback::global()
             .get_last_command_output(terminal.pane_id)
-            .unwrap_or_default())
+            .ok_or_else(|| "last command output is unavailable".to_string())
     }
 
     pub fn abort_terminal(&self, terminal_id: &str) -> Result<(), String> {
@@ -314,7 +257,9 @@ impl AgentTerminalManager {
         }
 
         let pane_id = PaneId::new(entry.terminal.pane_id);
-        let _ = self.mux.write_to_pane(pane_id, b"\x03");
+        self.mux
+            .write_to_pane(pane_id, b"\x03")
+            .map_err(|err| format!("failed to send interrupt to terminal: {err}"))?;
 
         entry.terminal.status = TerminalStatus::Aborted;
         entry.terminal.completed_at_ms = Some(now_ms());
@@ -322,20 +267,11 @@ impl AgentTerminalManager {
         let mut pending = self
             .pending_completed
             .write()
-            .unwrap_or_else(|e| e.into_inner());
+            .map_err(|_| "pending completion queue poisoned".to_string())?;
         pending
             .entry(entry.terminal.session_id)
             .or_default()
             .push(entry.terminal.id.clone());
-
-        (self.emitter)(
-            "agent_terminal_updated",
-            serde_json::to_value(&entry.terminal).unwrap_or_else(|_| serde_json::json!({})),
-        );
-        (self.emitter)(
-            "agent_terminal_completed",
-            serde_json::to_value(&entry.terminal).unwrap_or_else(|_| serde_json::json!({})),
-        );
 
         entry.notify.notify_waiters();
         Ok(())
@@ -354,7 +290,9 @@ impl AgentTerminalManager {
         };
 
         let pane_id = PaneId::new(terminal.pane_id);
-        let _ = self.mux.remove_pane(pane_id);
+        self.mux
+            .remove_pane(pane_id)
+            .map_err(|err| format!("failed to remove terminal pane: {err}"))?;
 
         {
             let mut terminals = self
@@ -362,13 +300,6 @@ impl AgentTerminalManager {
                 .write()
                 .map_err(|_| "terminal map poisoned".to_string())?;
             terminals.remove(terminal_id);
-        }
-        {
-            let mut session_index = self
-                .session_index
-                .write()
-                .map_err(|_| "session index poisoned".to_string())?;
-            session_index.retain(|_, value| value != terminal_id);
         }
         {
             let mut pane_index = self
@@ -381,7 +312,7 @@ impl AgentTerminalManager {
             let mut pending = self
                 .pending_completed
                 .write()
-                .unwrap_or_else(|e| e.into_inner());
+                .map_err(|_| "pending completion queue poisoned".to_string())?;
             if let Some(list) = pending.get_mut(&terminal.session_id) {
                 list.retain(|id| id != terminal_id);
                 if list.is_empty() {
@@ -390,11 +321,6 @@ impl AgentTerminalManager {
             }
         }
 
-        (self.emitter)(
-            "agent_terminal_removed",
-            serde_json::json!({ "terminalId": terminal_id }),
-        );
-
         Ok(())
     }
 
@@ -402,7 +328,14 @@ impl AgentTerminalManager {
         let ids = {
             let mut pending = match self.pending_completed.write() {
                 Ok(guard) => guard,
-                Err(_) => return Vec::new(),
+                Err(err) => {
+                    tracing::error!(
+                        "pending completion queue poisoned while draining session {}: {}",
+                        session_id,
+                        err
+                    );
+                    return Vec::new();
+                }
             };
             pending.remove(&session_id).unwrap_or_default()
         };
@@ -449,9 +382,10 @@ impl AgentTerminalManager {
                     TerminalStatus::Completed { exit_code } => exit_code,
                     _ => None,
                 };
-                let exit_label = exit_code
-                    .map(|code| format!("exit {code}"))
-                    .unwrap_or_else(|| "exit unknown".to_string());
+                let exit_label = match exit_code {
+                    Some(code) => format!("exit {code}"),
+                    None => "no exit code reported".to_string(),
+                };
                 overlay.push_str(&format!(
                     "- `{}`: `{}` finished ({}) - use `read_terminal` with terminalId\n",
                     term.id, term.command, exit_label
@@ -529,31 +463,29 @@ impl AgentTerminalManager {
         entry.terminal.completed_at_ms = Some(now_ms());
 
         if entry.terminal.mode == TerminalExecutionMode::Background {
-            let mut pending = self
-                .pending_completed
-                .write()
-                .unwrap_or_else(|e| e.into_inner());
-            pending
-                .entry(entry.terminal.session_id)
-                .or_default()
-                .push(terminal_id.clone());
+            match self.pending_completed.write() {
+                Ok(mut pending) => {
+                    pending
+                        .entry(entry.terminal.session_id)
+                        .or_default()
+                        .push(terminal_id.clone());
+                }
+                Err(err) => {
+                    tracing::error!(
+                        "pending completion queue poisoned while handling pane {}: {}",
+                        pane_id.as_u32(),
+                        err
+                    );
+                }
+            }
         }
-
-        (self.emitter)(
-            "agent_terminal_updated",
-            serde_json::to_value(&entry.terminal).unwrap_or_else(|_| serde_json::json!({})),
-        );
-        (self.emitter)(
-            "agent_terminal_completed",
-            serde_json::to_value(&entry.terminal).unwrap_or_else(|_| serde_json::json!({})),
-        );
 
         entry.notify.notify_waiters();
     }
 
     async fn create_agent_pane(&self, cwd: Option<&str>) -> Result<PaneId, String> {
         let size = PtySize::new(24, 80);
-        let mut shell_config = MuxShellConfig::with_default_shell();
+        let mut shell_config = MuxShellConfig::with_default_shell()?;
         shell_config.shell_info.display_name = "agent".to_string();
         shell_config.shell_info.name = "agent".to_string();
         if let Some(working_dir) = cwd.filter(|v| !v.trim().is_empty()) {
@@ -568,10 +500,13 @@ impl AgentTerminalManager {
 }
 
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_millis() as i64,
+        Err(err) => {
+            tracing::error!("system clock is before UNIX_EPOCH: {err}");
+            0
+        }
+    }
 }
 
 fn shell_escape_single_quotes(value: &str) -> String {

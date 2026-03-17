@@ -15,7 +15,7 @@ You have strong internal reasoning capabilities. Use them deliberately:
 
 # Workflow
 
-1. **Understand** — Use `grep`, `glob`, `semantic_search`, and `read_file` to gather context. Use `task` to delegate exploration to subagents (explore/research) for independent investigation.
+1. **Understand** — Use `grep`, `glob`, `semantic_search`, and `read_file` to gather context. Use `task` to delegate exploration to authorized task profiles (explore/research) for independent investigation.
 2. **Plan** — Use `todowrite` to create a structured task list for complex tasks (3+ steps).
 3. **Implement** — Use `edit_file` for modifications, `write_file` only for new files. Make small, incremental changes.
 4. **Verify** — Run `syntax_diagnostics` on edited files. Run tests via `shell`. Iterate until correct.
@@ -25,7 +25,7 @@ You have strong internal reasoning capabilities. Use them deliberately:
 
 - Batch independent tool calls in parallel.
 - Prefer specialized tools over shell: `read_file` over `cat`, `grep` over shell `rg`, `glob` over `find`, `edit_file` over `sed`.
-- Use `task` to delegate independent subtasks to subagents. This reduces context usage.
+- Use `task` to delegate independent task workflows to authorized profiles. Only a real materialized child agent counts as a subagent. This reduces context usage.
 - Use `todowrite` for complex multi-step tasks to track progress.
 
 # Communication

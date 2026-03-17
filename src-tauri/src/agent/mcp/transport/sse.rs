@@ -26,7 +26,7 @@ impl SseTransport {
         let client = Client::builder()
             .default_headers(default_headers)
             .build()
-            .map_err(|e| McpError::Protocol(format!("Failed to create HTTP client: {}", e)))?;
+            .map_err(|e| McpError::Protocol(format!("Failed to create HTTP client: {e}")))?;
 
         Ok(Self {
             client,
@@ -47,7 +47,7 @@ impl SseTransport {
             .json(&req)
             .send()
             .await
-            .map_err(|e| McpError::Protocol(format!("SSE request failed: {}", e)))?;
+            .map_err(|e| McpError::Protocol(format!("SSE request failed: {e}")))?;
 
         if !response.status().is_success() {
             return Err(McpError::Protocol(format!(
@@ -59,19 +59,25 @@ impl SseTransport {
         let resp: JsonRpcResponse = response
             .json()
             .await
-            .map_err(|e| McpError::Protocol(format!("Failed to parse SSE response: {}", e)))?;
+            .map_err(|e| McpError::Protocol(format!("Failed to parse SSE response: {e}")))?;
 
         Ok(resp)
     }
 
     pub async fn notify(&self, req: JsonRpcRequest) -> McpResult<()> {
-        let _ = self
+        let response = self
             .client
             .post(&self.url)
             .json(&req)
             .send()
             .await
-            .map_err(|e| McpError::Protocol(format!("SSE notify failed: {}", e)))?;
+            .map_err(|e| McpError::Protocol(format!("SSE notify failed: {e}")))?;
+        if !response.status().is_success() {
+            return Err(McpError::Protocol(format!(
+                "SSE notify failed with status: {}",
+                response.status()
+            )));
+        }
         Ok(())
     }
 }

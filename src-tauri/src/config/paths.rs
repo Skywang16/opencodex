@@ -64,8 +64,17 @@ impl ConfigPaths {
         let app_data_dir = app_data_dir.as_ref().to_path_buf();
 
         // Calculate and cache canonical path once
-        let canonical_app_dir =
-            fs::canonicalize(&app_data_dir).unwrap_or_else(|_| app_data_dir.clone());
+        let canonical_app_dir = match fs::canonicalize(&app_data_dir) {
+            Ok(path) => path,
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to canonicalize app data dir '{}': {}",
+                    app_data_dir.display(),
+                    err
+                );
+                app_data_dir.clone()
+            }
+        };
 
         let themes_dir = app_data_dir.join(crate::config::THEMES_DIR_NAME);
         let backups_dir = app_data_dir.join(crate::config::BACKUPS_DIR_NAME);

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::{Emitter, Runtime};
 use tokio::sync::{mpsc, RwLock};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::config::FileWatcherConfig;
 use super::events::{
@@ -30,19 +30,19 @@ struct CompiledIgnore {
 }
 
 impl CompiledIgnore {
-    fn new(workspace_root: &Path, patterns: &[String]) -> Self {
+    fn new(workspace_root: &Path, patterns: &[String]) -> Result<Self, String> {
         let mut builder = ignore::gitignore::GitignoreBuilder::new(workspace_root);
         for pattern in patterns {
-            let _ = builder.add_line(None, pattern);
+            builder
+                .add_line(None, pattern)
+                .map_err(|err| format!("Invalid ignore pattern '{pattern}': {err}"))?;
         }
 
-        let gitignore = builder.build().unwrap_or_else(|_| {
-            ignore::gitignore::GitignoreBuilder::new(workspace_root)
-                .build()
-                .expect("GitignoreBuilder must build for empty set")
-        });
+        let gitignore = builder
+            .build()
+            .map_err(|err| format!("Failed to build ignore matcher: {err}"))?;
 
-        Self { gitignore }
+        Ok(Self { gitignore })
     }
 
     fn is_ignored_abs(&self, abs_path: &Path) -> bool {
@@ -131,15 +131,23 @@ impl UnifiedFileWatcher {
             _ => None,
         };
 
-        let ignore = CompiledIgnore::new(&workspace_root, &config.ignore_patterns);
+        let ignore = CompiledIgnore::new(&workspace_root, &config.ignore_patterns)?;
         let (tx, mut rx) = mpsc::channel::<notify::Event>(CHANNEL_CAPACITY);
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
 
         let mut watcher = RecommendedWatcher::new(
-            move |res: Result<notify::Event, notify::Error>| {
-                if let Ok(event) = res {
-                    let _ = tx.try_send(event);
+            move |res: Result<notify::Event, notify::Error>| match res {
+                Ok(event) => {
+                    if let Err(err) = tx.try_send(event) {
+                        warn!(
+                            "Dropping file watcher event because channel is full: {}",
+                            err
+                        );
+                    }
+                }
+                Err(err) => {
+                    warn!("File watcher backend error: {}", err);
                 }
             },
             Config::default().with_poll_interval(Duration::from_millis(500)),
@@ -286,18 +294,22 @@ impl UnifiedFileWatcher {
 
                         if let Some(sink) = &fs_sink {
                             if !observed.is_empty() {
-                                let _ = sink.try_send(ObservedFsChangeBatch {
+                                if let Err(err) = sink.try_send(ObservedFsChangeBatch {
                                     workspace_key: Arc::clone(&workspace_key),
                                     workspace_root: workspace_root_for_task.clone(),
                                     changes: observed,
-                                });
+                                }) {
+                                    warn!("Dropping observed file changes because sink is full: {}", err);
+                                }
                             }
                         }
 
                         if !events.is_empty() {
                             seq = seq.saturating_add(1);
                             let batch = FileWatcherEventBatch { seq, events };
-                            let _ = emitter.emit("file-watcher:event", &batch);
+                            if let Err(err) = emitter.emit("file-watcher:event", &batch) {
+                                warn!("Failed to emit file watcher event batch: {}", err);
+                            }
                             last_emit_time = Some(tokio::time::Instant::now());
                         }
 
@@ -317,7 +329,9 @@ impl UnifiedFileWatcher {
         if let Some(mut state) = self.state.write().await.take() {
             state.shutdown.store(true, Ordering::SeqCst);
             for path in &state.watched_paths {
-                let _ = state.watcher.unwatch(path);
+                if let Err(err) = state.watcher.unwatch(path) {
+                    warn!("Failed to unwatch path '{}': {}", path.display(), err);
+                }
             }
         }
     }
@@ -386,30 +400,50 @@ fn classify_git_event(
 
     for path in &event.paths {
         if path.starts_with(&git_paths.git_dir) {
-            if let Ok(relative) = path.strip_prefix(&git_paths.git_dir) {
-                let rel = relative.to_string_lossy();
-                if rel == "index" {
-                    return Some(GitChangeType::Index);
+            match path.strip_prefix(&git_paths.git_dir) {
+                Ok(relative) => {
+                    let rel = relative.to_string_lossy();
+                    if rel == "index" {
+                        return Some(GitChangeType::Index);
+                    }
+                    if rel == "HEAD" {
+                        return Some(GitChangeType::Head);
+                    }
                 }
-                if rel == "HEAD" {
-                    return Some(GitChangeType::Head);
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to strip git dir prefix '{}' from '{}': {}",
+                        git_paths.git_dir.display(),
+                        path.display(),
+                        err
+                    );
                 }
             }
             continue;
         }
 
         if path.starts_with(&git_paths.common_dir) {
-            if let Ok(relative) = path.strip_prefix(&git_paths.common_dir) {
-                let rel = relative.to_string_lossy();
-                if rel.starts_with("refs/") || rel == "packed-refs" {
-                    return Some(GitChangeType::Refs);
+            match path.strip_prefix(&git_paths.common_dir) {
+                Ok(relative) => {
+                    let rel = relative.to_string_lossy();
+                    if rel.starts_with("refs/") || rel == "packed-refs" {
+                        return Some(GitChangeType::Refs);
+                    }
+                    if rel == "COMMIT_EDITMSG"
+                        || rel == "MERGE_HEAD"
+                        || rel == "REBASE_HEAD"
+                        || rel == "CHERRY_PICK_HEAD"
+                    {
+                        return Some(GitChangeType::Index);
+                    }
                 }
-                if rel == "COMMIT_EDITMSG"
-                    || rel == "MERGE_HEAD"
-                    || rel == "REBASE_HEAD"
-                    || rel == "CHERRY_PICK_HEAD"
-                {
-                    return Some(GitChangeType::Index);
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to strip common git dir prefix '{}' from '{}': {}",
+                        git_paths.common_dir.display(),
+                        path.display(),
+                        err
+                    );
                 }
             }
             continue;

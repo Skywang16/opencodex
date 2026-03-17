@@ -11,6 +11,7 @@ use super::script_generator::{ShellIntegrationConfig, ShellScriptGenerator, Shel
 use crate::events::ShellEvent;
 use crate::mux::PaneId;
 use crate::shell::error::ShellScriptResult;
+use tracing::warn;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CommandInfo {
@@ -129,32 +130,42 @@ impl ShellIntegrationManager {
         self.event_sender.subscribe()
     }
 
+    fn broadcast_event(&self, pane_id: PaneId, event: ShellEvent) {
+        if let Err(err) = self.event_sender.send((pane_id, event)) {
+            warn!(
+                "failed to broadcast shell event for pane {}: {}",
+                pane_id.as_u32(),
+                err
+            );
+        }
+    }
+
     pub fn process_output(&self, pane_id: PaneId, data: &str) {
         for sequence in self.parser.parse(data) {
             match sequence {
                 OscSequence::CurrentWorkingDirectory { path } => {
                     if let Some(event) = self.apply_cwd(pane_id, path) {
-                        let _ = self.event_sender.send((pane_id, event));
+                        self.broadcast_event(pane_id, event);
                     }
                 }
                 OscSequence::WindowsTerminalCwd { path } => {
                     if let Some(event) = self.apply_cwd(pane_id, path) {
-                        let _ = self.event_sender.send((pane_id, event));
+                        self.broadcast_event(pane_id, event);
                     }
                 }
                 OscSequence::ShellIntegration { marker, data } => {
                     for event in self.apply_shell_integration(pane_id, marker, data) {
-                        let _ = self.event_sender.send((pane_id, event.clone()));
+                        self.broadcast_event(pane_id, event);
                     }
                 }
                 OscSequence::WindowTitle { title, .. } => {
                     if let Some(event) = self.apply_title(pane_id, title) {
-                        let _ = self.event_sender.send((pane_id, event));
+                        self.broadcast_event(pane_id, event);
                     }
                 }
                 OscSequence::OpenCodexNodeVersion { version } => {
                     if let Some(event) = self.apply_node_version(pane_id, version) {
-                        let _ = self.event_sender.send((pane_id, event));
+                        self.broadcast_event(pane_id, event);
                     }
                 }
                 OscSequence::Unknown { .. } => {}
@@ -237,17 +248,17 @@ impl ShellIntegrationManager {
     }
 
     pub fn is_integration_enabled(&self, pane_id: PaneId) -> bool {
-        self.states
-            .get(&pane_id)
-            .map(|state| matches!(state.integration_state, ShellIntegrationState::Enabled))
-            .unwrap_or(false)
+        match self.states.get(&pane_id) {
+            Some(state) => matches!(state.integration_state, ShellIntegrationState::Enabled),
+            None => false,
+        }
     }
 
     pub fn get_command_history(&self, pane_id: PaneId) -> Vec<Arc<CommandInfo>> {
-        self.states
-            .get(&pane_id)
-            .map(|state| state.command_history.iter().map(Arc::clone).collect())
-            .unwrap_or_default()
+        match self.states.get(&pane_id) {
+            Some(state) => state.command_history.iter().map(Arc::clone).collect(),
+            None => Vec::new(),
+        }
     }
 
     pub fn get_multiple_pane_states(&self, pane_ids: &[PaneId]) -> HashMap<PaneId, PaneShellState> {

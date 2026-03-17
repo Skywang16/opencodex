@@ -16,6 +16,7 @@ pub(crate) struct ExecutionState {
     pub(crate) runtime_status: AgentTaskStatus,
     pub(crate) system_prompt: Option<SystemPrompt>,
     pub(crate) system_prompt_overlay: Option<SystemPrompt>,
+    pub(crate) developer_context: Vec<String>,
     /// Used by subtask/lifecycle init only; orchestrator reloads from DB.
     pub(crate) messages: Vec<MessageParam>,
     pub(crate) message_sequence: i64,
@@ -29,6 +30,7 @@ impl ExecutionState {
             runtime_status,
             system_prompt: None,
             system_prompt_overlay: None,
+            developer_context: Vec::new(),
             messages: Vec::new(),
             message_sequence: 0,
             current_iteration: 0,

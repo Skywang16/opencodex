@@ -4,6 +4,7 @@ use super::AIManagerState;
 use crate::ai::error::AIServiceError;
 use crate::ai::types::AIModelConfig;
 use crate::storage::error::RepositoryError;
+use crate::storage::repositories::AIModelsConfig;
 use crate::utils::{EmptyData, TauriApiResult};
 use crate::{api_error, api_success, validate_not_empty};
 
@@ -22,6 +23,26 @@ pub async fn ai_models_get(state: State<'_, AIManagerState>) -> TauriApiResult<V
     }
 }
 
+/// Get the full JSON-backed AI model configuration.
+#[tauri::command]
+pub async fn ai_models_get_config(
+    state: State<'_, AIManagerState>,
+) -> TauriApiResult<AIModelsConfig> {
+    match state.ai_service.get_models_config().await {
+        Ok(config) => Ok(api_success!(config)),
+        Err(error) => {
+            warn!(error = %error, "Failed to load AI models JSON config");
+            Ok(api_error!("ai.get_models_failed"))
+        }
+    }
+}
+
+/// Get the models.json path on disk.
+#[tauri::command]
+pub async fn ai_models_get_config_path(state: State<'_, AIManagerState>) -> TauriApiResult<String> {
+    Ok(api_success!(state.ai_service.get_models_config_path()))
+}
+
 /// Add AI model configuration
 #[tauri::command]
 pub async fn ai_models_add(
@@ -31,7 +52,7 @@ pub async fn ai_models_add(
     if config
         .display_name
         .as_ref()
-        .map_or(true, |name| name.trim().is_empty())
+        .is_none_or(|name| name.trim().is_empty())
     {
         return Ok(api_error!("ai.display_name_empty"));
     }
@@ -125,14 +146,14 @@ pub async fn ai_models_test_connection(
         if config
             .api_url
             .as_ref()
-            .map_or(true, |url| url.trim().is_empty())
+            .is_none_or(|url| url.trim().is_empty())
         {
             return Ok(api_error!("ai.api_url_empty"));
         }
         if config
             .api_key
             .as_ref()
-            .map_or(true, |key| key.trim().is_empty())
+            .is_none_or(|key| key.trim().is_empty())
         {
             return Ok(api_error!("ai.api_key_empty"));
         }

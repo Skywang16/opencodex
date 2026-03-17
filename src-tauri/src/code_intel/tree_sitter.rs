@@ -22,7 +22,10 @@ pub fn configure_parser_for_language(
             .set_language(&tree_sitter_python::LANGUAGE.into())
             .map_err(|e| TreeSitterError::SetLanguage(e.to_string()))?,
         Language::TypeScript => {
-            let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let ext = file_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default();
             let ts_lang = if ext.eq_ignore_ascii_case("tsx") {
                 tree_sitter_typescript::LANGUAGE_TSX
             } else {

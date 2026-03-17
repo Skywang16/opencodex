@@ -5,6 +5,7 @@
 use crate::agent::agents::AgentConfigLoader;
 use crate::agent::command_system::{CommandConfigLoader, CommandRenderResult, CommandSummary};
 use crate::agent::core::executor::{ExecuteTaskParams, TaskExecutor, TaskSummary};
+use crate::agent::persistence::repositories::CreateMessageParams;
 use crate::agent::skill::SkillSummary;
 use crate::agent::tools::registry::ToolConfirmationDecision;
 use crate::agent::types::{AgentSwitchBlock, Block, MessageRole, MessageStatus, TaskEvent};
@@ -37,13 +38,22 @@ pub async fn agent_execute_task(
     let mut params = params;
 
     // Collect workspace file changes as a system reminder (not persisted to UI messages)
-    if let Ok(workspace_root) = std::path::PathBuf::from(&params.workspace_path).canonicalize() {
-        let workspace_key: std::sync::Arc<str> =
-            std::sync::Arc::from(workspace_root.to_string_lossy().to_string());
-        let pending = changes.take_pending_by_key(workspace_key).await;
-        let notice = build_file_change_notice(&pending);
-        if !notice.is_empty() {
-            params.system_reminders.push(notice);
+    match std::path::PathBuf::from(&params.workspace_path).canonicalize() {
+        Ok(workspace_root) => {
+            let workspace_key: std::sync::Arc<str> =
+                std::sync::Arc::from(workspace_root.to_string_lossy().to_string());
+            let pending = changes.take_pending_by_key(workspace_key).await;
+            let notice = build_file_change_notice(&pending);
+            if !notice.is_empty() {
+                params.system_reminders.push(notice);
+            }
+        }
+        Err(err) => {
+            tracing::warn!(
+                "Failed to canonicalize workspace path '{}': {}",
+                params.workspace_path,
+                err
+            );
         }
     }
 
@@ -112,7 +122,19 @@ fn build_file_change_notice(changes: &[PendingChange]) -> String {
 
         lines.push(format!("- {path} ({kind}, {age} ago):"));
         lines.push("```diff".to_string());
-        lines.push(change.patch.clone().unwrap_or_default());
+        let Some(patch) = change.patch.as_deref() else {
+            tracing::warn!(
+                path = %path,
+                kind = %kind,
+                "Workspace change summary missing patch for non-large change"
+            );
+            lines.pop();
+            lines.push(format!(
+                "- {path} ({kind}, {age} ago): Changed; patch unavailable, re-read before editing."
+            ));
+            continue;
+        };
+        lines.push(patch.to_string());
         lines.push("```".to_string());
     }
 
@@ -286,7 +308,15 @@ pub async fn agent_list_skills(
     let metadata_list = skill_manager
         .discover_skills(Some(global_skills_dir), Some(&workspace_root))
         .await
-        .unwrap_or_default();
+        .map_err(|err| {
+            tracing::error!("❌ List skills failed: {err}");
+            err
+        });
+
+    let metadata_list = match metadata_list {
+        Ok(metadata_list) => metadata_list,
+        Err(_) => return Ok(api_error!("agent.list_skills_failed")),
+    };
 
     let mut out: Vec<SkillSummary> = metadata_list.iter().map(|m| m.into()).collect();
 
@@ -326,20 +356,23 @@ pub async fn agent_switch_session_agent(
     params: SwitchSessionAgentParams,
 ) -> TauriApiResult<EmptyData> {
     let persistence = state.executor.agent_persistence();
-    let Some(session) = persistence
-        .sessions()
-        .get(params.session_id)
-        .await
-        .ok()
-        .flatten()
-    else {
-        return Ok(api_error!("workspace.session_not_found"));
+    let session = match persistence.sessions().get(params.session_id).await {
+        Ok(Some(session)) => session,
+        Ok(None) => return Ok(api_error!("workspace.session_not_found")),
+        Err(err) => {
+            tracing::error!("❌ Load session failed during agent switch: {}", err);
+            return Ok(api_error!("agent.switch_failed"));
+        }
     };
 
     let workspace_root = std::path::PathBuf::from(session.workspace_path.clone());
-    let agent_configs = AgentConfigLoader::load_for_workspace(&workspace_root)
-        .await
-        .unwrap_or_default();
+    let agent_configs = match AgentConfigLoader::load_for_workspace(&workspace_root).await {
+        Ok(agent_configs) => agent_configs,
+        Err(err) => {
+            tracing::error!("❌ Load agent configs failed: {err}");
+            return Ok(api_error!("agent.switch_failed"));
+        }
+    };
     if !agent_configs.contains_key(params.agent_type.as_str()) {
         return Ok(api_error!("agent.unknown_agent_type"));
     }
@@ -360,22 +393,22 @@ pub async fn agent_switch_session_agent(
 
     let mut message = match persistence
         .messages()
-        .create(
-            params.session_id,
-            MessageRole::Assistant,
-            MessageStatus::Completed,
-            vec![Block::AgentSwitch(AgentSwitchBlock {
+        .create(CreateMessageParams {
+            session_id: params.session_id,
+            role: MessageRole::Assistant,
+            status: MessageStatus::Completed,
+            blocks: vec![Block::AgentSwitch(AgentSwitchBlock {
                 from_agent,
                 to_agent: params.agent_type.clone(),
                 reason: params.reason.clone(),
             })],
-            false,
-            false,
-            &params.agent_type,
-            None,
-            None,
-            None,
-        )
+            is_summary: false,
+            is_internal: false,
+            agent_type: &params.agent_type,
+            parent_message_id: None,
+            model_id: None,
+            provider_id: None,
+        })
         .await
     {
         Ok(m) => m,

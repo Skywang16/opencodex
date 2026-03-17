@@ -79,7 +79,7 @@ export const useShortcutListener = () => {
         frontendResult = shortcutActionsService.openSettings()
         break
       case 'new_terminal':
-        frontendResult = shortcutActionsService.newTerminal()
+        frontendResult = await shortcutActionsService.newTerminal()
         break
       case 'clear_terminal':
         frontendResult = shortcutActionsService.clearTerminal()

@@ -14,6 +14,7 @@ use crate::agent::core::context::TaskContext;
 use crate::agent::core::executor::{ExecuteTaskParams, TaskExecutor};
 use crate::agent::core::status::AgentTaskStatus;
 use crate::agent::error::{TaskExecutorError, TaskExecutorResult};
+use crate::agent::persistence::repositories::CreateMessageParams;
 use crate::agent::tools::RunnableTool;
 use crate::agent::tools::ToolAvailabilityContext;
 use crate::agent::tools::{ToolResultContent, ToolResultStatus};
@@ -62,8 +63,15 @@ impl Drop for RunTaskLoopDropGuard {
                 status,
                 AgentTaskStatus::Created | AgentTaskStatus::Running | AgentTaskStatus::Paused
             ) {
-                let _ = ctx.set_status(AgentTaskStatus::Cancelled).await;
-                let _ = ctx.cancel_assistant_message().await;
+                if let Err(err) = ctx.set_status(AgentTaskStatus::Cancelled).await {
+                    warn!("Failed to mark dropped task as cancelled: {}", err);
+                }
+                if let Err(err) = ctx.cancel_assistant_message().await {
+                    warn!(
+                        "Failed to cancel assistant message for dropped task: {}",
+                        err
+                    );
+                }
             }
 
             ctx.tool_registry()
@@ -89,7 +97,7 @@ impl TaskExecutor {
             .await?;
 
         // Clear the agent edit set from the previous task to avoid "diagnosing old files" behavior.
-        let _ = ctx.file_tracker().take_recent_agent_edits().await;
+        ctx.file_tracker().take_recent_agent_edits().await;
 
         ctx.emit_event(TaskEvent::TaskCreated {
             task_id: ctx.task_id.to_string(),
@@ -111,11 +119,14 @@ impl TaskExecutor {
         // Persist model_id on the session so subtasks (Task tool) can inherit it reliably.
         // Otherwise older sessions created without model selection will fail with:
         // "No model_id set on session; cannot run subtask".
-        let _ = ctx
+        if let Err(err) = ctx
             .agent_persistence()
             .sessions()
             .update_model_id(ctx.session_id, &params.model_id)
-            .await;
+            .await
+        {
+            warn!("Failed to persist session model id: {}", err);
+        }
 
         if ctx.checkpointing_enabled() {
             if let Err(err) = ctx.init_checkpoint(user_message_id).await {
@@ -162,10 +173,13 @@ impl TaskExecutor {
                 }
             };
 
-            let _ = executor
+            if let Err(err) = executor
                 .mcp_registry()
                 .init_workspace_servers(&workspace_root, &effective, workspace_settings.as_ref())
-                .await;
+                .await
+            {
+                warn!("Failed to initialize MCP workspace servers: {}", err);
+            }
 
             // If prior subtasks were cancelled mid-flight, do NOT dump partial output into the
             // parent prompt. Backfill *real* summaries once per block using the LLM.
@@ -177,7 +191,12 @@ impl TaskExecutor {
             }
 
             // Restore history after backfilling summaries so the current turn's prompt sees them.
-            let _ = ctx_for_spawn.reset_message_state().await;
+            if let Err(err) = ctx_for_spawn.reset_message_state().await {
+                warn!(
+                    "Failed to reset message state before restoring history: {}",
+                    err
+                );
+            }
             if let Err(e) = executor
                 .restore_session_history(
                     &ctx_for_spawn,
@@ -198,7 +217,7 @@ impl TaskExecutor {
                 .get_tools_for_workspace(ctx_for_spawn.cwd.as_ref())
             {
                 let name = tool.name().to_string();
-                let _ = ctx_for_spawn
+                if let Err(err) = ctx_for_spawn
                     .tool_registry()
                     .register(
                         &name,
@@ -206,10 +225,13 @@ impl TaskExecutor {
                         false,
                         &availability_ctx,
                     )
-                    .await;
+                    .await
+                {
+                    warn!("Failed to register MCP tool '{}': {}", name, err);
+                }
             }
 
-            let (system_prompt, _) = match executor
+            let prompts = match executor
                 .prompt_orchestrator()
                 .build_task_prompts(
                     ctx_for_spawn.session_id,
@@ -226,7 +248,12 @@ impl TaskExecutor {
                 Err(e) => {
                     error!("Failed to build task prompts: {}", e);
                     ctx_for_spawn.abort();
-                    let _ = ctx_for_spawn.set_status(AgentTaskStatus::Error).await;
+                    if let Err(err) = ctx_for_spawn.set_status(AgentTaskStatus::Error).await {
+                        warn!(
+                            "Failed to mark task as error after prompt build failure: {}",
+                            err
+                        );
+                    }
 
                     let error_block = ErrorBlock {
                         code: "task.prompt_build_failed".to_string(),
@@ -234,16 +261,22 @@ impl TaskExecutor {
                         details: None,
                     };
 
-                    let _ = ctx_for_spawn
+                    if let Err(err) = ctx_for_spawn
                         .fail_assistant_message(error_block.clone())
-                        .await;
+                        .await
+                    {
+                        warn!("Failed to persist assistant error message: {}", err);
+                    }
                     if ctx_for_spawn.emits_task_events() {
-                        let _ = ctx_for_spawn
+                        if let Err(err) = ctx_for_spawn
                             .emit_event(TaskEvent::TaskError {
                                 task_id: ctx_for_spawn.task_id.to_string(),
                                 error: error_block,
                             })
-                            .await;
+                            .await
+                        {
+                            warn!("Failed to emit task error event: {}", err);
+                        }
                     }
 
                     executor
@@ -253,14 +286,28 @@ impl TaskExecutor {
                 }
             };
 
-            let _ = ctx_for_spawn.set_system_prompt(system_prompt).await;
-            let _ = ctx_for_spawn
+            if let Err(err) = ctx_for_spawn.set_system_prompt(prompts.instructions).await {
+                error!("Failed to persist system prompt: {}", err);
+                return;
+            }
+            if let Err(err) = ctx_for_spawn
+                .set_developer_context(prompts.developer_context)
+                .await
+            {
+                error!("Failed to persist developer context: {}", err);
+                return;
+            }
+            if let Err(err) = ctx_for_spawn
                 .add_user_message_with_reminders(
-                    llm_user_prompt,
+                    prompts.user_prompt,
                     images.as_deref(),
                     &system_reminders,
                 )
-                .await;
+                .await
+            {
+                error!("Failed to append user message with reminders: {}", err);
+                return;
+            }
 
             if let Err(e) = executor.run_task_loop(ctx_for_spawn, model_id).await {
                 error!("Task execution failed: {}", e);
@@ -305,13 +352,16 @@ impl TaskExecutor {
                         .await?;
 
                         if ctx.agent_type.as_ref() == "plan" {
-                            let _ = self
+                            if let Err(err) = self
                                 .switch_session_agent_with_ctx(
                                     &ctx,
                                     "coder",
                                     Some("plan completed".to_string()),
                                 )
-                                .await;
+                                .await
+                            {
+                                warn!("Failed to switch completed plan session to coder: {}", err);
+                            }
                         }
 
                         if ctx.emits_task_events() {
@@ -345,14 +395,19 @@ impl TaskExecutor {
                         error!("Task failed: {}", error_block.message);
                         ctx.abort();
                         ctx.set_status(AgentTaskStatus::Error).await?;
-                        let _ = ctx.fail_assistant_message(error_block.clone()).await;
+                        if let Err(err) = ctx.fail_assistant_message(error_block.clone()).await {
+                            warn!("Failed to persist assistant syntax error message: {}", err);
+                        }
                         if ctx.emits_task_events() {
-                            let _ = ctx
+                            if let Err(err) = ctx
                                 .emit_event(TaskEvent::TaskError {
                                     task_id: ctx.task_id.to_string(),
                                     error: error_block,
                                 })
-                                .await;
+                                .await
+                            {
+                                warn!("Failed to emit syntax repair failure event: {}", err);
+                            }
                         }
                         break;
                     }
@@ -367,14 +422,24 @@ impl TaskExecutor {
                     if matches!(e, TaskExecutorError::TaskInterrupted) {
                         let status = ctx.status().await;
                         if !matches!(status, AgentTaskStatus::Cancelled) {
-                            let _ = ctx.set_status(AgentTaskStatus::Cancelled).await;
-                            let _ = ctx.cancel_assistant_message().await;
+                            if let Err(err) = ctx.set_status(AgentTaskStatus::Cancelled).await {
+                                warn!("Failed to mark interrupted task as cancelled: {}", err);
+                            }
+                            if let Err(err) = ctx.cancel_assistant_message().await {
+                                warn!(
+                                    "Failed to cancel assistant message for interrupted task: {}",
+                                    err
+                                );
+                            }
                             if ctx.emits_task_events() {
-                                let _ = ctx
+                                if let Err(err) = ctx
                                     .emit_event(TaskEvent::TaskCancelled {
                                         task_id: ctx.task_id.to_string(),
                                     })
-                                    .await;
+                                    .await
+                                {
+                                    warn!("Failed to emit task cancelled event: {}", err);
+                                }
                             }
                         }
                         break;
@@ -389,14 +454,22 @@ impl TaskExecutor {
                         details: None,
                     };
 
-                    let _ = ctx.fail_assistant_message(error_block.clone()).await;
+                    if let Err(err) = ctx.fail_assistant_message(error_block.clone()).await {
+                        warn!(
+                            "Failed to persist assistant execution error message: {}",
+                            err
+                        );
+                    }
                     if ctx.emits_task_events() {
-                        let _ = ctx
+                        if let Err(err) = ctx
                             .emit_event(TaskEvent::TaskError {
                                 task_id: ctx.task_id.to_string(),
                                 error: error_block,
                             })
-                            .await;
+                            .await
+                        {
+                            warn!("Failed to emit task execution error event: {}", err);
+                        }
                     }
                     break;
                 }
@@ -499,7 +572,11 @@ impl TaskExecutor {
             .as_ref()
             .and_then(|v| v.get("errorCount"))
             .and_then(|v| v.as_u64())
-            .unwrap_or(0);
+            .ok_or_else(|| {
+                TaskExecutorError::InternalError(
+                    "syntax_diagnostics result missing numeric errorCount".to_string(),
+                )
+            })?;
 
         if error_count == 0 {
             return Ok(true);
@@ -527,13 +604,21 @@ impl TaskExecutor {
         ctx.abort();
         ctx.set_status(AgentTaskStatus::Cancelled).await?;
 
-        let _ = ctx.cancel_assistant_message().await;
+        if let Err(err) = ctx.cancel_assistant_message().await {
+            warn!(
+                "Failed to cancel assistant message during explicit cancel: {}",
+                err
+            );
+        }
         if ctx.emits_task_events() {
-            let _ = ctx
+            if let Err(err) = ctx
                 .emit_event(TaskEvent::TaskCancelled {
                     task_id: task_id.to_string(),
                 })
-                .await;
+                .await
+            {
+                warn!("Failed to emit task cancelled event: {}", err);
+            }
         }
 
         self.active_tasks().remove(task_id);
@@ -623,22 +708,22 @@ impl TaskExecutor {
         let mut message = ctx
             .agent_persistence()
             .messages()
-            .create(
-                ctx.session_id,
-                MessageRole::Assistant,
-                MessageStatus::Completed,
-                vec![Block::AgentSwitch(AgentSwitchBlock {
+            .create(CreateMessageParams {
+                session_id: ctx.session_id,
+                role: MessageRole::Assistant,
+                status: MessageStatus::Completed,
+                blocks: vec![Block::AgentSwitch(AgentSwitchBlock {
                     from_agent,
                     to_agent: to_agent.to_string(),
                     reason,
                 })],
-                false,
-                false,
-                to_agent,
-                None,
-                None,
-                None,
-            )
+                is_summary: false,
+                is_internal: false,
+                agent_type: to_agent,
+                parent_message_id: None,
+                model_id: None,
+                provider_id: None,
+            })
             .await
             .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
 
@@ -742,6 +827,7 @@ impl TaskExecutor {
                 model: model_id.to_string(),
                 max_tokens: 512,
                 system: Some(system),
+                developer_context: None,
                 messages: vec![crate::llm::anthropic_types::MessageParam {
                     role: crate::llm::anthropic_types::MessageRole::User,
                     content: crate::llm::anthropic_types::MessageContent::Text(prompt),
@@ -785,14 +871,17 @@ impl TaskExecutor {
                 .await
                 .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
 
-            let _ = ctx
+            if let Err(err) = ctx
                 .emit_event(TaskEvent::BlockUpdated {
                     task_id: ctx.task_id.to_string(),
                     message_id: parent_msg.id,
                     block_id: updated.id.clone(),
                     block: Block::Subtask(updated),
                 })
-                .await;
+                .await
+            {
+                warn!("Failed to emit subtask block update event: {}", err);
+            }
         }
 
         Ok(())
@@ -806,7 +895,9 @@ fn build_subtask_transcript(messages: &[Message]) -> String {
             MessageRole::User => "USER",
             MessageRole::Assistant => "ASSISTANT",
         };
-        let text = extract_prompt_text(&msg.blocks, &msg.role).unwrap_or_default();
+        let Some(text) = extract_prompt_text(&msg.blocks, &msg.role) else {
+            continue;
+        };
         let text = text.trim();
         if text.is_empty() {
             continue;

@@ -3,6 +3,7 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
+use tracing::warn;
 
 use super::file_utils::lenient;
 use crate::agent::core::context::TaskContext;
@@ -55,7 +56,7 @@ impl RunnableTool for WebSearchTool {
         r#"Search the web for real-time information. Returns top results with content snippets.
 
 Usage:
-- Provide `query` keywords. Optional: `numResults` (1–10, default 5), `type` ("auto", "fast", "deep").
+- Provide `query` keywords. Optional: `numResults` (1–10, default 5), `type` ("auto", "keyword", "neural").
 - Returns a markdown list of results with title, URL, and content snippet.
 - To read a page, call `web_fetch` with the URL and a specific `prompt` (question) about what you need.
 - Do not rely on snippets alone. Always use web_fetch to extract detailed information from relevant pages.
@@ -68,13 +69,13 @@ Search Tips:
 
 Search Types:
 - "auto": Balanced search (default)
-- "fast": Quick results, less comprehensive
-- "deep": Thorough search, more comprehensive
+- "keyword": Keyword-oriented retrieval
+- "neural": Semantic retrieval
 
 Examples:
 - {"query": "rust async channels", "numResults": 5}
-- {"query": "vue 3 composition api", "type": "fast"}
-- {"query": "machine learning tutorial", "type": "deep", "numResults": 8}
+- {"query": "vue 3 composition api", "type": "keyword"}
+- {"query": "machine learning tutorial", "type": "neural", "numResults": 8}
 "#
     }
 
@@ -84,7 +85,7 @@ Examples:
             "properties": {
                 "query": {"type": "string", "description": "Search keywords"},
                 "numResults": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Number of results (default 5)"},
-                "type": {"type": "string", "enum": ["auto", "fast", "deep"], "description": "Search type: auto (balanced), fast (quick), deep (thorough)"}
+                "type": {"type": "string", "enum": ["auto", "keyword", "neural"], "description": "Search type: auto (balanced), keyword (keyword-focused), neural (semantic)"}
             },
             "required": ["query"]
         })
@@ -123,6 +124,17 @@ Examples:
 
         let num_results = args.num_results.unwrap_or(5).clamp(1, 10);
         let search_type = args.search_type.as_deref().unwrap_or("auto");
+        if !matches!(search_type, "auto" | "keyword" | "neural") {
+            return Ok(ToolResult {
+                content: vec![ToolResultContent::Error(format!(
+                    "Invalid searchType '{search_type}'. Expected one of: auto, keyword, neural"
+                ))],
+                status: ToolResultStatus::Error,
+                cancel_reason: None,
+                execution_time_ms: None,
+                ext_info: None,
+            });
+        }
 
         let started = std::time::Instant::now();
         let res = exa_mcp_search(&args.query, num_results, search_type).await;
@@ -231,7 +243,13 @@ async fn exa_mcp_search(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response.text().await.unwrap_or_default();
+        let error_text = response.text().await.unwrap_or_else(|err| {
+            warn!(
+                "Failed to read web_search error response body for status {}: {}",
+                status, err
+            );
+            format!("<failed to read error response body: {err}>")
+        });
         return Err(ToolExecutorError::ExecutionFailed {
             tool_name: "web_search".into(),
             error: format!("HTTP {status}: {error_text}"),
@@ -246,9 +264,12 @@ async fn exa_mcp_search(
             error: format!("Failed to read response: {e}"),
         })?;
 
+    let mut saw_response_payload = false;
+
     // Parse SSE response - look for "data: " lines
     for line in response_text.lines() {
         if let Some(data) = line.strip_prefix("data: ") {
+            saw_response_payload = true;
             match serde_json::from_str::<McpResponse>(data) {
                 Ok(mcp_resp) => {
                     if let Some(error) = mcp_resp.error {
@@ -272,19 +293,35 @@ async fn exa_mcp_search(
     }
 
     // If no SSE data lines, try parsing the whole response as JSON
-    if let Ok(mcp_resp) = serde_json::from_str::<McpResponse>(&response_text) {
-        if let Some(error) = mcp_resp.error {
-            return Err(ToolExecutorError::ExecutionFailed {
-                tool_name: "web_search".into(),
-                error: error.message,
-            });
-        }
-        if let Some(result) = mcp_resp.result {
-            if let Some(content) = result.content.first() {
-                return Ok(content.text.clone());
+    match serde_json::from_str::<McpResponse>(&response_text) {
+        Ok(mcp_resp) => {
+            saw_response_payload = true;
+            if let Some(error) = mcp_resp.error {
+                return Err(ToolExecutorError::ExecutionFailed {
+                    tool_name: "web_search".into(),
+                    error: error.message,
+                });
             }
+            if let Some(result) = mcp_resp.result {
+                if let Some(content) = result.content.first() {
+                    return Ok(content.text.clone());
+                }
+            }
+        }
+        Err(err) => {
+            tracing::debug!(error = %err, "Failed to parse full Exa MCP response as JSON");
         }
     }
 
-    Ok("No search results found. Please try a different query.".to_string())
+    if saw_response_payload {
+        return Err(ToolExecutorError::ExecutionFailed {
+            tool_name: "web_search".into(),
+            error: "Search provider returned no usable result content".to_string(),
+        });
+    }
+
+    Err(ToolExecutorError::ExecutionFailed {
+        tool_name: "web_search".into(),
+        error: "Search provider returned no results".to_string(),
+    })
 }

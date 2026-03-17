@@ -27,6 +27,8 @@ pub struct Session {
     pub agent_type: String,
     pub spawned_by_tool_call: Option<String>,
 
+    pub worktree_path: Option<String>,
+
     pub title: Option<String>,
     pub model_id: Option<String>,
     pub provider_id: Option<String>,
@@ -132,17 +134,114 @@ pub struct ToolExecution {
     pub duration_ms: Option<i64>,
 }
 
-pub(crate) fn build_workspace(row: &sqlx::sqlite::SqliteRow) -> Workspace {
-    Workspace {
-        path: row.try_get("path").unwrap_or_default(),
-        display_name: row.try_get("display_name").unwrap_or(None),
-        active_session_id: row.try_get("active_session_id").unwrap_or(None),
-        created_at: timestamp_to_datetime(row.try_get::<i64, _>("created_at").unwrap_or(0)),
-        updated_at: timestamp_to_datetime(row.try_get::<i64, _>("updated_at").unwrap_or(0)),
-        last_accessed_at: timestamp_to_datetime(
-            row.try_get::<i64, _>("last_accessed_at").unwrap_or(0),
-        ),
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RunStatus {
+    Queued,
+    Running,
+    Completed,
+    Error,
+    Cancelled,
+}
+
+impl RunStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Error => "error",
+            Self::Cancelled => "cancelled",
+        }
     }
+}
+
+impl FromStr for RunStatus {
+    type Err = AgentError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "queued" => Ok(Self::Queued),
+            "running" => Ok(Self::Running),
+            "completed" => Ok(Self::Completed),
+            "error" => Ok(Self::Error),
+            "cancelled" => Ok(Self::Cancelled),
+            other => Err(AgentError::Parse(format!("Unknown run status: {other}"))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Run {
+    pub id: i64,
+    pub session_id: i64,
+    pub trigger_message_id: Option<i64>,
+    pub root_node_id: Option<i64>,
+    pub status: RunStatus,
+    pub summary: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AgentNodeRole {
+    Root,
+    Fork,
+    Branch,
+}
+
+impl AgentNodeRole {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Root => "root",
+            Self::Fork => "fork",
+            Self::Branch => "branch",
+        }
+    }
+}
+
+impl FromStr for AgentNodeRole {
+    type Err = AgentError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "root" => Ok(Self::Root),
+            "fork" => Ok(Self::Fork),
+            "branch" => Ok(Self::Branch),
+            other => Err(AgentError::Parse(format!(
+                "Unknown agent node role: {other}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentNode {
+    pub id: i64,
+    pub run_id: i64,
+    pub parent_node_id: Option<i64>,
+    pub backing_session_id: Option<i64>,
+    pub trigger_tool_call_id: Option<String>,
+    pub role: AgentNodeRole,
+    pub profile: String,
+    pub title: String,
+    pub status: RunStatus,
+    pub worktree_path: Option<String>,
+    pub model_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+}
+
+pub(crate) fn build_workspace(row: &sqlx::sqlite::SqliteRow) -> AgentResult<Workspace> {
+    Ok(Workspace {
+        path: row.try_get("path")?,
+        display_name: row.try_get("display_name")?,
+        active_session_id: row.try_get("active_session_id")?,
+        created_at: timestamp_to_datetime(row.try_get::<i64, _>("created_at")?),
+        updated_at: timestamp_to_datetime(row.try_get::<i64, _>("updated_at")?),
+        last_accessed_at: timestamp_to_datetime(row.try_get::<i64, _>("last_accessed_at")?),
+    })
 }
 
 pub(crate) fn build_session(row: &sqlx::sqlite::SqliteRow) -> AgentResult<Session> {
@@ -152,6 +251,7 @@ pub(crate) fn build_session(row: &sqlx::sqlite::SqliteRow) -> AgentResult<Sessio
         parent_id: row.try_get("parent_id")?,
         agent_type: row.try_get("agent_type")?,
         spawned_by_tool_call: row.try_get("spawned_by_tool_call")?,
+        worktree_path: row.try_get("worktree_path")?,
         title: row.try_get("title")?,
         model_id: row.try_get("model_id")?,
         provider_id: row.try_get("provider_id")?,
@@ -177,5 +277,38 @@ pub(crate) fn build_tool_execution(row: &sqlx::sqlite::SqliteRow) -> AgentResult
         started_at: timestamp_to_datetime(row.try_get::<i64, _>("started_at")?),
         finished_at: opt_timestamp_to_datetime(row.try_get("finished_at")?),
         duration_ms: row.try_get("duration_ms")?,
+    })
+}
+
+pub(crate) fn build_run(row: &sqlx::sqlite::SqliteRow) -> AgentResult<Run> {
+    Ok(Run {
+        id: row.try_get("id")?,
+        session_id: row.try_get("session_id")?,
+        trigger_message_id: row.try_get("trigger_message_id")?,
+        root_node_id: row.try_get("root_node_id")?,
+        status: RunStatus::from_str(row.try_get::<String, _>("status")?.as_str())?,
+        summary: row.try_get("summary")?,
+        created_at: timestamp_to_datetime(row.try_get::<i64, _>("created_at")?),
+        started_at: opt_timestamp_to_datetime(row.try_get("started_at")?),
+        finished_at: opt_timestamp_to_datetime(row.try_get("finished_at")?),
+    })
+}
+
+pub(crate) fn build_agent_node(row: &sqlx::sqlite::SqliteRow) -> AgentResult<AgentNode> {
+    Ok(AgentNode {
+        id: row.try_get("id")?,
+        run_id: row.try_get("run_id")?,
+        parent_node_id: row.try_get("parent_node_id")?,
+        backing_session_id: row.try_get("backing_session_id")?,
+        trigger_tool_call_id: row.try_get("trigger_tool_call_id")?,
+        role: AgentNodeRole::from_str(row.try_get::<String, _>("role")?.as_str())?,
+        profile: row.try_get("profile")?,
+        title: row.try_get("title")?,
+        status: RunStatus::from_str(row.try_get::<String, _>("status")?.as_str())?,
+        worktree_path: row.try_get("worktree_path")?,
+        model_id: row.try_get("model_id")?,
+        created_at: timestamp_to_datetime(row.try_get::<i64, _>("created_at")?),
+        started_at: opt_timestamp_to_datetime(row.try_get("started_at")?),
+        finished_at: opt_timestamp_to_datetime(row.try_get("finished_at")?),
     })
 }

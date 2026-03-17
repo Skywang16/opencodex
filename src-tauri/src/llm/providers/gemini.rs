@@ -20,6 +20,10 @@ impl GeminiProvider {
 
 #[async_trait]
 impl LLMProvider for GeminiProvider {
+    fn provider_name(&self) -> &'static str {
+        "gemini"
+    }
+
     async fn call(
         &self,
         _request: crate::llm::anthropic_types::CreateMessageRequest,

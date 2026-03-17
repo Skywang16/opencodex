@@ -17,6 +17,9 @@
   const workspaceStore = useWorkspaceStore()
   const { refreshCheckpoints } = useCheckpoint()
   const isConfirming = ref(false)
+  const formatErrorMessage = (error: unknown): string => {
+    return error instanceof Error ? error.message : String(error)
+  }
 
   const getChangeIcon = (type: FileChangeType) => {
     switch (type) {
@@ -79,7 +82,7 @@
       console.error('[RollbackConfirmDialog] Rollback error:', error)
       emit('rollback', {
         success: false,
-        message: String(error),
+        message: formatErrorMessage(error),
       })
     } finally {
       isConfirming.value = false

@@ -20,7 +20,7 @@ fn test_pty_creation() {
 fn test_pty_with_config() {
     let pane_id = PaneId::new(2);
     let size = PtySize::new(30, 100);
-    let config = MuxSessionConfig::default();
+    let config = MuxSessionConfig::with_default_shell().expect("默认 shell 不可用");
 
     // 测试使用配置创建PTY
     let result = LocalPane::new_with_config(pane_id, size, &config);

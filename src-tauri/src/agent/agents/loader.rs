@@ -9,14 +9,59 @@ use tokio::fs;
 
 use crate::agent::agents::config::{AgentConfig, AgentMode};
 use crate::agent::agents::frontmatter::{
-    parse_agent_mode, parse_frontmatter, parse_tool_filter, split_frontmatter,
+    parse_agent_mode, parse_frontmatter, parse_task_permissions, parse_tool_filter,
+    split_frontmatter,
 };
 use crate::agent::error::{AgentError, AgentResult};
 use crate::agent::prompt::BuiltinPrompts;
+use tracing::warn;
 
 pub struct AgentConfigLoader;
 
 impl AgentConfigLoader {
+    fn parse_optional_u32_field(
+        parsed: &crate::agent::agents::frontmatter::ParsedFrontmatter,
+        key: &str,
+    ) -> AgentResult<Option<u32>> {
+        match parsed.fields.get(key) {
+            Some(raw) => raw
+                .parse::<u32>()
+                .map(Some)
+                .map_err(|err| AgentError::Parse(format!("Invalid {key} value '{raw}': {err}"))),
+            None => Ok(None),
+        }
+    }
+
+    fn parse_optional_f32_field(
+        parsed: &crate::agent::agents::frontmatter::ParsedFrontmatter,
+        key: &str,
+    ) -> AgentResult<Option<f32>> {
+        match parsed.fields.get(key) {
+            Some(raw) => raw
+                .parse::<f32>()
+                .map(Some)
+                .map_err(|err| AgentError::Parse(format!("Invalid {key} value '{raw}': {err}"))),
+            None => Ok(None),
+        }
+    }
+
+    fn parse_bool_field(
+        parsed: &crate::agent::agents::frontmatter::ParsedFrontmatter,
+        key: &str,
+        default: bool,
+    ) -> AgentResult<bool> {
+        match parsed.fields.get(key) {
+            Some(raw) => match raw.trim().to_ascii_lowercase().as_str() {
+                "true" => Ok(true),
+                "false" => Ok(false),
+                other => Err(AgentError::Parse(format!(
+                    "Invalid {key} value '{other}', expected true or false"
+                ))),
+            },
+            None => Ok(default),
+        }
+    }
+
     /// Parse agent md file content into AgentConfig
     fn parse_agent_content(
         content: &str,
@@ -46,29 +91,17 @@ impl AgentConfigLoader {
             .unwrap_or(AgentMode::Primary);
 
         let tool_filter = parse_tool_filter(front)?;
+        let task_permissions = parse_task_permissions(front)?;
 
-        let max_steps = parsed
-            .fields
-            .get("max_steps")
-            .and_then(|v| v.parse::<u32>().ok());
+        let max_steps = Self::parse_optional_u32_field(&parsed, "max_steps")?;
 
         let model_id = parsed.fields.get("model").cloned();
 
-        let temperature = parsed
-            .fields
-            .get("temperature")
-            .and_then(|v| v.parse::<f32>().ok());
+        let temperature = Self::parse_optional_f32_field(&parsed, "temperature")?;
 
-        let top_p = parsed
-            .fields
-            .get("top_p")
-            .and_then(|v| v.parse::<f32>().ok());
+        let top_p = Self::parse_optional_f32_field(&parsed, "top_p")?;
 
-        let hidden = parsed
-            .fields
-            .get("hidden")
-            .map(|v| v == "true")
-            .unwrap_or(false);
+        let hidden = Self::parse_bool_field(&parsed, "hidden", false)?;
 
         let skills = parsed
             .fields
@@ -89,6 +122,7 @@ impl AgentConfigLoader {
             system_prompt: body.trim().to_string(),
             tool_filter,
             skills,
+            task_permissions,
             max_steps,
             model_id,
             temperature,
@@ -106,6 +140,7 @@ impl AgentConfigLoader {
             ("coder", BuiltinPrompts::agent_coder()),
             ("plan", BuiltinPrompts::agent_plan()),
             ("explore", BuiltinPrompts::agent_explore()),
+            ("orchestrate", BuiltinPrompts::agent_orchestrate()),
             ("general", BuiltinPrompts::agent_general()),
             ("bulk_edit", BuiltinPrompts::agent_bulk_edit()),
             ("research", BuiltinPrompts::agent_research()),
@@ -113,14 +148,15 @@ impl AgentConfigLoader {
 
         builtin_contents
             .iter()
-            .filter_map(|(name, content)| {
-                Self::parse_agent_content(content, None, true)
-                    .map_err(|e| {
-                        eprintln!("Failed to parse builtin agent {name}: {e}");
-                        e
-                    })
-                    .ok()
-            })
+            .filter_map(
+                |(name, content)| match Self::parse_agent_content(content, None, true) {
+                    Ok(config) => Some(config),
+                    Err(err) => {
+                        warn!("Failed to parse builtin agent {}: {}", name, err);
+                        None
+                    }
+                },
+            )
             .collect()
     }
 
@@ -136,8 +172,16 @@ impl AgentConfigLoader {
 
         // Then load workspace custom (will override builtin with same name)
         let dir = workspace_root.join(".opencodex").join("agents");
-        let Ok(mut entries) = fs::read_dir(&dir).await else {
-            return Ok(configs);
+        let mut entries = match fs::read_dir(&dir).await {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(configs),
+            Err(err) => {
+                return Err(AgentError::Io(std::io::Error::other(format!(
+                    "Failed to read workspace agent directory '{}': {}",
+                    dir.display(),
+                    err
+                ))));
+            }
         };
 
         while let Some(entry) = entries.next_entry().await? {
@@ -146,13 +190,32 @@ impl AgentConfigLoader {
                 continue;
             }
 
-            if let Ok(content) = fs::read_to_string(&path).await {
-                if let Ok(cfg) = Self::parse_agent_content(
-                    &content,
-                    Some(path.to_string_lossy().to_string()),
-                    false,
-                ) {
-                    configs.insert(cfg.name.clone(), cfg);
+            let content = match fs::read_to_string(&path).await {
+                Ok(content) => content,
+                Err(err) => {
+                    warn!(
+                        "Failed to read workspace agent '{}': {}",
+                        path.display(),
+                        err
+                    );
+                    continue;
+                }
+            };
+
+            match Self::parse_agent_content(
+                &content,
+                Some(path.to_string_lossy().to_string()),
+                false,
+            ) {
+                Ok(config) => {
+                    configs.insert(config.name.clone(), config);
+                }
+                Err(err) => {
+                    warn!(
+                        "Failed to parse workspace agent '{}': {}",
+                        path.display(),
+                        err
+                    );
                 }
             }
         }

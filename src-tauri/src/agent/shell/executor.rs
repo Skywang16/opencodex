@@ -57,6 +57,30 @@ impl AgentShellExecutor {
         Ok(())
     }
 
+    #[cfg(not(target_os = "windows"))]
+    fn resolve_unix_shell(&self) -> Result<String, ShellError> {
+        let shell = std::env::var("SHELL").map_err(|err| {
+            ShellError::ValidationFailed(format!(
+                "SHELL environment variable is unavailable: {err}"
+            ))
+        })?;
+
+        if shell.trim().is_empty() {
+            return Err(ShellError::ValidationFailed(
+                "SHELL environment variable is empty".into(),
+            ));
+        }
+
+        let shell_path = std::path::Path::new(&shell);
+        if !shell_path.is_file() {
+            return Err(ShellError::ValidationFailed(format!(
+                "Configured shell is not an executable file: {shell}"
+            )));
+        }
+
+        Ok(shell)
+    }
+
     /// Synchronously execute command (wait for completion or timeout)
     pub async fn execute(
         &self,
@@ -87,7 +111,7 @@ impl AgentShellExecutor {
             c.arg("/C").arg(command);
             c
         } else {
-            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+            let shell = self.resolve_unix_shell()?;
             let mut c = Command::new(shell);
             c.arg("-lc").arg(command);
             c

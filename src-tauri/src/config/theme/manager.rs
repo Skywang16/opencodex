@@ -69,17 +69,30 @@ impl ThemeManager {
                 continue;
             }
 
-            let file_name = path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or_default();
+            let file_name = match path.file_name().and_then(|s| s.to_str()) {
+                Some(file_name) => file_name,
+                None => {
+                    tracing::warn!("Skipping theme file with invalid name: {}", path.display());
+                    continue;
+                }
+            };
             if file_name == "index.json" {
                 continue;
             }
 
             let meta = fs::metadata(&path)?;
             let file_size = Some(meta.len());
-            let last_modified = meta.modified().ok();
+            let last_modified = match meta.modified() {
+                Ok(modified) => Some(modified),
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to read theme file modified time '{}': {}",
+                        path.display(),
+                        err
+                    );
+                    None
+                }
+            };
 
             let raw = fs::read_to_string(&path)?;
             let wrapper: ThemeFileWrapper = match serde_json::from_str(&raw) {
@@ -121,13 +134,11 @@ impl ThemeManager {
 
         let validation = ThemeValidator::validate_theme(&wrapper.theme);
         if !validation.is_valid {
-            return Err(ThemeConfigError::Validation {
-                reason: validation
-                    .errors
-                    .into_iter()
-                    .next()
-                    .unwrap_or_else(|| "invalid theme".into()),
-            });
+            let reason = match validation.errors.into_iter().next() {
+                Some(reason) => reason,
+                None => "invalid theme".into(),
+            };
+            return Err(ThemeConfigError::Validation { reason });
         }
 
         Ok(wrapper.theme)

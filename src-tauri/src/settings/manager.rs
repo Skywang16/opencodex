@@ -174,8 +174,12 @@ impl SettingsManager {
     }
 
     fn resolve_app_dir() -> SettingsResult<PathBuf> {
-        if let Ok(dir) = std::env::var("OPENCODEX_DATA_DIR") {
-            return Ok(PathBuf::from(dir));
+        match std::env::var("OPENCODEX_DATA_DIR") {
+            Ok(dir) => return Ok(PathBuf::from(dir)),
+            Err(std::env::VarError::NotPresent) => {}
+            Err(err) => {
+                tracing::warn!("Failed to read OPENCODEX_DATA_DIR: {}", err);
+            }
         }
 
         let Some(data_dir) = dirs::data_dir() else {

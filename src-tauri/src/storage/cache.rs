@@ -198,10 +198,16 @@ impl UnifiedCache {
 
     /// Session: Get active session
     pub async fn get_active_session(&self) -> Option<i64> {
-        self.get_deserialized_ns(CacheNamespace::Session, "active_session")
+        match self
+            .get_deserialized_ns(CacheNamespace::Session, "active_session")
             .await
-            .ok()
-            .flatten()
+        {
+            Ok(session_id) => session_id,
+            Err(err) => {
+                tracing::warn!("Failed to load active session from cache: {}", err);
+                None
+            }
+        }
     }
 
     /// Session: Set active session

@@ -5,6 +5,9 @@
 
   const store = useToolConfirmationDialogStore()
   const submitError = ref<string | null>(null)
+  const formatErrorMessage = (error: unknown): string => {
+    return error instanceof Error ? error.message : String(error)
+  }
 
   watch(
     () => store.visible,
@@ -22,7 +25,7 @@
       await agentApi.confirmTool(store.state.requestId, decision)
     } catch (error) {
       console.error('[ToolConfirmationDialog] confirm failed:', error)
-      submitError.value = String(error)
+      submitError.value = formatErrorMessage(error)
       return
     } finally {
       store.submitting = false

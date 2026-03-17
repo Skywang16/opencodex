@@ -23,9 +23,17 @@ impl ConfigManager {
         let path = app_dir.join(CONFIG_FILE_NAME);
 
         let initial = if path.exists() {
-            read_json(&path)
-                .await
-                .unwrap_or_else(|_| create_default_config())
+            match read_json(&path).await {
+                Ok(config) => config,
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to read config file '{}', using defaults: {}",
+                        path.display(),
+                        err
+                    );
+                    create_default_config()
+                }
+            }
         } else {
             create_default_config()
         };
@@ -74,8 +82,12 @@ impl ConfigManager {
 }
 
 fn resolve_app_dir() -> ConfigResult<PathBuf> {
-    if let Ok(dir) = std::env::var("OPENCODEX_DATA_DIR") {
-        return Ok(PathBuf::from(dir));
+    match std::env::var("OPENCODEX_DATA_DIR") {
+        Ok(dir) => return Ok(PathBuf::from(dir)),
+        Err(std::env::VarError::NotPresent) => {}
+        Err(err) => {
+            tracing::warn!("Failed to read OPENCODEX_DATA_DIR: {}", err);
+        }
     }
     let Some(data_dir) = dirs::data_dir() else {
         return Err(ConfigError::Internal("system data_dir unavailable".into()));

@@ -38,9 +38,9 @@ impl ToolSignature {
                     .into_iter()
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
-                serde_json::to_string(&Value::Object(sorted)).unwrap_or_default()
+                Value::Object(sorted).to_string()
             }
-            _ => serde_json::to_string(args).unwrap_or_default(),
+            _ => args.to_string(),
         }
     }
 }

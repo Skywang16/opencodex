@@ -42,11 +42,11 @@ impl RunnableTool for ReadTerminalTool {
     }
 
     fn description(&self) -> &str {
-        r#"Reads terminal output from the active terminal or a background agent terminal.
+        r#"Reads terminal output from the active terminal or a task terminal.
 
 Usage:
 - Without terminalId: reads the user's active terminal pane
-- With terminalId: reads a background agent terminal (from shell tool with background=true)
+- With terminalId: reads a task terminal created by shell, especially background runs
 - Use maxLines to control how much history to retrieve (default: 1000)
 
 Note: This is NOT for reading source files - use read_file instead."#
@@ -58,7 +58,7 @@ Note: This is NOT for reading source files - use read_file instead."#
             "properties": {
                 "terminalId": {
                     "type": "string",
-                    "description": "Agent terminal ID to read from. If omitted, reads the active user terminal."
+                    "description": "Task terminal ID returned by shell. If omitted, reads the active terminal pane."
                 },
                 "maxLines": {
                     "type": "number",
@@ -82,6 +82,12 @@ Note: This is NOT for reading source files - use read_file instead."#
     ) -> ToolExecutorResult<ToolResult> {
         let args: ReadTerminalArgs = serde_json::from_value(args)?;
         let max_lines = args.max_lines.unwrap_or(1000);
+        if max_lines == 0 {
+            return Err(ToolExecutorError::InvalidArguments {
+                tool_name: "read_terminal".to_string(),
+                error: "maxLines must be greater than 0".to_string(),
+            });
+        }
 
         let (buffer, pane_id) = if let Some(ref tid) = args.terminal_id {
             read_agent_terminal(tid)?
@@ -152,7 +158,7 @@ fn read_agent_terminal(terminal_id: &str) -> ToolExecutorResult<(String, u32)> {
             .get_terminal(terminal_id)
             .ok_or_else(|| ToolExecutorError::ExecutionFailed {
                 tool_name: "read_terminal".to_string(),
-                error: format!("Terminal '{}' not found.", terminal_id),
+                error: format!("Terminal '{terminal_id}' not found."),
             })?;
     let buffer = manager.get_terminal_output(terminal_id).map_err(|e| {
         ToolExecutorError::ExecutionFailed {

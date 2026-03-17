@@ -63,7 +63,7 @@
     const directory = await windowApi.handleFileOpen(filePath)
     if (directory) {
       await workspaceStore.loadTree()
-      await workspaceStore.loadSessions(directory)
+      await workspaceStore.loadSessionViews(directory)
     }
   }
 
@@ -220,7 +220,7 @@
     background: transparent;
     border: none;
     border-radius: var(--border-radius-md);
-    color: var(--text-500);
+    color: var(--text-300);
     cursor: pointer;
     transition:
       color 0.15s ease,
@@ -228,8 +228,8 @@
   }
 
   .top-btn:hover {
-    color: var(--text-200);
-    background: var(--bg-300);
+    color: var(--text-100);
+    background: var(--color-hover);
   }
 
   .top-btn svg {

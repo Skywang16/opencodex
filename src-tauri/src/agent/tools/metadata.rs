@@ -17,6 +17,7 @@ pub enum ToolCategory {
     FileRead,
     FileWrite,
     CodeAnalysis,
+    Delegation,
     Execution,
     Network,
     FileSystem,
@@ -29,6 +30,7 @@ impl ToolCategory {
             Self::FileRead => "file_read",
             Self::FileWrite => "file_write",
             Self::CodeAnalysis => "code_analysis",
+            Self::Delegation => "delegation",
             Self::Execution => "execution",
             Self::Network => "network",
             Self::FileSystem => "filesystem",
@@ -43,7 +45,9 @@ impl ToolCategory {
             Self::FileRead | Self::CodeAnalysis | Self::FileSystem | Self::Network => {
                 ExecutionMode::Parallel
             }
-            Self::FileWrite | Self::Execution | Self::Terminal => ExecutionMode::Sequential,
+            Self::FileWrite | Self::Delegation | Self::Execution | Self::Terminal => {
+                ExecutionMode::Sequential
+            }
         }
     }
 }
@@ -76,6 +80,7 @@ impl ToolPriority {
 #[derive(Debug, Clone)]
 pub struct ToolMetadata {
     pub category: ToolCategory,
+    pub execution_mode: Option<ExecutionMode>,
     pub priority: ToolPriority,
     pub custom_timeout: Option<Duration>,
     pub rate_limit: Option<RateLimitConfig>,
@@ -92,6 +97,7 @@ impl ToolMetadata {
     pub fn new(category: ToolCategory, priority: ToolPriority) -> Self {
         Self {
             category,
+            execution_mode: None,
             priority,
             custom_timeout: None,
             rate_limit: None,
@@ -124,6 +130,11 @@ impl ToolMetadata {
 
     pub fn with_summary_key_arg(mut self, key_arg: &'static str) -> Self {
         self.summary_key_arg = Some(key_arg);
+        self
+    }
+
+    pub fn with_execution_mode(mut self, mode: ExecutionMode) -> Self {
+        self.execution_mode = Some(mode);
         self
     }
 

@@ -1,6 +1,6 @@
 # Subtask Summary
 
-Summarize this subtask session for the parent agent. The subtask may have been interrupted or failed, so the transcript may be incomplete.
+Summarize this child task session for the parent execution. The run may have been interrupted or failed, so the transcript may be incomplete.
 
 ## Guidelines
 

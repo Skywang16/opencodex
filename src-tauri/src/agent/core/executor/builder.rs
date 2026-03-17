@@ -18,6 +18,7 @@ use crate::agent::config::TaskExecutionConfig;
 use crate::agent::core::context::TaskContext;
 use crate::agent::core::executor::{ExecuteTaskParams, TaskExecutor};
 use crate::agent::error::{TaskExecutorError, TaskExecutorResult};
+use crate::agent::persistence::{AgentNodeRole, CreateAgentNodeParams, CreateRunParams, RunStatus};
 use crate::agent::types::TaskEvent;
 
 const MAX_ACTIVE_TASKS_GLOBAL: usize = 5;
@@ -43,9 +44,16 @@ impl TaskExecutor {
         }
 
         for task_id in to_cancel {
-            let _ = self
+            if let Err(err) = self
                 .cancel_task(&task_id, Some("superseded by new user message".to_string()))
-                .await;
+                .await
+            {
+                tracing::warn!(
+                    "Failed to cancel superseded running task '{}': {}",
+                    task_id,
+                    err
+                );
+            }
         }
 
         Ok(())
@@ -60,9 +68,17 @@ impl TaskExecutor {
 
         let requested_workspace = params.workspace_path.clone();
         let workspace_root =
-            tokio::fs::canonicalize(std::path::PathBuf::from(&requested_workspace))
-                .await
-                .unwrap_or_else(|_| std::path::PathBuf::from(&requested_workspace));
+            match tokio::fs::canonicalize(std::path::PathBuf::from(&requested_workspace)).await {
+                Ok(path) => path,
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to canonicalize requested workspace '{}': {}",
+                        requested_workspace,
+                        err
+                    );
+                    std::path::PathBuf::from(&requested_workspace)
+                }
+            };
         let cwd = workspace_root.to_string_lossy().to_string();
 
         let session = self
@@ -77,11 +93,10 @@ impl TaskExecutor {
                     params.session_id
                 ))
             })?;
-        let agent_type = params
-            .agent_type
-            .clone()
-            .filter(|v| !v.trim().is_empty())
-            .unwrap_or_else(|| session.agent_type.clone());
+        let mut agent_type = match params.agent_type.clone().filter(|v| !v.trim().is_empty()) {
+            Some(agent_type) => agent_type,
+            None => session.agent_type.clone(),
+        };
 
         let effective = self
             .settings_manager()
@@ -92,24 +107,24 @@ impl TaskExecutor {
         let agent_configs = AgentConfigLoader::load_for_workspace(&workspace_root)
             .await
             .map_err(|e| {
-                tracing::warn!("Failed to load agent configs: {}, using defaults", e);
-            })
-            .unwrap_or_default();
+                TaskExecutorError::ConfigurationError(format!("Failed to load agent configs: {e}"))
+            })?;
 
         // Get tool filter for the requested agent type.
         // If not found, fall back to "coder" config (the default primary agent).
-        let agent_tool_filter = agent_configs
-            .get(&agent_type)
-            .or_else(|| {
-                if agent_type != "coder" {
-                    tracing::debug!(
-                        "Agent type '{}' not found, falling back to 'coder'",
-                        agent_type
-                    );
-                }
-                agent_configs.get("coder")
-            })
-            .map(|cfg| cfg.tool_filter.clone());
+        let agent_tool_filter = if let Some(config) = agent_configs.get(&agent_type) {
+            Some(config.tool_filter.clone())
+        } else {
+            if agent_type != "coder" {
+                tracing::debug!(
+                    "Agent type '{}' not found, falling back to 'coder'",
+                    agent_type
+                );
+            }
+            agent_configs
+                .get("coder")
+                .map(|cfg| cfg.tool_filter.clone())
+        };
 
         // Initialize Skill system: automatically discover global and workspace skills
         let skill_manager = {
@@ -141,6 +156,7 @@ impl TaskExecutor {
             self.tool_confirmations(),
             Vec::new(),
             self.vector_search_engine(),
+            Some(self.lsp_manager()),
             skill_manager,
         )
         .await;
@@ -157,6 +173,13 @@ impl TaskExecutor {
         let user_prompt = if let Some(cmd_id) = params.command_id.as_deref() {
             if let Some(cmd_config) = CommandConfigLoader::get(cmd_id) {
                 let rendered = CommandConfigLoader::render(cmd_config, &raw_user_prompt);
+                if params.agent_type.is_none() {
+                    if let Some(command_agent) =
+                        rendered.agent.as_ref().filter(|v| !v.trim().is_empty())
+                    {
+                        agent_type = command_agent.clone();
+                    }
+                }
                 tracing::info!("Rendered built-in command '{}' template", cmd_id);
                 rendered.prompt
             } else {
@@ -167,24 +190,62 @@ impl TaskExecutor {
             raw_user_prompt.clone()
         };
 
-        let ctx = TaskContext::new(
-            task_id.clone(),
-            params.session_id,
+        let run = self
+            .agent_persistence()
+            .runs()
+            .create(CreateRunParams {
+                session_id: params.session_id,
+                status: RunStatus::Running,
+                summary: None,
+            })
+            .await
+            .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
+
+        let root_node = self
+            .agent_persistence()
+            .agent_nodes()
+            .create(CreateAgentNodeParams {
+                run_id: run.id,
+                parent_node_id: None,
+                backing_session_id: Some(params.session_id),
+                trigger_tool_call_id: None,
+                role: AgentNodeRole::Root,
+                profile: &agent_type,
+                title: &agent_type,
+                status: RunStatus::Running,
+                worktree_path: session.worktree_path.as_deref(),
+                model_id: Some(params.model_id.as_str()),
+            })
+            .await
+            .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
+
+        self.agent_persistence()
+            .runs()
+            .set_root_node_id(run.id, root_node.id)
+            .await
+            .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
+
+        let ctx = TaskContext::new(crate::agent::core::context::TaskContextInit {
+            task_id: task_id.clone(),
+            session_id: params.session_id,
+            run_id: run.id,
+            node_id: root_node.id,
             user_prompt,
             agent_type,
-            TaskExecutionConfig::default(),
-            cwd,
-            true,
+            config: TaskExecutionConfig::default(),
+            workspace_path: cwd,
+            updates_run_status: true,
+            emit_task_events: true,
             progress_channel,
-            crate::agent::core::context::TaskContextDeps {
+            deps: crate::agent::core::context::TaskContextDeps {
                 tool_registry,
                 repositories: Arc::clone(&self.database()),
                 agent_persistence: Arc::clone(&self.agent_persistence()),
                 checkpoint_service: self.checkpoint_service(),
                 workspace_changes: self.workspace_changes(),
-                subtask_runner: Arc::new(self.clone()),
+                task_execution_runner: Arc::new(self.clone()),
             },
-        )
+        })
         .await?;
 
         let ctx = Arc::new(ctx);

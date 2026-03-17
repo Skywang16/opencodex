@@ -53,9 +53,47 @@ export interface AIModelConfig {
     reasoningEffort?: string // OpenAI Responses API effort: minimal/low/medium/high/xhigh
   }
   oauthConfig?: OAuthConfig
-  useCustomBaseUrl?: boolean
   createdAt?: Date
   updatedAt?: Date
+}
+
+export interface AIModelFileEntry {
+  id: string
+  model: string
+  displayName?: string
+  modelType: ModelType
+  authType: AuthType
+  apiUrl?: string
+  apiKey?: string
+  options?: AIModelConfig['options']
+  oauthConfig?: OAuthConfig
+  createdAt?: Date
+  updatedAt?: Date
+}
+
+export interface AIModelProviderConfig {
+  models: AIModelFileEntry[]
+}
+
+export interface AIModelDefaults {
+  chatModelId?: string
+  embeddingModelId?: string
+}
+
+export interface AgentModelDefaults {
+  subagent?: string
+}
+
+export interface AgentModelConfig {
+  defaults?: AgentModelDefaults
+  bindings?: Record<string, string>
+}
+
+export interface AIModelsConfig {
+  version: number
+  defaults?: AIModelDefaults
+  agents?: AgentModelConfig
+  providers: Record<string, AIModelProviderConfig>
 }
 
 export interface AIResponse {

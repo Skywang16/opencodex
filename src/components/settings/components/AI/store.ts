@@ -14,15 +14,15 @@ export const useAISettingsStore = defineStore('ai-settings', () => {
   const isInitialized = ref(false)
 
   const hasModels = computed(() => {
-    return (settings.value?.models?.length || 0) > 0
+    return (settings.value?.models?.length ?? 0) > 0
   })
 
   const enabledModels = computed(() => {
-    return settings.value?.models || []
+    return settings.value?.models ?? []
   })
 
   const models = computed(() => {
-    return settings.value?.models || []
+    return settings.value?.models ?? []
   })
 
   const chatModels = computed(() => {
@@ -109,7 +109,6 @@ export const useAISettingsStore = defineStore('ai-settings', () => {
         modelType: updatedModel.modelType,
         options: updatedModel.options,
         oauthConfig: updatedModel.authType === AuthType.OAuth ? (updatedModel.oauthConfig ?? null) : null,
-        useCustomBaseUrl: updatedModel.useCustomBaseUrl,
       },
     }
 

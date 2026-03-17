@@ -9,6 +9,8 @@ pub type SetupResult<T> = Result<T, SetupError>;
 pub enum SetupError {
     #[error("Terminal state initialization failed: {0}")]
     TerminalState(String),
+    #[error("Environment configuration failed: {0}")]
+    Environment(String),
     #[error("Config paths initialization failed: {0}")]
     ConfigPaths(#[from] ConfigPathsError),
     #[error("Config manager initialization failed: {0}")]

@@ -7,7 +7,7 @@
 
 /// Recognized model families.
 ///
-/// Covers Chinese models (Qwen, GLM, MiniMax, Doubao, Moonshot/Kimi) and
+/// Covers Chinese models (Qwen, Glm, MiniMax, Doubao, Moonshot/Kimi) and
 /// international models (Mistral/Devstral, Grok/xAI).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelFamily {
@@ -18,7 +18,7 @@ pub enum ModelFamily {
     GoogleGemini,
     DeepSeek,
     Qwen,
-    GLM,
+    Glm,
     MiniMax,
     Doubao,
     Moonshot,
@@ -67,7 +67,7 @@ impl ModelFamily {
             || id.contains("zai-org/")
             || id.contains("chatglm")
         {
-            return Self::GLM;
+            return Self::Glm;
         }
 
         // MiniMax
@@ -131,7 +131,7 @@ impl ModelFamily {
             Self::GoogleGemini => "google-gemini",
             Self::DeepSeek => "deepseek",
             Self::Qwen => "qwen",
-            Self::GLM => "glm",
+            Self::Glm => "glm",
             Self::MiniMax => "minimax",
             Self::Doubao => "doubao",
             Self::Moonshot => "moonshot",
@@ -144,7 +144,7 @@ impl ModelFamily {
     /// Prompt profile key under `prompts/models/{profile_key}.md`.
     ///
     /// Multiple families can share the same profile:
-    /// - Chinese models (Qwen, GLM, MiniMax, Doubao, Moonshot) → "deepseek"
+    /// - Chinese models (Qwen, Glm, MiniMax, Doubao, Moonshot) → "deepseek"
     ///   (concise style, similar behavioral characteristics)
     /// - Grok → "openai-gpt" (similar autonomous style)
     /// - Mistral → "generic" (neutral style)
@@ -157,7 +157,7 @@ impl ModelFamily {
             Self::GoogleGemini => "google-gemini",
             Self::DeepSeek => "deepseek",
             Self::Qwen => "deepseek",
-            Self::GLM => "deepseek",
+            Self::Glm => "deepseek",
             Self::MiniMax => "deepseek",
             Self::Doubao => "deepseek",
             Self::Moonshot => "deepseek",
@@ -217,10 +217,10 @@ mod tests {
         // Chinese models
         assert_eq!(ModelFamily::detect("qwen-max"), ModelFamily::Qwen);
         assert_eq!(ModelFamily::detect("qwen-code-plus"), ModelFamily::Qwen);
-        assert_eq!(ModelFamily::detect("glm-4.7"), ModelFamily::GLM);
-        assert_eq!(ModelFamily::detect("glm-5"), ModelFamily::GLM);
-        assert_eq!(ModelFamily::detect("z-ai/glm-4"), ModelFamily::GLM);
-        assert_eq!(ModelFamily::detect("chatglm-turbo"), ModelFamily::GLM);
+        assert_eq!(ModelFamily::detect("glm-4.7"), ModelFamily::Glm);
+        assert_eq!(ModelFamily::detect("glm-5"), ModelFamily::Glm);
+        assert_eq!(ModelFamily::detect("z-ai/glm-4"), ModelFamily::Glm);
+        assert_eq!(ModelFamily::detect("chatglm-turbo"), ModelFamily::Glm);
         assert_eq!(ModelFamily::detect("minimax-m2"), ModelFamily::MiniMax);
         assert_eq!(ModelFamily::detect("abab-7"), ModelFamily::MiniMax);
         assert_eq!(ModelFamily::detect("doubao-pro"), ModelFamily::Doubao);
@@ -258,7 +258,7 @@ mod tests {
 
         // Shared profiles — Chinese models → deepseek
         assert_eq!(ModelFamily::Qwen.profile_key(), "deepseek");
-        assert_eq!(ModelFamily::GLM.profile_key(), "deepseek");
+        assert_eq!(ModelFamily::Glm.profile_key(), "deepseek");
         assert_eq!(ModelFamily::MiniMax.profile_key(), "deepseek");
         assert_eq!(ModelFamily::Doubao.profile_key(), "deepseek");
         assert_eq!(ModelFamily::Moonshot.profile_key(), "deepseek");

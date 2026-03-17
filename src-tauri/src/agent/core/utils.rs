@@ -15,10 +15,11 @@ pub fn deduplicate_tool_uses(
     let mut deduplicated = Vec::new();
 
     for (id, name, args) in tool_calls.iter() {
-        let key = (
-            name.clone(),
-            serde_json::to_string(args).unwrap_or_default(),
-        );
+        let Ok(serialized_args) = serde_json::to_string(args) else {
+            deduplicated.push((id.clone(), name.clone(), args.clone()));
+            continue;
+        };
+        let key = (name.clone(), serialized_args);
 
         if seen.insert(key) {
             deduplicated.push((id.clone(), name.clone(), args.clone()));
@@ -32,26 +33,24 @@ pub fn deduplicate_tool_uses(
 pub fn tool_call_result_to_outcome(result: &AgentToolCallResult) -> ToolResult {
     let content = match result.status {
         ToolResultStatus::Success => {
-            let result_str = serde_json::to_string(&result.result)
-                .unwrap_or_else(|_| "Tool execution succeeded".to_string());
+            let result_str = match serde_json::to_string(&result.result) {
+                Ok(serialized) => serialized,
+                Err(err) => format!("<failed to serialize tool result: {err}>"),
+            };
             ToolResultContent::Success(result_str)
         }
         ToolResultStatus::Error => {
-            let message = result
-                .result
-                .get("error")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Tool execution failed")
-                .to_string();
+            let message = match result.result.get("error").and_then(|v| v.as_str()) {
+                Some(message) => message.to_string(),
+                None => "Tool returned error status without error message".to_string(),
+            };
             ToolResultContent::Error(message)
         }
         ToolResultStatus::Cancelled => {
-            let message = result
-                .result
-                .get("cancelled")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Tool execution cancelled")
-                .to_string();
+            let message = match result.result.get("cancelled").and_then(|v| v.as_str()) {
+                Some(message) => message.to_string(),
+                None => "Tool returned cancelled status without cancel reason".to_string(),
+            };
             ToolResultContent::Error(message)
         }
     };

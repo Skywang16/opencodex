@@ -241,6 +241,13 @@ pub struct CreateMessageRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<SystemPrompt>,
 
+    /// Additional developer-role context blocks.
+    /// For Responses API, each entry becomes a dedicated `developer` input message.
+    /// Provider adapters that do not support developer role must map this field
+    /// into their closest equivalent instruction layer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub developer_context: Option<Vec<String>>,
+
     /// Tool definition list (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,

@@ -75,6 +75,8 @@
     "personality_description": "自定义 AI 助手的个性",
     "plan_mode": "计划模式",
     "plan_mode_description": "切换计划模式",
+    "orchestrate_mode": "编排模式",
+    "orchestrate_mode_description": "为已探索任务协调并行子代理执行",
     "skill_creator": "技能创建器",
     "skill_creator_description": "创建或更新技能",
     "skill_installer": "技能安装器",
@@ -156,6 +158,29 @@
   "ai": {
     "select_model": "选择AI模型"
   },
+  "lsp": {
+    "title": "语言服务器",
+    "description": "LSP 为 agent 提供更强的语义跳转、引用查找、悬浮信息和诊断能力。",
+    "status": {
+      "ready": "已就绪",
+      "starting": "启动中",
+      "offline": "离线"
+    },
+    "summary": {
+      "ready": "就绪服务",
+      "detected": "可见服务",
+      "workspace": "工作区",
+      "no_workspace": "尚未选择工作区"
+    },
+    "fields": {
+      "documents": "打开文档数",
+      "diagnostics": "诊断文件数"
+    },
+    "empty": {
+      "title": "当前没有激活的语言服务器",
+      "description": "语言服务器会在需要时自动启动。"
+    }
+  },
   "ai_model": {
     "add_title": "添加 AI 模型",
     "edit_title": "编辑 AI 模型",
@@ -190,8 +215,6 @@
     "api_key_placeholder": "输入您的 API Key",
     "max_tokens": "最大 Token 数",
     "max_tokens_placeholder": "4096",
-    "use_custom_base_url": "使用自定义 Base URL",
-    "use_custom_model": "自定义模型 ID",
     "responses_api": "Responses API 格式",
     "reasoning_model": "推理模型",
     "add_model_hint": "添加模型以开始使用 AI 功能",
@@ -410,7 +433,8 @@
     "delete_workspace": "删除工作区",
     "delete_workspace_confirm": "确定要删除此工作区吗？",
     "delete_session": "删除对话",
-    "delete_session_confirm": "确定要删除此对话吗？"
+    "delete_session_confirm": "确定要删除此对话吗？",
+    "just_now": "刚刚"
   },
   "skills_page": {
     "title": "Skills",

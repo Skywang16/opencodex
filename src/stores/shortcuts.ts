@@ -17,6 +17,10 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 
 export const useShortcutStore = defineStore('shortcuts', () => {
+  const formatErrorMessage = (error: unknown): string => {
+    return error instanceof Error ? error.message : String(error)
+  }
+
   // Simplified state: flattened structure
   const config = ref<ShortcutsConfig | null>(null)
   const currentPlatform = ref<Platform | null>(null)
@@ -42,7 +46,7 @@ export const useShortcutStore = defineStore('shortcuts', () => {
     try {
       return await operation()
     } catch (err) {
-      error.value = `Operation failed: ${err}`
+      error.value = `Operation failed: ${formatErrorMessage(err)}`
       throw err
     } finally {
       loading.value = false

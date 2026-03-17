@@ -68,7 +68,9 @@ impl BuildState {
     fn new(root: String) -> Self {
         let (tx, _rx) = broadcast::channel::<VectorBuildProgress>(64);
         let progress = VectorBuildProgress::new(root);
-        let _ = tx.send(progress.clone());
+        if let Err(err) = tx.send(progress.clone()) {
+            warn!("Failed to broadcast initial vector build progress: {}", err);
+        }
         Self {
             progress: Mutex::new(progress),
             tx,
@@ -86,7 +88,9 @@ impl BuildState {
     fn update(&self, f: impl FnOnce(&mut VectorBuildProgress)) {
         let mut p = self.progress.lock();
         f(&mut p);
-        let _ = self.tx.send(p.clone());
+        if let Err(err) = self.tx.send(p.clone()) {
+            warn!("Failed to broadcast vector build progress update: {}", err);
+        }
     }
 }
 

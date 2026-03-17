@@ -2,9 +2,13 @@ use serde::{Deserialize, Serialize};
 
 pub fn now_timestamp_ms() -> u64 {
     let now = std::time::SystemTime::now();
-    now.duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    match now.duration_since(std::time::UNIX_EPOCH) {
+        Ok(duration) => duration.as_millis() as u64,
+        Err(err) => {
+            tracing::warn!("System clock is before UNIX_EPOCH: {}", err);
+            0
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

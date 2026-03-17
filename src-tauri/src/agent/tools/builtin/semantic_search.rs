@@ -77,7 +77,7 @@ impl SemanticSearchTool {
                 continue;
             }
             let span = r.span.clone();
-            let snippet = extract_content_from_span(&r.file_path, &span).await;
+            let snippet = extract_content_from_span(&r.file_path, &span).await?;
             let language = language_from_path(&r.file_path);
             entries.push(SemanticResultEntry {
                 file_path: r.file_path.display().to_string(),
@@ -199,14 +199,30 @@ Examples:
         match result {
             Ok(entries) => {
                 for entry in &entries {
-                    if let Ok(p) = PathBuf::from(&entry.file_path).canonicalize() {
-                        let _ = context
-                            .file_tracker()
-                            .track_file_operation(FileOperationRecord::new(
-                                p.as_path(),
-                                FileRecordSource::FileMentioned,
-                            ))
-                            .await;
+                    match PathBuf::from(&entry.file_path).canonicalize() {
+                        Ok(p) => {
+                            if let Err(err) = context
+                                .file_tracker()
+                                .track_file_operation(FileOperationRecord::new(
+                                    p.as_path(),
+                                    FileRecordSource::FileMentioned,
+                                ))
+                                .await
+                            {
+                                tracing::warn!(
+                                    "Failed to track semantic search file mention '{}': {}",
+                                    p.display(),
+                                    err
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                "Failed to canonicalize semantic search file mention '{}': {}",
+                                entry.file_path,
+                                err
+                            );
+                        }
                     }
                 }
 
@@ -265,35 +281,58 @@ fn language_from_path(path: &Path) -> String {
     }
 }
 
-async fn extract_content_from_span(file: &Path, span: &crate::vector_db::core::Span) -> String {
-    match fs::read_to_string(file).await {
-        Ok(content) => {
-            let lines: Vec<&str> = content.lines().collect();
-            if span.line_start == 0 || span.line_start > lines.len() {
-                return String::new();
-            }
-            let start_idx = span.line_start.saturating_sub(1);
-            let end_idx = span
-                .line_end
-                .saturating_sub(1)
-                .min(lines.len().saturating_sub(1));
-            let snippet = if start_idx <= end_idx && end_idx < lines.len() {
-                lines
-                    .get(start_idx..=end_idx)
-                    .map(|l| l.join("\n"))
-                    .unwrap_or_default()
-            } else if start_idx < lines.len() {
-                lines
-                    .get(start_idx)
-                    .map(|s| s.to_string())
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
-            truncate_snippet(&snippet)
-        }
-        Err(_) => String::new(),
+async fn extract_content_from_span(
+    file: &Path,
+    span: &crate::vector_db::core::Span,
+) -> Result<String, String> {
+    let content = fs::read_to_string(file)
+        .await
+        .map_err(|err| format!("Failed to read {}: {err}", file.display()))?;
+    let lines: Vec<&str> = content.lines().collect();
+    if span.line_start == 0 || span.line_start > lines.len() {
+        return Err(format!(
+            "Invalid span start {} for {}",
+            span.line_start,
+            file.display()
+        ));
     }
+    let start_idx = span.line_start.saturating_sub(1);
+    let end_idx = span
+        .line_end
+        .saturating_sub(1)
+        .min(lines.len().saturating_sub(1));
+    let snippet = if start_idx <= end_idx && end_idx < lines.len() {
+        lines
+            .get(start_idx..=end_idx)
+            .ok_or_else(|| {
+                format!(
+                    "Failed to slice span {}-{} for {}",
+                    span.line_start,
+                    span.line_end,
+                    file.display()
+                )
+            })?
+            .join("\n")
+    } else if start_idx < lines.len() {
+        lines
+            .get(start_idx)
+            .ok_or_else(|| {
+                format!(
+                    "Failed to read line {} for {}",
+                    span.line_start,
+                    file.display()
+                )
+            })?
+            .to_string()
+    } else {
+        return Err(format!(
+            "Invalid span {}-{} for {}",
+            span.line_start,
+            span.line_end,
+            file.display()
+        ));
+    };
+    Ok(truncate_snippet(&snippet))
 }
 
 fn truncate_snippet(snippet: &str) -> String {

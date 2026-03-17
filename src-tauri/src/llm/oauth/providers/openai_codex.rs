@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use reqwest::RequestBuilder;
 use serde_json::{json, Value};
+use tracing::warn;
 
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const AUTH_ENDPOINT: &str = "https://auth.openai.com/oauth/authorize";
@@ -24,33 +25,97 @@ impl OpenAiCodexProvider {
         }
     }
 
+    fn push_account_id_candidate(
+        candidates: &mut Vec<String>,
+        value: Option<&Value>,
+        label: &'static str,
+    ) {
+        let Some(value) = value else {
+            return;
+        };
+
+        let Some(account_id) = value.as_str().map(str::trim) else {
+            tracing::warn!("OpenAI Codex OAuth JWT claim '{}' is not a string", label);
+            return;
+        };
+
+        if account_id.is_empty() {
+            tracing::warn!("OpenAI Codex OAuth JWT claim '{}' is empty", label);
+            return;
+        }
+
+        if !candidates.iter().any(|candidate| candidate == account_id) {
+            candidates.push(account_id.to_string());
+        }
+    }
+
     /// Extract account_id from JWT
     fn extract_account_id_from_jwt(token: &str) -> Option<String> {
         let parts: Vec<&str> = token.split('.').collect();
         if parts.len() != 3 {
+            tracing::warn!("OpenAI Codex OAuth token is not a valid JWT");
             return None;
         }
 
         // Decode payload (base64url)
-        let payload = URL_SAFE_NO_PAD.decode(parts[1]).ok()?;
-        let claims: Value = serde_json::from_slice(&payload).ok()?;
+        let payload = match URL_SAFE_NO_PAD.decode(parts[1]) {
+            Ok(payload) => payload,
+            Err(err) => {
+                tracing::warn!("Failed to decode OpenAI Codex OAuth JWT payload: {}", err);
+                return None;
+            }
+        };
+        let claims: Value = match serde_json::from_slice(&payload) {
+            Ok(claims) => claims,
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to parse OpenAI Codex OAuth JWT payload JSON: {}",
+                    err
+                );
+                return None;
+            }
+        };
 
-        // Try to extract from multiple fields
-        claims
-            .get("chatgpt_account_id")
-            .or_else(|| {
-                claims
-                    .get("https://api.openai.com/auth")
-                    .and_then(|v| v.get("chatgpt_account_id"))
-            })
-            .or_else(|| {
-                claims
-                    .get("organizations")
-                    .and_then(|orgs| orgs.as_array()?.first())
-                    .and_then(|org| org.get("id"))
-            })
-            .and_then(|v| v.as_str())
-            .map(String::from)
+        let mut candidates = Vec::new();
+        Self::push_account_id_candidate(
+            &mut candidates,
+            claims.get("chatgpt_account_id"),
+            "chatgpt_account_id",
+        );
+        Self::push_account_id_candidate(
+            &mut candidates,
+            claims
+                .get("https://api.openai.com/auth")
+                .and_then(|value| value.get("chatgpt_account_id")),
+            "https://api.openai.com/auth.chatgpt_account_id",
+        );
+        Self::push_account_id_candidate(
+            &mut candidates,
+            claims
+                .get("organizations")
+                .and_then(Value::as_array)
+                .and_then(|orgs| orgs.first())
+                .and_then(|org| org.get("id")),
+            "organizations[0].id",
+        );
+
+        match candidates.len() {
+            0 => None,
+            1 => candidates.into_iter().next(),
+            _ => {
+                tracing::warn!(
+                    "Conflicting OpenAI Codex OAuth account ID claims found in JWT: {:?}",
+                    candidates
+                );
+                None
+            }
+        }
+    }
+}
+
+impl Default for OpenAiCodexProvider {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -79,7 +144,7 @@ impl OAuthProvider for OpenAiCodexProvider {
         ];
 
         let query = serde_urlencoded::to_string(params)
-            .map_err(|e| OAuthError::Other(format!("Failed to encode query: {}", e)))?;
+            .map_err(|e| OAuthError::Other(format!("Failed to encode query: {e}")))?;
 
         Ok(format!("{AUTH_ENDPOINT}?{query}"))
     }
@@ -108,10 +173,15 @@ impl OAuthProvider for OpenAiCodexProvider {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = response.text().await.unwrap_or_else(|err| {
+                warn!(
+                    "Failed to read OpenAI Codex token exchange error body for status {}: {}",
+                    status, err
+                );
+                format!("<failed to read response body: {err}>")
+            });
             return Err(OAuthError::TokenExchange(format!(
-                "Status {}: {}",
-                status, body
+                "Status {status}: {body}"
             )));
         }
 
@@ -135,11 +205,14 @@ impl OAuthProvider for OpenAiCodexProvider {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(OAuthError::TokenRefresh(format!(
-                "Status {}: {}",
-                status, body
-            )));
+            let body = response.text().await.unwrap_or_else(|err| {
+                warn!(
+                    "Failed to read OpenAI Codex token refresh error body for status {}: {}",
+                    status, err
+                );
+                format!("<failed to read response body: {err}>")
+            });
+            return Err(OAuthError::TokenRefresh(format!("Status {status}: {body}")));
         }
 
         let token_response: TokenResponse = response.json().await?;

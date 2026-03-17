@@ -168,36 +168,20 @@ impl Default for CleanupConfig {
 impl TerminalSystemConfig {
     /// Apply environment variable overrides
     pub fn override_from_env(&mut self) {
-        if let Ok(val) = std::env::var("TERMINAL_BUFFER_MAX_SIZE") {
-            if let Ok(size) = val.parse::<usize>() {
-                self.buffer.max_size = size;
-            }
+        if let Some(value) = read_usize_env("TERMINAL_BUFFER_MAX_SIZE") {
+            self.buffer.max_size = value;
         }
-
-        if let Ok(val) = std::env::var("TERMINAL_BUFFER_KEEP_SIZE") {
-            if let Ok(size) = val.parse::<usize>() {
-                self.buffer.keep_size = size;
-            }
+        if let Some(value) = read_usize_env("TERMINAL_BUFFER_KEEP_SIZE") {
+            self.buffer.keep_size = value;
         }
-
-        // Shell configuration overrides
-        if let Ok(val) = std::env::var("TERMINAL_SHELL_CACHE_TTL") {
-            if let Ok(ttl) = val.parse::<u64>() {
-                self.shell.cache_ttl_seconds = ttl;
-            }
+        if let Some(value) = read_u64_env("TERMINAL_SHELL_CACHE_TTL") {
+            self.shell.cache_ttl_seconds = value;
         }
-
-        // Cleanup configuration overrides
-        if let Ok(val) = std::env::var("TERMINAL_CLEANUP_INTERVAL") {
-            if let Ok(interval) = val.parse::<u64>() {
-                self.cleanup.interval_seconds = interval;
-            }
+        if let Some(value) = read_u64_env("TERMINAL_CLEANUP_INTERVAL") {
+            self.cleanup.interval_seconds = value;
         }
-
-        if let Ok(val) = std::env::var("TERMINAL_AUTO_CLEANUP") {
-            if let Ok(enabled) = val.parse::<bool>() {
-                self.cleanup.auto_cleanup_enabled = enabled;
-            }
+        if let Some(value) = read_bool_env("TERMINAL_AUTO_CLEANUP") {
+            self.cleanup.auto_cleanup_enabled = value;
         }
     }
 
@@ -259,6 +243,57 @@ impl TerminalSystemConfig {
     }
 }
 
+fn read_usize_env(key: &str) -> Option<usize> {
+    match std::env::var(key) {
+        Ok(raw) => match raw.parse::<usize>() {
+            Ok(value) => Some(value),
+            Err(err) => {
+                tracing::warn!("invalid {} value '{}': {}", key, raw, err);
+                None
+            }
+        },
+        Err(std::env::VarError::NotPresent) => None,
+        Err(err) => {
+            tracing::warn!("failed to read {}: {}", key, err);
+            None
+        }
+    }
+}
+
+fn read_u64_env(key: &str) -> Option<u64> {
+    match std::env::var(key) {
+        Ok(raw) => match raw.parse::<u64>() {
+            Ok(value) => Some(value),
+            Err(err) => {
+                tracing::warn!("invalid {} value '{}': {}", key, raw, err);
+                None
+            }
+        },
+        Err(std::env::VarError::NotPresent) => None,
+        Err(err) => {
+            tracing::warn!("failed to read {}: {}", key, err);
+            None
+        }
+    }
+}
+
+fn read_bool_env(key: &str) -> Option<bool> {
+    match std::env::var(key) {
+        Ok(raw) => match raw.parse::<bool>() {
+            Ok(value) => Some(value),
+            Err(err) => {
+                tracing::warn!("invalid {} value '{}': {}", key, raw, err);
+                None
+            }
+        },
+        Err(std::env::VarError::NotPresent) => None,
+        Err(err) => {
+            tracing::warn!("failed to read {}: {}", key, err);
+            None
+        }
+    }
+}
+
 /// Global configuration storage
 static GLOBAL_CONFIG: OnceLock<Mutex<TerminalSystemConfig>> = OnceLock::new();
 
@@ -308,9 +343,10 @@ impl ConfigManager {
 
     /// Return a snapshot of the configuration
     pub fn config_get() -> TerminalSystemConfig {
-        let config = Self::get()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let config = match Self::get().lock() {
+            Ok(config) => config,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         config.clone()
     }
 

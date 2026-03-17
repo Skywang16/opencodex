@@ -147,7 +147,19 @@
     <transition name="expand">
       <div v-if="isExpanded && hasResult" class="tool-result" :class="{ 'has-scroll': hasScroll }" @click.stop>
         <div ref="resultWrapperRef" class="result-wrapper" @scroll="checkScroll">
-          <pre v-if="shouldHighlight" ref="resultTextRef" class="result-text"><code>{{ cleanToolResult }}</code></pre>
+          <LspResult
+            v-if="isLspTool"
+            :action="lspAction"
+            :metadata="toolMetadata"
+            :result-text="
+              typeof cleanToolResult === 'string' ? cleanToolResult : JSON.stringify(cleanToolResult, null, 2)
+            "
+          />
+          <pre
+            v-else-if="shouldHighlight"
+            ref="resultTextRef"
+            class="result-text"
+          ><code>{{ cleanToolResult }}</code></pre>
           <pre v-else class="result-text-plain">{{ cleanToolResult }}</pre>
         </div>
       </div>
@@ -163,6 +175,7 @@
   import stripAnsi from 'strip-ansi'
   import { computed, nextTick, ref, watch } from 'vue'
   import EditResult from './components/EditResult.vue'
+  import LspResult from './components/LspResult.vue'
 
   interface EditResultData {
     file: string
@@ -233,6 +246,11 @@
   const toolMetadata = computed(() => (props.block.output?.metadata as Record<string, unknown>) || null)
 
   const isShellTool = computed(() => toolName.value === 'shell')
+  const isLspTool = computed(() => toolName.value === 'lsp_query')
+  const lspAction = computed(() => {
+    const action = toolParams.value?.action
+    return typeof action === 'string' ? action : ''
+  })
   const shellPaneId = computed(() => {
     if (!isShellTool.value) return null
     const paneId = toolMetadata.value?.paneId
@@ -332,6 +350,8 @@
         return 'Glob '
       case 'semantic_search':
         return 'Searched '
+      case 'lsp_query':
+        return 'LSP '
       case 'multi_edit_file':
         return 'Edited '
       case 'task':
@@ -404,6 +424,23 @@
       case 'semantic_search':
         baseText = formatText(params?.query as string)
         break
+      case 'lsp_query': {
+        const action = typeof params?.action === 'string' ? params.action : 'query'
+        const path = typeof params?.path === 'string' ? formatPath(params.path) : ''
+        const query = typeof params?.query === 'string' ? formatText(params.query) : ''
+        const line = typeof params?.line === 'number' ? params.line + 1 : null
+        const character = typeof params?.character === 'number' ? params.character + 1 : null
+        if (path && line !== null && character !== null && ['hover', 'definition', 'references'].includes(action)) {
+          baseText = `${action} ${path} @ ${line}:${character}`
+        } else if (path) {
+          baseText = `${action} ${path}`
+        } else if (query) {
+          baseText = `${action} ${query}`
+        } else {
+          baseText = action
+        }
+        break
+      }
       case 'multi_edit_file':
         baseText = formatPath(params?.path as string)
         break
@@ -464,7 +501,8 @@
     try {
       const urlObj = new URL(url)
       return urlObj.hostname + (urlObj.pathname !== '/' ? urlObj.pathname : '')
-    } catch {
+    } catch (error) {
+      console.warn(`Failed to parse tool URL '${url}', using raw value:`, error)
       return url
     }
   }

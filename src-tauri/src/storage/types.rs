@@ -49,12 +49,42 @@ impl Default for WindowGeometry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub enum TerminalRuntimeKind {
+    Workspace,
+    Task,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskTerminalMode {
+    Blocking,
+    Background,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskTerminalStatus {
+    Initializing,
+    Running,
+    Completed,
+    Failed,
+    Aborted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalRuntimeState {
     pub id: u32,
     pub cwd: String,
     pub shell: String,
     /// Pre-computed display title for the tab, calculated by the backend.
     pub display_title: String,
+    pub kind: TerminalRuntimeKind,
+    pub session_id: Option<i64>,
+    pub task_terminal_id: Option<String>,
+    pub source_label: Option<String>,
+    pub task_mode: Option<TaskTerminalMode>,
+    pub task_status: Option<TaskTerminalStatus>,
 }
 
 /// Configuration section type

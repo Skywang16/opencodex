@@ -19,6 +19,7 @@ use crate::agent::context::FileContextTracker;
 use crate::agent::core::executor::ImageAttachment;
 use crate::agent::core::status::AgentTaskStatus;
 use crate::agent::error::{TaskExecutorError, TaskExecutorResult};
+use crate::agent::persistence::repositories::CreateMessageParams;
 use crate::agent::persistence::AgentPersistence;
 use crate::agent::react::runtime::ReactRuntime;
 use crate::agent::react::types::ReactRuntimeConfig;
@@ -36,30 +37,35 @@ use crate::llm::anthropic_types::{
 };
 use crate::storage::DatabaseManager;
 use tokio_util::sync::CancellationToken;
+use tracing::warn;
 
 #[async_trait::async_trait]
-pub trait SubtaskRunner: Send + Sync {
-    async fn run_subtask(
+pub trait TaskExecutionRunner: Send + Sync {
+    async fn run_task_execution(
         &self,
         parent: &TaskContext,
-        request: SubtaskRequest,
-    ) -> TaskExecutorResult<SubtaskResponse>;
+        request: TaskExecutionRequest,
+    ) -> TaskExecutorResult<TaskExecutionResponse>;
 }
 
 #[derive(Debug, Clone)]
-pub struct SubtaskRequest {
+pub struct TaskExecutionRequest {
     pub description: String,
     pub prompt: String,
-    pub subagent_type: String,
+    pub profile: String,
     pub session_id: Option<i64>,
     pub call_id: Option<String>,
-    /// Optional model override for this subtask.  When set, the child session
+    /// Optional model override for this delegated execution. When set, the backing session
     /// uses this model instead of inheriting the parent's model_id.
     pub model_id: Option<String>,
+    /// When true, create an isolated git worktree for this child execution session.
+    /// The child execution operates in its own branch, preventing file conflicts
+    /// when multiple child executions run in parallel.
+    pub use_worktree: bool,
 }
 
 #[derive(Debug, Clone)]
-pub struct SubtaskResponse {
+pub struct TaskExecutionResponse {
     pub session_id: i64,
     pub status: SubtaskStatus,
     pub summary: Option<String>,
@@ -71,21 +77,39 @@ pub struct TaskContextDeps {
     pub agent_persistence: Arc<AgentPersistence>,
     pub checkpoint_service: Option<Arc<CheckpointService>>,
     pub workspace_changes: Arc<WorkspaceChangeJournal>,
-    pub subtask_runner: Arc<dyn SubtaskRunner>,
+    pub task_execution_runner: Arc<dyn TaskExecutionRunner>,
+}
+
+pub struct TaskContextInit {
+    pub task_id: String,
+    pub session_id: i64,
+    pub run_id: i64,
+    pub node_id: i64,
+    pub user_prompt: String,
+    pub agent_type: String,
+    pub config: TaskExecutionConfig,
+    pub workspace_path: String,
+    pub updates_run_status: bool,
+    pub emit_task_events: bool,
+    pub progress_channel: Option<Channel<TaskEvent>>,
+    pub deps: TaskContextDeps,
 }
 
 pub struct TaskContext {
     pub task_id: Arc<str>,
     pub session_id: i64,
+    pub run_id: i64,
+    pub node_id: i64,
     pub user_prompt: Arc<str>,
     pub agent_type: Arc<str>,
     pub cwd: Arc<str>,
     emit_task_events: bool,
+    updates_run_status: bool,
     config: TaskExecutionConfig,
 
     session: Arc<SessionContext>,
     tool_registry: Arc<ToolRegistry>,
-    subtask_runner: Arc<dyn SubtaskRunner>,
+    task_execution_runner: Arc<dyn TaskExecutionRunner>,
     state_manager: Arc<StateManager>,
     checkpoint_service: Option<Arc<CheckpointService>>,
     active_checkpoint: Arc<RwLock<Option<ActiveCheckpoint>>>,
@@ -100,17 +124,21 @@ pub struct TaskContext {
 
 impl TaskContext {
     /// Construct a fresh context for a new task.
-    pub async fn new(
-        task_id: String,
-        session_id: i64,
-        user_prompt: String,
-        agent_type: String,
-        config: TaskExecutionConfig,
-        workspace_path: String,
-        emit_task_events: bool,
-        progress_channel: Option<Channel<TaskEvent>>,
-        deps: TaskContextDeps,
-    ) -> TaskExecutorResult<Self> {
+    pub async fn new(init: TaskContextInit) -> TaskExecutorResult<Self> {
+        let TaskContextInit {
+            task_id,
+            session_id,
+            run_id,
+            node_id,
+            user_prompt,
+            agent_type,
+            config,
+            workspace_path,
+            updates_run_status,
+            emit_task_events,
+            progress_channel,
+            deps,
+        } = init;
         let agent_config = AgentConfig::default();
         let runtime_config = ReactRuntimeConfig {
             max_iterations: agent_config.max_react_num,
@@ -153,14 +181,17 @@ impl TaskContext {
         Ok(Self {
             task_id: Arc::from(task_id.as_str()),
             session_id,
+            run_id,
+            node_id,
             user_prompt: Arc::from(user_prompt.as_str()),
             agent_type: Arc::from(agent_type.as_str()),
             cwd: Arc::from(normalized_workspace.as_str()),
             emit_task_events,
+            updates_run_status,
             config,
             session,
             tool_registry: deps.tool_registry,
-            subtask_runner: deps.subtask_runner,
+            task_execution_runner: deps.task_execution_runner,
             state_manager: Arc::new(StateManager::new(task_state)),
             checkpoint_service: deps.checkpoint_service,
             active_checkpoint: Arc::new(RwLock::new(None)),
@@ -268,8 +299,8 @@ impl TaskContext {
         Arc::clone(&self.tool_registry)
     }
 
-    pub fn subtask_runner(&self) -> &dyn SubtaskRunner {
-        self.subtask_runner.as_ref()
+    pub fn task_execution_runner(&self) -> &dyn TaskExecutionRunner {
+        self.task_execution_runner.as_ref()
     }
 
     pub async fn status(&self) -> AgentTaskStatus {
@@ -294,6 +325,30 @@ impl TaskContext {
             .update_status(self.session_id, session_status)
             .await
             .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
+
+        let run_status = match status {
+            AgentTaskStatus::Created | AgentTaskStatus::Paused => {
+                crate::agent::persistence::RunStatus::Queued
+            }
+            AgentTaskStatus::Running => crate::agent::persistence::RunStatus::Running,
+            AgentTaskStatus::Completed => crate::agent::persistence::RunStatus::Completed,
+            AgentTaskStatus::Error => crate::agent::persistence::RunStatus::Error,
+            AgentTaskStatus::Cancelled => crate::agent::persistence::RunStatus::Cancelled,
+        };
+
+        self.agent_persistence()
+            .agent_nodes()
+            .update_status(self.node_id, run_status)
+            .await
+            .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
+
+        if self.updates_run_status {
+            self.agent_persistence()
+                .runs()
+                .update_status(self.run_id, run_status)
+                .await
+                .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
+        }
 
         self.state_manager
             .update_task_status(map_status(&status), None)
@@ -445,6 +500,10 @@ impl TaskContext {
         self.states.execution.read().await.messages_vec()
     }
 
+    pub async fn get_developer_context(&self) -> Vec<String> {
+        self.states.execution.read().await.developer_context.clone()
+    }
+
     pub async fn get_system_prompt(&self) -> Option<SystemPrompt> {
         let exec = self.states.execution.read().await;
         match (&exec.system_prompt, &exec.system_prompt_overlay) {
@@ -550,6 +609,15 @@ impl TaskContext {
         Ok(())
     }
 
+    pub async fn set_developer_context(&self, items: Vec<String>) -> TaskExecutorResult<()> {
+        self.states.execution.write().await.developer_context = items
+            .into_iter()
+            .map(|item| item.trim().to_string())
+            .filter(|item| !item.is_empty())
+            .collect();
+        Ok(())
+    }
+
     /// A transient overlay appended to the base system prompt (e.g. loop warnings).
     pub async fn set_system_prompt_overlay(
         &self,
@@ -605,18 +673,18 @@ impl TaskContext {
         let user_message = self
             .agent_persistence()
             .messages()
-            .create(
-                self.session_id,
-                UiMessageRole::User,
-                MessageStatus::Completed,
-                user_blocks,
-                false,
-                internal_user_message,
-                self.agent_type.as_ref(),
-                None,
-                None,
-                None,
-            )
+            .create(CreateMessageParams {
+                session_id: self.session_id,
+                role: UiMessageRole::User,
+                status: MessageStatus::Completed,
+                blocks: user_blocks,
+                is_summary: false,
+                is_internal: internal_user_message,
+                agent_type: self.agent_type.as_ref(),
+                parent_message_id: None,
+                model_id: None,
+                provider_id: None,
+            })
             .await
             .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
 
@@ -629,18 +697,18 @@ impl TaskContext {
         let assistant_message = self
             .agent_persistence()
             .messages()
-            .create(
-                self.session_id,
-                UiMessageRole::Assistant,
-                MessageStatus::Streaming,
-                Vec::new(),
-                false,
-                false,
-                self.agent_type.as_ref(),
-                Some(user_message.id),
-                None,
-                None,
-            )
+            .create(CreateMessageParams {
+                session_id: self.session_id,
+                role: UiMessageRole::Assistant,
+                status: MessageStatus::Streaming,
+                blocks: Vec::new(),
+                is_summary: false,
+                is_internal: false,
+                agent_type: self.agent_type.as_ref(),
+                parent_message_id: Some(user_message.id),
+                model_id: None,
+                provider_id: None,
+            })
             .await
             .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
 
@@ -977,14 +1045,20 @@ impl TaskContext {
         .await?;
 
         for (block_id, block) in changed_blocks {
-            let _ = self
+            if let Err(err) = self
                 .emit_event(TaskEvent::BlockUpdated {
                     task_id: self.task_id.to_string(),
                     message_id,
                     block_id,
                     block,
                 })
-                .await;
+                .await
+            {
+                warn!(
+                    "Failed to emit block update while failing assistant message: {}",
+                    err
+                );
+            }
         }
 
         self.emit_event(TaskEvent::MessageFinished {
@@ -992,7 +1066,11 @@ impl TaskContext {
             message_id,
             status: MessageStatus::Error,
             finished_at: now,
-            duration_ms: message.duration_ms.unwrap_or(0),
+            duration_ms: message.duration_ms.unwrap_or_else(|| {
+                now.signed_duration_since(message.created_at)
+                    .num_milliseconds()
+                    .max(0)
+            }),
             token_usage: None,
             context_usage: None,
         })
@@ -1064,14 +1142,20 @@ impl TaskContext {
         self.states.messages.lock().await.assistant_message = Some(message.clone());
 
         for (block_id, block) in changed_blocks {
-            let _ = self
+            if let Err(err) = self
                 .emit_event(TaskEvent::BlockUpdated {
                     task_id: self.task_id.to_string(),
                     message_id: message.id,
                     block_id,
                     block,
                 })
-                .await;
+                .await
+            {
+                warn!(
+                    "Failed to emit block update while cancelling assistant message: {}",
+                    err
+                );
+            }
         }
 
         self.emit_event(TaskEvent::MessageFinished {
@@ -1079,7 +1163,11 @@ impl TaskContext {
             message_id: message.id,
             status: MessageStatus::Cancelled,
             finished_at: now,
-            duration_ms: message.duration_ms.unwrap_or(0),
+            duration_ms: message.duration_ms.unwrap_or_else(|| {
+                now.signed_duration_since(message.created_at)
+                    .num_milliseconds()
+                    .max(0)
+            }),
             token_usage: None,
             context_usage: None,
         })
@@ -1110,7 +1198,10 @@ fn map_user_image_blocks(images: &[ImageAttachment]) -> Vec<Block> {
         .iter()
         .enumerate()
         .map(|(index, attachment)| {
-            let ext = attachment.mime_type.split('/').nth(1).unwrap_or("image");
+            let ext = match attachment.mime_type.split('/').nth(1) {
+                Some(ext) if !ext.trim().is_empty() => ext,
+                _ => "image",
+            };
             Block::UserImage(UserImageBlock {
                 data_url: attachment.data_url.clone(),
                 mime_type: attachment.mime_type.clone(),

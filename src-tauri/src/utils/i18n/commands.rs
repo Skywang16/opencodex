@@ -3,6 +3,7 @@ use crate::utils::{EmptyData, Language, LanguageManager, TauriApiResult};
 use crate::{api_error, api_success};
 use std::sync::Arc;
 use tauri::{Emitter, State};
+use tracing::warn;
 
 #[tauri::command]
 pub async fn language_set_app_language<R: tauri::Runtime>(
@@ -27,7 +28,9 @@ pub async fn language_set_app_language<R: tauri::Runtime>(
         return Ok(api_error!("config.update_failed"));
     }
 
-    let _ = app.emit("language-changed", &language);
+    if let Err(err) = app.emit("language-changed", &language) {
+        warn!("Failed to emit language-changed event: {}", err);
+    }
 
     Ok(api_success!())
 }

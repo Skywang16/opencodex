@@ -3,6 +3,7 @@
   import { useI18n } from 'vue-i18n'
   import { useAISettingsStore } from './store'
   import AIModelConfig from './components/AIModelConfig.vue'
+  import LspStatusPanel from './components/LspStatusPanel.vue'
 
   const { t } = useI18n()
   const aiSettingsStore = useAISettingsStore()
@@ -24,6 +25,7 @@
   <div class="settings-section">
     <h1 class="section-title">{{ t('settings.ai.title') }}</h1>
     <AIModelConfig />
+    <LspStatusPanel />
   </div>
 </template>
 

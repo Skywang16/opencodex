@@ -111,7 +111,9 @@
     refreshDisplayPath()
     homeDir()
       .then(path => (homePath.value = path))
-      .catch(() => {})
+      .catch(error => {
+        console.warn('Failed to resolve home directory for vector index display:', error)
+      })
     // Load vector model configuration
     await aiSettingsStore.loadModels()
   })

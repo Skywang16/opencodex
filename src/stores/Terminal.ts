@@ -81,6 +81,7 @@ export const useTerminalStore = defineStore('Terminal', () => {
 
   let globalListenersUnlisten: UnlistenFn[] = []
   let isListenerSetup = false
+  let initializationPromise: Promise<void> | null = null
 
   const pendingOperations = ref<Set<string>>(new Set())
   const operationQueue = ref<Array<() => Promise<void>>>([])
@@ -166,24 +167,57 @@ export const useTerminalStore = defineStore('Terminal', () => {
   const setupGlobalListeners = async () => {
     if (isListenerSetup) return
 
+    const removeTerminalState = (paneId: number, exitCode: number | null = null) => {
+      const existsInStore = terminals.value.some(t => t.id === paneId)
+      const hasPaneLifecycleState =
+        paneOutputById.value.has(paneId) ||
+        paneCreatedAtById.value.has(paneId) ||
+        listenersByPaneId.value.has(paneId) ||
+        terminalInitialCwd.value.has(paneId)
+
+      if (!existsInStore && !hasPaneLifecycleState) {
+        return
+      }
+
+      paneOutputById.value.delete(paneId)
+      paneCreatedAtById.value.delete(paneId)
+
+      const listeners = listenersByPaneId.value.get(paneId) || []
+      listeners.forEach(listener => listener.callbacks.onExit(exitCode))
+      terminalExitListeners.value.forEach(cb => cb(paneId, exitCode))
+
+      terminalInitialCwd.value.delete(paneId)
+      unregisterTerminalCallbacks(paneId)
+
+      const index = terminals.value.findIndex(t => t.id === paneId)
+      if (index !== -1) {
+        terminals.value.splice(index, 1)
+      }
+
+      if (activeTerminalId.value === paneId) {
+        activeTerminalId.value = terminals.value[0]?.id ?? null
+      }
+    }
+
+    const unlistenCreated = await terminalApi.onTerminalCreated(async payload => {
+      try {
+        const state = await storageApi.getTerminalState(payload.paneId)
+        if (!state) {
+          return
+        }
+        upsertRuntimeTerminal(state)
+      } catch (error) {
+        console.error(`Failed to load runtime state for created terminal ${payload.paneId}:`, error)
+      }
+    })
+
+    const unlistenClosed = await terminalApi.onTerminalClosed(payload => {
+      removeTerminalState(payload.paneId, null)
+    })
+
     const unlistenExit = await terminalApi.onTerminalExit(payload => {
       try {
-        const terminal = terminals.value.find(t => t.id === payload.paneId)
-        const terminalId = terminal?.id ?? payload.paneId
-
-        paneOutputById.value.delete(terminalId)
-        paneCreatedAtById.value.delete(terminalId)
-
-        const listeners = listenersByPaneId.value.get(terminalId) || []
-        listeners.forEach(listener => listener.callbacks.onExit(payload.exitCode))
-        terminalExitListeners.value.forEach(cb => cb(terminalId, payload.exitCode))
-
-        terminalInitialCwd.value.delete(terminalId)
-        unregisterTerminalCallbacks(terminalId)
-
-        const index = terminals.value.findIndex(t => t.id === terminalId)
-        if (index !== -1) terminals.value.splice(index, 1)
-        if (activeTerminalId.value === terminalId) activeTerminalId.value = null
+        removeTerminalState(payload.paneId, payload.exitCode)
       } catch (error) {
         console.error('Error handling terminal exit event:', error)
       }
@@ -234,7 +268,14 @@ export const useTerminalStore = defineStore('Terminal', () => {
       refreshTerminalState(payload.paneId)
     })
 
-    globalListenersUnlisten = [unlistenExit, unlistenCwdChanged, unlistenTitleChanged, unlistenCommandEvent]
+    globalListenersUnlisten = [
+      unlistenCreated,
+      unlistenClosed,
+      unlistenExit,
+      unlistenCwdChanged,
+      unlistenTitleChanged,
+      unlistenCommandEvent,
+    ]
     isListenerSetup = true
   }
 
@@ -294,8 +335,6 @@ export const useTerminalStore = defineStore('Terminal', () => {
   }
 
   const registerRuntimeTerminal = (terminal: RuntimeTerminalState) => {
-    // Runtime terminals (e.g. agent/background terminals) may already have output;
-    // do not mark them as "new" to avoid hiding the terminal UI behind the loading overlay.
     upsertRuntimeTerminal(terminal)
   }
 
@@ -318,6 +357,12 @@ export const useTerminalStore = defineStore('Terminal', () => {
       cwd: initialDirectory || '~',
       shell: 'shell',
       displayTitle: getPathBasename(initialDirectory || '~'),
+      kind: 'workspace',
+      sessionId: null,
+      taskTerminalId: null,
+      sourceLabel: null,
+      taskMode: null,
+      taskStatus: null,
     }
 
     if (typeof options?.shellName === 'string') {
@@ -449,9 +494,21 @@ export const useTerminalStore = defineStore('Terminal', () => {
   }
 
   const initializeTerminalStore = async () => {
-    await initializeShellManager()
-    await refreshRuntimeTerminals()
-    await setupGlobalListeners()
+    if (initializationPromise) {
+      return initializationPromise
+    }
+
+    initializationPromise = (async () => {
+      await initializeShellManager()
+      await refreshRuntimeTerminals()
+      await setupGlobalListeners()
+    })()
+
+    try {
+      await initializationPromise
+    } finally {
+      initializationPromise = null
+    }
   }
 
   const refreshRuntimeTerminals = async (): Promise<void> => {
@@ -478,12 +535,16 @@ export const useTerminalStore = defineStore('Terminal', () => {
       paneId,
       setTimeout(async () => {
         titleRefreshTimers.delete(paneId)
-        const state = await storageApi.getTerminalState(paneId)
-        if (!state) return
+        try {
+          const state = await storageApi.getTerminalState(paneId)
+          if (!state) return
 
-        const index = terminals.value.findIndex(t => t.id === paneId)
-        if (index !== -1) {
-          terminals.value[index] = state
+          const index = terminals.value.findIndex(t => t.id === paneId)
+          if (index !== -1) {
+            terminals.value[index] = state
+          }
+        } catch (error) {
+          console.warn(`Failed to refresh terminal state for pane ${paneId}:`, error)
         }
       }, 150)
     )

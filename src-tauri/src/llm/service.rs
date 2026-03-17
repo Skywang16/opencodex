@@ -324,6 +324,7 @@ impl LLMService {
             }],
             max_tokens: 10,
             system: None,
+            developer_context: None,
             tools: None,
             temperature: Some(0.1),
             stream: false,

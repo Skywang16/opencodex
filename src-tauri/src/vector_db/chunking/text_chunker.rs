@@ -56,16 +56,17 @@ impl TextChunker {
                     | Language::Swift
             ) {
                 tracing::debug!("Using tree-sitter chunking for {:?}", language);
-                if let Ok(chunks) = self.tree_sitter_chunker.chunk(content, file_path, language) {
-                    if !chunks.is_empty() {
-                        chunks
-                    } else {
+                match self.tree_sitter_chunker.chunk(content, file_path, language) {
+                    Ok(chunks) if !chunks.is_empty() => chunks,
+                    Ok(_) => self.chunk_generic(content, file_path)?,
+                    Err(err) => {
+                        tracing::warn!(
+                            "Tree-sitter chunking failed for '{}': {}, fallback to simple chunking",
+                            file_path.display(),
+                            err
+                        );
                         self.chunk_generic(content, file_path)?
                     }
-                } else {
-                    // If tree-sitter fails, fallback to simple chunking
-                    tracing::warn!("Tree-sitter failed, fallback to simple chunking");
-                    self.chunk_generic(content, file_path)?
                 }
             } else {
                 self.chunk_generic(content, file_path)?

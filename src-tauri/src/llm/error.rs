@@ -88,6 +88,8 @@ pub enum AnthropicError {
         #[source]
         source: reqwest::Error,
     },
+    #[error("Anthropic configuration error: {message}")]
+    Configuration { message: String },
     #[error("Anthropic API error {status}: {message}")]
     Api { status: StatusCode, message: String },
     #[error("Anthropic JSON parse failed: {source}")]

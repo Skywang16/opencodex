@@ -22,7 +22,13 @@ pub async fn node_list_versions() -> TauriApiResult<Vec<NodeVersionInfo>> {
     let manager = detect_version_manager();
     match get_node_versions(&manager) {
         Ok(versions) => {
-            let current_version = super::detector::get_current_version(None).ok().flatten();
+            let current_version = match super::detector::get_current_version(None) {
+                Ok(version) => version,
+                Err(err) => {
+                    tracing::warn!("Failed to detect current Node version: {}", err);
+                    None
+                }
+            };
             let version_infos = versions
                 .into_iter()
                 .map(|v| {
@@ -46,7 +52,10 @@ pub async fn node_list_versions() -> TauriApiResult<Vec<NodeVersionInfo>> {
 
 #[tauri::command]
 pub async fn node_get_switch_command(manager: String, version: String) -> TauriApiResult<String> {
-    let mgr = NodeVersionManager::from_str(&manager).unwrap_or(NodeVersionManager::Unknown);
+    let mgr = match NodeVersionManager::from_str(&manager) {
+        Ok(manager) => manager,
+        Err(_) => NodeVersionManager::Unknown,
+    };
     let version_cleaned = version.trim().trim_start_matches('v');
 
     let command = match mgr {

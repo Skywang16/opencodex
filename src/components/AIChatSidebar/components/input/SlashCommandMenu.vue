@@ -126,7 +126,8 @@
     try {
       const skills = await agentApi.listSkills(workspaceStore.currentWorkspacePath || '')
       skillCommands.value = skills.map(skillToCommand)
-    } catch {
+    } catch (error) {
+      console.warn('Failed to load slash-command skills:', error)
       skillCommands.value = []
     }
   }

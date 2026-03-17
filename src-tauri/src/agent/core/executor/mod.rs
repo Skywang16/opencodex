@@ -36,6 +36,7 @@ use crate::agent::react::orchestrator::ReactOrchestrator;
 use crate::agent::tools::ToolConfirmationManager;
 use crate::agent::workspace_changes::WorkspaceChangeJournal;
 use crate::checkpoint::CheckpointService;
+use crate::lsp::LspManager;
 use crate::settings::SettingsManager;
 use crate::storage::{DatabaseManager, UnifiedCache};
 
@@ -47,6 +48,7 @@ struct TaskExecutorInner {
     agent_persistence: Arc<AgentPersistence>,
     settings_manager: Arc<SettingsManager>,
     mcp_registry: Arc<McpRegistry>,
+    lsp_manager: Arc<LspManager>,
 
     // Checkpoint service (optional, for automatic checkpoint creation)
     checkpoint_service: Option<Arc<CheckpointService>>,
@@ -61,6 +63,19 @@ struct TaskExecutorInner {
     // Task state management - only used to find running tasks for interruption
     // No longer cache conversation_contexts, load from DB each time
     active_tasks: DashMap<String, Arc<crate::agent::core::context::TaskContext>>,
+    active_child_executions_by_parent: DashMap<String, usize>,
+}
+
+pub(crate) struct TaskExecutorServices {
+    pub database: Arc<DatabaseManager>,
+    pub cache: Arc<UnifiedCache>,
+    pub agent_persistence: Arc<AgentPersistence>,
+    pub settings_manager: Arc<SettingsManager>,
+    pub mcp_registry: Arc<McpRegistry>,
+    pub lsp_manager: Arc<LspManager>,
+    pub checkpoint_service: Option<Arc<CheckpointService>>,
+    pub workspace_changes: Arc<WorkspaceChangeJournal>,
+    pub vector_search_engine: Option<Arc<crate::vector_db::search::SemanticSearchEngine>>,
 }
 
 /// TaskExecutor - Task executor
@@ -73,12 +88,13 @@ pub struct TaskExecutor {
 }
 
 #[async_trait::async_trait]
-impl crate::agent::core::context::SubtaskRunner for TaskExecutor {
-    async fn run_subtask(
+impl crate::agent::core::context::TaskExecutionRunner for TaskExecutor {
+    async fn run_task_execution(
         &self,
         parent: &crate::agent::core::context::TaskContext,
-        request: crate::agent::core::context::SubtaskRequest,
-    ) -> crate::agent::error::TaskExecutorResult<crate::agent::core::context::SubtaskResponse> {
+        request: crate::agent::core::context::TaskExecutionRequest,
+    ) -> crate::agent::error::TaskExecutorResult<crate::agent::core::context::TaskExecutionResponse>
+    {
         subtask::run_subtask(self, parent, request).await
     }
 }
@@ -93,54 +109,40 @@ impl TaskExecutor {
         agent_persistence: Arc<AgentPersistence>,
         settings_manager: Arc<SettingsManager>,
         mcp_registry: Arc<McpRegistry>,
+        lsp_manager: Arc<LspManager>,
         workspace_changes: Arc<WorkspaceChangeJournal>,
         vector_search_engine: Option<Arc<crate::vector_db::search::SemanticSearchEngine>>,
     ) -> Self {
-        Self::build(
+        Self::build(TaskExecutorServices {
             database,
             cache,
             agent_persistence,
             settings_manager,
             mcp_registry,
-            None,
+            lsp_manager,
+            checkpoint_service: None,
             workspace_changes,
             vector_search_engine,
-        )
+        })
     }
 
     /// Create TaskExecutor instance with Checkpoint service.
-    pub fn with_checkpoint_service(
-        database: Arc<DatabaseManager>,
-        cache: Arc<UnifiedCache>,
-        agent_persistence: Arc<AgentPersistence>,
-        settings_manager: Arc<SettingsManager>,
-        mcp_registry: Arc<McpRegistry>,
-        checkpoint_service: Arc<CheckpointService>,
-        workspace_changes: Arc<WorkspaceChangeJournal>,
-        vector_search_engine: Option<Arc<crate::vector_db::search::SemanticSearchEngine>>,
-    ) -> Self {
-        Self::build(
+    pub(crate) fn with_checkpoint_service(services: TaskExecutorServices) -> Self {
+        Self::build(services)
+    }
+
+    fn build(services: TaskExecutorServices) -> Self {
+        let TaskExecutorServices {
             database,
             cache,
             agent_persistence,
             settings_manager,
             mcp_registry,
-            Some(checkpoint_service),
+            lsp_manager,
+            checkpoint_service,
             workspace_changes,
             vector_search_engine,
-        )
-    }
-
-    fn build(
-        database: Arc<DatabaseManager>,
-        cache: Arc<UnifiedCache>,
-        agent_persistence: Arc<AgentPersistence>,
-        settings_manager: Arc<SettingsManager>,
-        mcp_registry: Arc<McpRegistry>,
-        checkpoint_service: Option<Arc<CheckpointService>>,
-        workspace_changes: Arc<WorkspaceChangeJournal>,
-        vector_search_engine: Option<Arc<crate::vector_db::search::SemanticSearchEngine>>,
-    ) -> Self {
+        } = services;
         let prompt_orchestrator = Arc::new(PromptOrchestrator::new(
             Arc::clone(&cache),
             Arc::clone(&database),
@@ -158,6 +160,7 @@ impl TaskExecutor {
                 agent_persistence,
                 settings_manager,
                 mcp_registry,
+                lsp_manager,
                 checkpoint_service,
                 workspace_changes,
                 vector_search_engine,
@@ -165,6 +168,7 @@ impl TaskExecutor {
                 prompt_orchestrator,
                 react_orchestrator,
                 active_tasks: DashMap::new(),
+                active_child_executions_by_parent: DashMap::new(),
             }),
         }
     }
@@ -197,6 +201,10 @@ impl TaskExecutor {
         Arc::clone(&self.inner.mcp_registry)
     }
 
+    pub fn lsp_manager(&self) -> Arc<LspManager> {
+        Arc::clone(&self.inner.lsp_manager)
+    }
+
     pub fn workspace_changes(&self) -> Arc<WorkspaceChangeJournal> {
         Arc::clone(&self.inner.workspace_changes)
     }
@@ -217,6 +225,50 @@ impl TaskExecutor {
         &self,
     ) -> &DashMap<String, Arc<crate::agent::core::context::TaskContext>> {
         &self.inner.active_tasks
+    }
+
+    pub(crate) fn active_child_executions_global(&self) -> usize {
+        self.inner
+            .active_tasks
+            .iter()
+            .filter(|entry| !entry.value().emits_task_events())
+            .count()
+    }
+
+    pub(crate) fn active_child_executions_for_parent(&self, parent_task_id: &str) -> usize {
+        match self
+            .inner
+            .active_child_executions_by_parent
+            .get(parent_task_id)
+        {
+            Some(count) => *count,
+            None => 0,
+        }
+    }
+
+    pub(crate) fn increment_active_child_executions_for_parent(&self, parent_task_id: &str) {
+        self.inner
+            .active_child_executions_by_parent
+            .entry(parent_task_id.to_string())
+            .and_modify(|count| *count += 1)
+            .or_insert(1);
+    }
+
+    pub(crate) fn decrement_active_child_executions_for_parent(&self, parent_task_id: &str) {
+        if let Some(mut entry) = self
+            .inner
+            .active_child_executions_by_parent
+            .get_mut(parent_task_id)
+        {
+            if *entry > 1 {
+                *entry -= 1;
+            } else {
+                drop(entry);
+                self.inner
+                    .active_child_executions_by_parent
+                    .remove(parent_task_id);
+            }
+        }
     }
 
     /// Get Checkpoint service (if configured)

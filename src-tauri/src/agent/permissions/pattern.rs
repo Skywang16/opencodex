@@ -1,5 +1,6 @@
 use crate::agent::permissions::types::ToolAction;
 use regex::Regex;
+use tracing::warn;
 
 #[derive(Debug, Clone)]
 pub struct PermissionPattern {
@@ -32,8 +33,7 @@ fn map_tool_alias_with_optional_glob(lower: &str, from: &str, to: &str) -> Optio
     if lower == from {
         return Some(to.to_string());
     }
-    if lower.starts_with(from) {
-        let rest = lower.strip_prefix(from).unwrap_or(lower);
+    if let Some(rest) = lower.strip_prefix(from) {
         if !rest.is_empty() && rest.chars().all(|c| c == '*' || c == '?') {
             return Some(format!("{to}{rest}"));
         }
@@ -62,15 +62,12 @@ impl PermissionPattern {
         }
 
         // Safe slice
-        let tool = raw.get(..open_idx).map(|s| s.trim()).unwrap_or("");
+        let tool = raw[..open_idx].trim();
         if tool.is_empty() {
             return None;
         }
 
-        let param = raw
-            .get(open_idx + 1..close_idx)
-            .map(|s| s.trim())
-            .unwrap_or("");
+        let param = raw[open_idx + 1..close_idx].trim();
         let param = if param.is_empty() {
             None
         } else {
@@ -186,7 +183,22 @@ fn compile_glob_regex(
 
     out.push('$');
 
-    Regex::new(&out).ok()
+    match Regex::new(&out) {
+        Ok(regex) => Some(regex),
+        Err(err) => {
+            warn!(
+                "Failed to compile permission glob regex from pattern '{}': {}",
+                pattern, err
+            );
+            None
+        }
+    }
+}
+
+pub fn matches_simple_glob(pattern: &str, candidate: &str) -> bool {
+    compile_glob_regex(pattern, GlobFlavor::General, None)
+        .map(|re| re.is_match(candidate))
+        .unwrap_or(false)
 }
 
 fn expand_env_vars(input: &str) -> String {

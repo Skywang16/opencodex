@@ -94,10 +94,13 @@ impl LanguageManager {
     /// # Returns
     /// Currently set language, returns default language (Chinese) on failure
     pub fn get_language() -> Language {
-        CURRENT_LANGUAGE
-            .read()
-            .map(|lang| *lang)
-            .unwrap_or_default()
+        match CURRENT_LANGUAGE.read() {
+            Ok(lang) => *lang,
+            Err(err) => {
+                tracing::warn!("Failed to read current language, using default: {}", err);
+                Language::default()
+            }
+        }
     }
 
     /// Set language from string

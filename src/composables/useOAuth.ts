@@ -11,6 +11,10 @@ export interface OAuthState {
 }
 
 export const useOAuth = () => {
+  const formatErrorMessage = (error: unknown): string => {
+    return error instanceof Error ? error.message : String(error)
+  }
+
   const state = ref<OAuthState>({
     isAuthenticating: false,
     flowId: null,
@@ -47,6 +51,7 @@ export const useOAuth = () => {
       if (state.value.cancelled) {
         return null
       }
+      console.error(`[OAuth] Authorization failed for provider '${provider}':`, err)
       // Re-throw to let caller handle
       throw err
     } finally {
@@ -66,6 +71,9 @@ export const useOAuth = () => {
 
     try {
       await oauthApi.cancelFlow(state.value.flowId)
+    } catch (error) {
+      console.warn(`[OAuth] Failed to cancel flow '${state.value.flowId}': ${formatErrorMessage(error)}`)
+      throw error
     } finally {
       state.value.isAuthenticating = false
       state.value.flowId = null

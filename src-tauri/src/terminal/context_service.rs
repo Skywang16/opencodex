@@ -25,10 +25,16 @@ impl TerminalCachePayload {
     fn new(context: TerminalContext) -> Self {
         Self {
             context,
-            cached_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
+            cached_at: match SystemTime::now().duration_since(UNIX_EPOCH) {
+                Ok(duration) => duration.as_millis() as u64,
+                Err(err) => {
+                    warn!(
+                        "terminal context cache timestamp predates UNIX_EPOCH: {}",
+                        err
+                    );
+                    0
+                }
+            },
         }
     }
 }
@@ -150,14 +156,28 @@ impl TerminalContextService {
         pane_id: Option<PaneId>,
     ) -> ContextServiceResult<TerminalContext> {
         if let Some(pane_id) = pane_id {
-            if let Ok(context) = self.get_context_by_pane(pane_id).await {
-                return Ok(context);
+            match self.get_context_by_pane(pane_id).await {
+                Ok(context) => return Ok(context),
+                Err(err) => {
+                    warn!(
+                        "failed to get terminal context for pane {}: {}",
+                        pane_id.as_u32(),
+                        err
+                    );
+                }
             }
         }
 
         if let Some(active_pane) = self.registry.terminal_context_get_active_pane() {
-            if let Ok(context) = self.get_context_by_pane(active_pane).await {
-                return Ok(context);
+            match self.get_context_by_pane(active_pane).await {
+                Ok(context) => return Ok(context),
+                Err(err) => {
+                    warn!(
+                        "failed to get active terminal context for pane {}: {}",
+                        active_pane.as_u32(),
+                        err
+                    );
+                }
             }
         }
 
@@ -315,11 +335,16 @@ impl TerminalContextService {
             self.base_cache_ttl
         };
 
-        if let Ok(idle) = SystemTime::now().duration_since(context.last_activity) {
-            if idle > Duration::from_secs(120) {
-                ttl = self.min_cache_ttl;
-            } else if idle < Duration::from_secs(10) {
-                ttl = ttl.saturating_mul(2);
+        match SystemTime::now().duration_since(context.last_activity) {
+            Ok(idle) => {
+                if idle > Duration::from_secs(120) {
+                    ttl = self.min_cache_ttl;
+                } else if idle < Duration::from_secs(10) {
+                    ttl = ttl.saturating_mul(2);
+                }
+            }
+            Err(err) => {
+                warn!("terminal last_activity is in the future: {}", err);
             }
         }
 
@@ -358,7 +383,11 @@ impl TerminalContextService {
         let mut context = TerminalContext::new(pane_id);
         context.set_active(self.registry.terminal_context_is_pane_active(pane_id));
 
-        if let Some(cwd) = self.terminal_mux.shell_get_pane_cwd(pane_id) {
+        if let Some(cwd) = self
+            .terminal_mux
+            .shell_get_pane_cwd(pane_id)
+            .or_else(Self::fallback_working_directory)
+        {
             context.update_cwd(cwd);
         }
 
@@ -392,10 +421,20 @@ impl TerminalContextService {
 
     fn create_default_context(&self) -> TerminalContext {
         let mut context = TerminalContext::new(PaneId::new(0));
-        context.update_cwd("~".to_string());
+        context.update_cwd(Self::fallback_working_directory().unwrap_or_else(|| "~".to_string()));
         context.update_shell_type(ShellType::Bash);
         context.set_shell_integration(false);
         context
+    }
+
+    fn fallback_working_directory() -> Option<String> {
+        dirs::home_dir()
+            .map(|path| path.to_string_lossy().into_owned())
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|path| path.to_string_lossy().into_owned())
+            })
     }
 
     fn convert_shell_type(&self, shell_type: crate::shell::ShellType) -> ShellType {
@@ -452,15 +491,27 @@ impl ContextServiceIntegration for TerminalContextService {
         let cache = Arc::clone(&self.cache);
         let cache_key = Self::cache_key(pane_id);
 
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            self.cache_evictions.fetch_add(1, Ordering::Relaxed);
-            handle.spawn(async move {
-                cache.remove(&cache_key).await;
-            });
-        } else if let Ok(rt) = tokio::runtime::Runtime::new() {
-            if rt.block_on(cache.remove(&cache_key)).is_some() {
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
                 self.cache_evictions.fetch_add(1, Ordering::Relaxed);
+                handle.spawn(async move {
+                    cache.remove(&cache_key).await;
+                });
             }
+            Err(handle_err) => match tokio::runtime::Runtime::new() {
+                Ok(rt) => {
+                    if rt.block_on(cache.remove(&cache_key)).is_some() {
+                        self.cache_evictions.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                Err(runtime_err) => {
+                    warn!(
+                        "failed to invalidate terminal context cache without runtime: handle={}, runtime={}",
+                        handle_err,
+                        runtime_err
+                    );
+                }
+            },
         }
     }
 

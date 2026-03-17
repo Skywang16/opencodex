@@ -16,7 +16,6 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::lookup_host;
-use tracing::warn;
 use url::Url;
 
 use crate::agent::common::llm_text::extract_text_from_llm_message;
@@ -244,9 +243,18 @@ Examples:
             let content_type = resp
                 .headers()
                 .get("content-type")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("")
-                .to_string();
+                .map(|value| {
+                    value
+                        .to_str()
+                        .map(|value| value.to_string())
+                        .map_err(|err| format!("Invalid content-type header: {err}"))
+                })
+                .transpose();
+            let content_type = match content_type {
+                Ok(Some(content_type)) => content_type,
+                Ok(None) => String::new(),
+                Err(err) => return Ok(validation_error(err)),
+            };
 
             let raw = match tokio::time::timeout(Duration::from_secs(30), resp.text()).await {
                 Ok(Ok(t)) => t,
@@ -255,7 +263,10 @@ Examples:
             };
 
             let md = if content_type.contains("text/html") {
-                html_to_markdown(&raw)
+                html_to_markdown(&raw).map_err(|err| ToolExecutorError::ExecutionFailed {
+                    tool_name: "web_fetch".to_string(),
+                    error: err,
+                })?
             } else {
                 raw
             };
@@ -277,13 +288,12 @@ Examples:
         }
 
         // --- LLM summarization (Claude Code style) ---
-        let summary = match summarize_with_llm(context, &markdown, &user_query).await {
-            Ok(s) => s,
-            Err(e) => {
-                warn!("LLM summarization failed, returning raw content: {e}");
-                truncate_content(&markdown, 8000)
-            }
-        };
+        let summary = summarize_with_llm(context, &markdown, &user_query)
+            .await
+            .map_err(|e| ToolExecutorError::ExecutionFailed {
+                tool_name: "web_fetch".to_string(),
+                error: format!("summarization failed: {e}"),
+            })?;
 
         Ok(ToolResult {
             content: vec![ToolResultContent::Success(summary)],
@@ -298,11 +308,8 @@ Examples:
 // ---------------------------------------------------------------------------
 // HTML → Markdown conversion (htmd, Turndown-style)
 // ---------------------------------------------------------------------------
-static TAG_STRIP_RE: Lazy<regex::Regex> =
-    Lazy::new(|| regex::Regex::new(r"<[^>]+>").expect("invalid tag-strip regex"));
-
-fn html_to_markdown(html: &str) -> String {
-    htmd::convert(html).unwrap_or_else(|_| TAG_STRIP_RE.replace_all(html, "").to_string())
+fn html_to_markdown(html: &str) -> Result<String, String> {
+    htmd::convert(html).map_err(|err| format!("HTML to Markdown conversion failed: {err}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +350,7 @@ async fn summarize_with_llm(
         model: model_id,
         max_tokens: 2048,
         system: None,
+        developer_context: None,
         messages: vec![MessageParam {
             role: MessageRole::User,
             content: MessageContent::Text(prompt),
@@ -406,7 +414,12 @@ async fn validate_fetch_url(url: &Url) -> ToolExecutorResult<()> {
             tool_name: "web_fetch".to_string(),
             error: "URL host is missing".to_string(),
         })?;
-    let port = url.port_or_known_default().unwrap_or(80);
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| ToolExecutorError::InvalidArguments {
+            tool_name: "web_fetch".to_string(),
+            error: "URL port is unavailable for this scheme".to_string(),
+        })?;
 
     match host {
         url::Host::Ipv4(addr) => {
@@ -486,17 +499,29 @@ async fn fetch_follow_redirects(
         debug!("Received response with status: {}", resp.status());
 
         if resp.status().is_redirection() {
-            let location = resp
-                .headers()
-                .get(reqwest::header::LOCATION)
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty());
+            let location = match resp.headers().get(reqwest::header::LOCATION) {
+                Some(value) => {
+                    let location =
+                        value
+                            .to_str()
+                            .map_err(|err| ToolExecutorError::ExecutionFailed {
+                                tool_name: "web_fetch".to_string(),
+                                error: format!("Invalid redirect location header: {err}"),
+                            })?;
+                    let trimmed = location.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                }
+                None => None,
+            };
 
             if let Some(location) = location {
                 debug!("Following redirect to: {}", location);
                 url = url
-                    .join(location)
+                    .join(&location)
                     .map_err(|e| ToolExecutorError::InvalidArguments {
                         tool_name: "web_fetch".to_string(),
                         error: format!("Invalid redirect URL: {e}"),

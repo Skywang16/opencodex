@@ -30,9 +30,9 @@
   --text-500: #a3a3a3;
 
   /* Primary colors */
-  --color-primary: #0ea5e9;
-  --color-primary-hover: #0284c7;
-  --color-primary-alpha: rgba(14, 165, 233, 0.1);
+  --color-primary: #2959F7;
+  --color-primary-hover: #1f43dc;
+  --color-primary-alpha: rgba(41, 89, 247, 0.1);
   --color-success: #22c55e;
   --color-warning: #f59e0b;
   --color-error: #ef4444;
@@ -41,8 +41,8 @@
   /* Interactive colors */
   --color-hover: rgba(0, 0, 0, 0.05);
   --color-active: rgba(0, 0, 0, 0.1);
-  --color-focus: #0ea5e9;
-  --color-selection: rgba(14, 165, 233, 0.2);
+  --color-focus: #2959F7;
+  --color-selection: rgba(41, 89, 247, 0.2);
 
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);

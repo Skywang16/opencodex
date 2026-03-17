@@ -14,7 +14,7 @@ export const useWindowStore = defineStore('window', {
         const state = await windowApi.getState(false)
         this.alwaysOnTop = !!state.alwaysOnTop
       } catch (e) {
-        // ignore init failure, keep default false
+        console.warn('Failed to initialize window state from system, keeping defaults:', e)
       }
     },
   },

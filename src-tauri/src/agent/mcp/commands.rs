@@ -22,9 +22,18 @@ pub async fn list_mcp_servers(
     };
 
     let workspace_root = PathBuf::from(workspace);
-    let workspace_root = tokio::fs::canonicalize(&workspace_root)
-        .await
-        .unwrap_or(workspace_root);
+    let workspace_root = match tokio::fs::canonicalize(&workspace_root).await {
+        Ok(path) => path,
+        Err(err) => {
+            tracing::warn!(
+                target: "mcp",
+                "Failed to canonicalize MCP workspace '{}': {}",
+                workspace_root.display(),
+                err
+            );
+            workspace_root
+        }
+    };
 
     let effective = match settings_mgr
         .get_effective_settings(Some(workspace_root.clone()))
@@ -37,11 +46,18 @@ pub async fn list_mcp_servers(
         }
     };
 
-    let workspace_settings = settings_mgr
-        .get_workspace_settings(&workspace_root)
-        .await
-        .ok()
-        .flatten();
+    let workspace_settings = match settings_mgr.get_workspace_settings(&workspace_root).await {
+        Ok(settings) => settings,
+        Err(err) => {
+            tracing::warn!(
+                target: "mcp",
+                "Failed to load workspace MCP settings for '{}': {}",
+                workspace_root.display(),
+                err
+            );
+            None
+        }
+    };
 
     let mut statuses = Vec::new();
     let workspace_key = workspace_root.to_string_lossy().to_string();
@@ -82,9 +98,10 @@ pub async fn test_mcp_server(
     config: McpServerConfig,
     workspace: Option<String>,
 ) -> TauriApiResult<McpTestResult> {
-    let workspace_root = workspace
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
+    let workspace_root = match workspace {
+        Some(path) => PathBuf::from(path),
+        None => std::env::temp_dir(),
+    };
 
     let result =
         match crate::agent::mcp::client::McpClient::new(name, &config, &workspace_root).await {
@@ -115,9 +132,18 @@ pub async fn reload_mcp_servers(
     };
 
     let workspace_root = PathBuf::from(workspace);
-    let workspace_root = tokio::fs::canonicalize(&workspace_root)
-        .await
-        .unwrap_or(workspace_root);
+    let workspace_root = match tokio::fs::canonicalize(&workspace_root).await {
+        Ok(path) => path,
+        Err(err) => {
+            tracing::warn!(
+                target: "mcp",
+                "Failed to canonicalize MCP workspace '{}': {}",
+                workspace_root.display(),
+                err
+            );
+            workspace_root
+        }
+    };
     let effective = match settings_mgr
         .get_effective_settings(Some(workspace_root.clone()))
         .await
@@ -129,15 +155,30 @@ pub async fn reload_mcp_servers(
         }
     };
 
-    let workspace_settings = settings_mgr
-        .get_workspace_settings(&workspace_root)
-        .await
-        .ok()
-        .flatten();
+    let workspace_settings = match settings_mgr.get_workspace_settings(&workspace_root).await {
+        Ok(settings) => settings,
+        Err(err) => {
+            tracing::warn!(
+                target: "mcp",
+                "Failed to load workspace MCP settings for reload '{}': {}",
+                workspace_root.display(),
+                err
+            );
+            None
+        }
+    };
 
-    let _ = registry
+    if let Err(err) = registry
         .reload_workspace_servers(&workspace_root, &effective, workspace_settings.as_ref())
-        .await;
+        .await
+    {
+        tracing::warn!(
+            target: "mcp",
+            "Failed to reload MCP workspace servers for '{}': {}",
+            workspace_root.display(),
+            err
+        );
+    }
 
     let workspace_key = workspace_root.to_string_lossy().to_string();
     Ok(api_success!(

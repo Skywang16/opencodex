@@ -67,12 +67,15 @@ enum Status {
 }
 
 impl Status {
-    fn parse(s: &str) -> Self {
+    fn parse(s: &str) -> Result<Self, String> {
         match s {
-            "in_progress" => Self::InProgress,
-            "completed" => Self::Completed,
-            "cancelled" => Self::Cancelled,
-            _ => Self::Pending,
+            "pending" => Ok(Self::Pending),
+            "in_progress" => Ok(Self::InProgress),
+            "completed" => Ok(Self::Completed),
+            "cancelled" => Ok(Self::Cancelled),
+            _ => Err(format!(
+                "Invalid todo status '{s}'. Expected one of: pending, in_progress, completed, cancelled"
+            )),
         }
     }
 
@@ -101,17 +104,13 @@ pub struct TodoState {
 }
 
 impl TodoState {
-    fn apply(&mut self, incoming: Vec<TodoItemInput>, merge: bool) {
+    fn apply(&mut self, incoming: Vec<TodoItemInput>, merge: bool) -> Result<(), String> {
         if !merge {
             self.items = incoming
                 .into_iter()
-                .map(|t| TodoItem {
-                    id: t.id,
-                    content: t.content.unwrap_or_default(),
-                    status: Status::parse(t.status.as_deref().unwrap_or("pending")),
-                })
-                .collect();
-            return;
+                .map(TodoItemInput::into_required_item)
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(());
         }
 
         // Merge: upsert by id, preserve existing order, append new items.
@@ -125,19 +124,20 @@ impl TodoState {
         for input in incoming {
             if let Some(&i) = idx_by_id.get(&input.id) {
                 if let Some(c) = input.content {
-                    self.items[i].content = c;
+                    let content = c.trim();
+                    if content.is_empty() {
+                        return Err(format!("Todo '{}' content cannot be empty", input.id));
+                    }
+                    self.items[i].content = content.to_string();
                 }
                 if let Some(s) = input.status {
-                    self.items[i].status = Status::parse(&s);
+                    self.items[i].status = Status::parse(s.trim())?;
                 }
             } else {
-                self.items.push(TodoItem {
-                    id: input.id,
-                    content: input.content.unwrap_or_default(),
-                    status: Status::parse(input.status.as_deref().unwrap_or("pending")),
-                });
+                self.items.push(input.into_required_item()?);
             }
         }
+        Ok(())
     }
 
     fn validate(&self) -> Result<(), &'static str> {
@@ -204,6 +204,30 @@ struct TodoItemInput {
     content: Option<String>,
     #[serde(default)]
     status: Option<String>,
+}
+
+impl TodoItemInput {
+    fn into_required_item(self) -> Result<TodoItem, String> {
+        let content = self
+            .content
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("Todo '{}' requires non-empty content", self.id))?;
+        let status = self
+            .status
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("Todo '{}' requires status", self.id))
+            .and_then(Status::parse)?;
+
+        Ok(TodoItem {
+            id: self.id,
+            content: content.to_string(),
+            status,
+        })
+    }
 }
 
 // ── Tool ─────────────────────────────────────────────────────────────────
@@ -275,7 +299,15 @@ impl RunnableTool for TodoWriteTool {
         let args: TodoWriteArgs = serde_json::from_value(args)?;
 
         let mut state = self.state.write().await;
-        state.apply(args.todos, args.merge);
+        if let Err(msg) = state.apply(args.todos, args.merge) {
+            return Ok(ToolResult {
+                content: vec![ToolResultContent::Error(msg)],
+                status: ToolResultStatus::Error,
+                cancel_reason: None,
+                execution_time_ms: None,
+                ext_info: None,
+            });
+        }
 
         if let Err(msg) = state.validate() {
             return Ok(ToolResult {

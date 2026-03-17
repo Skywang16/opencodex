@@ -6,7 +6,7 @@
  */
 
 use super::rules::get_available_rules_files;
-use super::{RunActionRecord, SessionRecord, WorkspaceRecord, WorkspaceService};
+use super::{RunActionRecord, SessionRecord, SessionViewRecord, WorkspaceRecord, WorkspaceService};
 use crate::agent::types::Message;
 use crate::storage::repositories::AppPreferences;
 use crate::storage::{DatabaseManager, UnifiedCache};
@@ -23,7 +23,10 @@ pub async fn workspace_get_recent(
     limit: Option<i64>,
     database: State<'_, Arc<DatabaseManager>>,
 ) -> TauriApiResult<Vec<WorkspaceRecord>> {
-    let limit = limit.unwrap_or(10).clamp(1, 50);
+    let limit = match limit {
+        Some(limit) => limit.clamp(1, 50),
+        None => 10,
+    };
     let service = WorkspaceService::new(Arc::clone(&database));
     match service.list_recent_workspaces(limit).await {
         Ok(workspaces) => Ok(api_success!(workspaces)),
@@ -96,15 +99,15 @@ pub async fn workspace_get_or_create(
 // ===== Session Management Commands =====
 
 #[tauri::command]
-pub async fn workspace_list_sessions(
+pub async fn workspace_list_session_views(
     path: String,
     database: State<'_, Arc<DatabaseManager>>,
-) -> TauriApiResult<Vec<SessionRecord>> {
+) -> TauriApiResult<Vec<SessionViewRecord>> {
     let service = WorkspaceService::new(Arc::clone(&database));
-    match service.list_sessions(&path).await {
+    match service.list_session_views(&path).await {
         Ok(records) => Ok(api_success!(records)),
         Err(err) => {
-            tracing::error!("workspace_list_sessions failed: {}", err);
+            tracing::error!("workspace_list_session_views failed: {}", err);
             Ok(api_error!("workspace.sessions_failed"))
         }
     }
@@ -118,7 +121,10 @@ pub async fn workspace_get_messages(
     database: State<'_, Arc<DatabaseManager>>,
 ) -> TauriApiResult<Vec<Message>> {
     let service = WorkspaceService::new(Arc::clone(&database));
-    let limit = limit.map(|l| l.clamp(1, 200)).unwrap_or(i64::MAX);
+    let limit = match limit {
+        Some(limit) => limit.clamp(1, 200),
+        None => i64::MAX,
+    };
     match service
         .get_session_messages(session_id, limit, before_id)
         .await
@@ -222,7 +228,9 @@ pub async fn workspace_get_project_rules(
     {
         Ok(value) => {
             // Sync cache to ensure Prompt construction uses latest data
-            let _ = cache.set_project_rules(value.clone()).await;
+            if let Err(err) = cache.set_project_rules(value.clone()).await {
+                tracing::warn!("Failed to sync project rules cache after load: {}", err);
+            }
             Ok(api_success!(value))
         }
         Err(e) => {
@@ -244,7 +252,9 @@ pub async fn workspace_set_project_rules(
         .await
     {
         Ok(_) => {
-            let _ = cache.set_project_rules(rules).await;
+            if let Err(err) = cache.set_project_rules(rules).await {
+                tracing::warn!("Failed to sync project rules cache after save: {}", err);
+            }
             Ok(api_success!())
         }
         Err(e) => {

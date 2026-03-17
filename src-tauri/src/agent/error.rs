@@ -108,6 +108,16 @@ pub enum TaskExecutorError {
     #[error("Too many active tasks globally: {current}/{limit}")]
     TooManyActiveTasksGlobal { current: usize, limit: usize },
 
+    #[error("Too many active subtasks globally: {current}/{limit}")]
+    TooManyActiveSubtasksGlobal { current: usize, limit: usize },
+
+    #[error("Too many active subtasks for parent task {parent_task_id}: {current}/{limit}")]
+    TooManyActiveSubtasksPerParent {
+        parent_task_id: String,
+        current: usize,
+        limit: usize,
+    },
+
     #[error("Invalid task state transition: {from} -> {to}")]
     InvalidStateTransition { from: String, to: String },
 
@@ -134,6 +144,8 @@ impl TaskExecutorError {
             TaskExecutorError::RepositoryError(_) => true,
             TaskExecutorError::TaskInterrupted => true,
             TaskExecutorError::TooManyActiveTasksGlobal { .. } => false,
+            TaskExecutorError::TooManyActiveSubtasksGlobal { .. } => false,
+            TaskExecutorError::TooManyActiveSubtasksPerParent { .. } => false,
             TaskExecutorError::InvalidStateTransition { .. } => false,
             TaskExecutorError::InternalError(_) => false,
         }
@@ -157,6 +169,8 @@ impl TaskExecutorError {
             TaskExecutorError::RepositoryError(_) => ErrorSeverity::Error,
             TaskExecutorError::TaskInterrupted => ErrorSeverity::Info,
             TaskExecutorError::TooManyActiveTasksGlobal { .. } => ErrorSeverity::Warning,
+            TaskExecutorError::TooManyActiveSubtasksGlobal { .. } => ErrorSeverity::Warning,
+            TaskExecutorError::TooManyActiveSubtasksPerParent { .. } => ErrorSeverity::Warning,
             TaskExecutorError::InvalidStateTransition { .. } => ErrorSeverity::Error,
             TaskExecutorError::InternalError(_) => ErrorSeverity::Critical,
         }

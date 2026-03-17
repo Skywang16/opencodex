@@ -57,13 +57,16 @@ impl WorkspaceChangeJournal {
     }
 
     pub async fn begin_agent_write(&self, workspace_key: Arc<str>, abs_path: PathBuf) {
-        let _ = self
+        if let Err(err) = self
             .cmd_tx
             .send(Command::BeginAgentWrite {
                 workspace_key,
                 abs_path,
             })
-            .await;
+            .await
+        {
+            tracing::warn!("Failed to send begin_agent_write command: {}", err);
+        }
     }
 
     pub async fn update_snapshot_from_read(
@@ -76,26 +79,40 @@ impl WorkspaceChangeJournal {
             return;
         }
 
-        let _ = self
+        if let Err(err) = self
             .cmd_tx
             .send(Command::UpdateSnapshot {
                 workspace_key,
                 abs_path,
                 content: content.to_string(),
             })
-            .await;
+            .await
+        {
+            tracing::warn!("Failed to send workspace snapshot update command: {}", err);
+        }
     }
 
     pub async fn take_pending_by_key(&self, workspace_key: Arc<str>) -> Vec<PendingChange> {
         let (tx, rx) = oneshot::channel();
-        let _ = self
+        if let Err(err) = self
             .cmd_tx
             .send(Command::TakePending {
                 workspace_key,
                 reply: tx,
             })
-            .await;
-        rx.await.unwrap_or_default()
+            .await
+        {
+            tracing::warn!("Failed to request pending workspace changes: {}", err);
+            return Vec::new();
+        }
+
+        match rx.await {
+            Ok(pending) => pending,
+            Err(err) => {
+                tracing::warn!("Failed to receive pending workspace changes: {}", err);
+                Vec::new()
+            }
+        }
     }
 }
 
@@ -130,9 +147,9 @@ async fn handle_command(workspaces: &mut BTreeMap<Arc<str>, WorkspaceState>, cmd
             workspace_key,
             abs_path,
         } => {
-            let state = workspaces.entry(workspace_key).or_insert_with(|| {
-                WorkspaceState::new(PathBuf::from(".")) // placeholder; fs batch will override
-            });
+            let state = workspaces
+                .entry(workspace_key)
+                .or_insert_with(|| WorkspaceState::new(infer_workspace_root_from_path(&abs_path)));
             let key = normalize_abs_path(&abs_path);
             state.agent_suppress_until_ms.insert(
                 key,
@@ -144,20 +161,22 @@ async fn handle_command(workspaces: &mut BTreeMap<Arc<str>, WorkspaceState>, cmd
             abs_path,
             content,
         } => {
-            let state = workspaces.entry(workspace_key).or_insert_with(|| {
-                WorkspaceState::new(PathBuf::from(".")) // placeholder; fs batch will override
-            });
+            let state = workspaces
+                .entry(workspace_key)
+                .or_insert_with(|| WorkspaceState::new(infer_workspace_root_from_path(&abs_path)));
             state.snapshots.put(normalize_abs_path(&abs_path), content);
         }
         Command::TakePending {
             workspace_key,
             reply,
         } => {
-            let pending = workspaces
-                .get_mut(&workspace_key)
-                .map(|s| s.pending.drain(..).collect())
-                .unwrap_or_default();
-            let _ = reply.send(pending);
+            let pending = match workspaces.get_mut(&workspace_key) {
+                Some(state) => state.pending.drain(..).collect(),
+                None => Vec::new(),
+            };
+            if reply.send(pending).is_err() {
+                tracing::warn!("Failed to send pending workspace changes to requester");
+            }
         }
     }
 }
@@ -204,9 +223,16 @@ async fn record_observed_change(state: &mut WorkspaceState, change: ObservedChan
 
     let (patch, large_change) = match change.kind {
         ChangeKind::Modified | ChangeKind::Created | ChangeKind::Renamed => {
-            compute_patch_from_snapshot(state, &change.abs_path)
-                .await
-                .unwrap_or((None, true))
+            match compute_patch_from_snapshot(state, &change.abs_path).await {
+                Some(result) => result,
+                None => {
+                    tracing::warn!(
+                        "Failed to compute workspace change patch for '{}'",
+                        change.abs_path
+                    );
+                    (None, true)
+                }
+            }
         }
         ChangeKind::Deleted => (None, false),
     };
@@ -231,7 +257,18 @@ async fn record_observed_change(state: &mut WorkspaceState, change: ObservedChan
 
 fn relative_path(workspace_root: &Path, abs_path: &str) -> Option<String> {
     let path = PathBuf::from(abs_path);
-    let rel = path.strip_prefix(workspace_root).ok()?;
+    let rel = match path.strip_prefix(workspace_root) {
+        Ok(relative) => relative,
+        Err(err) => {
+            tracing::warn!(
+                "Observed path '{}' is outside workspace '{}': {}",
+                abs_path,
+                workspace_root.display(),
+                err
+            );
+            return None;
+        }
+    };
     let relative = rel
         .components()
         .collect::<PathBuf>()
@@ -251,6 +288,17 @@ fn normalize_abs_path(path: &Path) -> String {
 
 fn normalize_abs_path_str(path: &str) -> String {
     path.replace('\\', "/")
+}
+
+fn infer_workspace_root_from_path(abs_path: &Path) -> PathBuf {
+    if abs_path.is_dir() {
+        return abs_path.to_path_buf();
+    }
+
+    match abs_path.parent() {
+        Some(parent) => parent.to_path_buf(),
+        None => abs_path.to_path_buf(),
+    }
 }
 
 fn prune_agent_suppression(state: &mut WorkspaceState) {
@@ -274,14 +322,34 @@ async fn compute_patch_from_snapshot(
 ) -> Option<(Option<String>, bool)> {
     let old = state.snapshots.get(abs_path).cloned()?;
     let path = PathBuf::from(abs_path);
-    let meta = tokio::fs::metadata(&path).await.ok()?;
+    let meta = match tokio::fs::metadata(&path).await {
+        Ok(metadata) => metadata,
+        Err(err) => {
+            tracing::warn!(
+                "Failed to stat workspace change path '{}': {}",
+                path.display(),
+                err
+            );
+            return None;
+        }
+    };
     if !meta.is_file() {
         return Some((None, false));
     }
     if meta.len() > MAX_SNAPSHOT_BYTES {
         return Some((None, true));
     }
-    let bytes = tokio::fs::read(&path).await.ok()?;
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(
+                "Failed to read workspace change path '{}': {}",
+                path.display(),
+                err
+            );
+            return None;
+        }
+    };
     let new = String::from_utf8_lossy(&bytes).to_string();
     if new == old {
         return Some((None, false));
@@ -312,7 +380,7 @@ fn count_changed_lines(patch: &str) -> usize {
 
 impl WorkspaceState {
     fn new(workspace_root: PathBuf) -> Self {
-        let cap = NonZeroUsize::new(MAX_SNAPSHOTS).expect("MAX_SNAPSHOTS must be non-zero");
+        let cap = NonZeroUsize::new(MAX_SNAPSHOTS).unwrap_or(NonZeroUsize::MIN);
         Self {
             workspace_root,
             pending: VecDeque::new(),

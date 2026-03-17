@@ -134,9 +134,12 @@ impl McpClient {
             self.server_info = Some(server_info);
         }
 
-        let _ = self
+        if let Err(err) = self
             .notify(JsonRpcRequest::new_notification("initialized", None))
-            .await;
+            .await
+        {
+            tracing::warn!("Failed to send MCP initialized notification: {}", err);
+        }
 
         Ok(())
     }

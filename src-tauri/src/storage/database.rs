@@ -15,7 +15,7 @@ use sqlx::sqlite::{
 use sqlx::{ConnectOptions, Executor, Row};
 use std::fmt;
 use std::num::NonZeroU32;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tracing;
@@ -35,9 +35,16 @@ impl PoolSize {
         match self {
             PoolSize::Fixed(size) => (*size, *size),
             PoolSize::Adaptive { min, max } => {
-                let cpu = std::thread::available_parallelism()
-                    .map(|n| n.get() as u32)
-                    .unwrap_or(4);
+                let cpu = match std::thread::available_parallelism() {
+                    Ok(parallelism) => parallelism.get() as u32,
+                    Err(err) => {
+                        tracing::warn!(
+                            "Failed to detect available parallelism, using default pool size: {}",
+                            err
+                        );
+                        4
+                    }
+                };
                 let suggested = (cpu * 2).clamp(min.get(), max.get());
                 (*min, NonZeroU32::new(suggested).unwrap())
             }
@@ -130,7 +137,7 @@ impl DatabaseManager {
                 ))
             })?;
 
-        let sql_dir = resolve_sql_dir(&options);
+        let sql_dir = resolve_sql_dir(&options)?;
         let scripts = SqlScriptCatalog::load(sql_dir)
             .await
             .map_err(DatabaseError::from)?
@@ -175,12 +182,17 @@ impl DatabaseManager {
         self.ensure_ai_models_schema().await?;
         self.ensure_messages_schema().await?;
         self.ensure_workspaces_schema().await?;
+        self.ensure_sessions_schema().await?;
         self.insert_default_data().await?;
         Ok(())
     }
 
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
+    }
+
+    pub fn config_dir(&self) -> &Path {
+        &self.paths.config_dir
     }
 
     pub async fn encrypt_data(&self, data: &str) -> DatabaseResult<Vec<u8>> {
@@ -255,9 +267,13 @@ impl DatabaseManager {
                 DatabaseError::internal(format!("Failed to inspect messages schema: {err}"))
             })?;
 
-        let has_is_internal = rows
-            .iter()
-            .any(|row| row.try_get::<String, _>("name").unwrap_or_default() == "is_internal");
+        let mut has_is_internal = false;
+        for row in &rows {
+            if pragma_text_column(row, "name", "messages table_info")? == "is_internal" {
+                has_is_internal = true;
+                break;
+            }
+        }
 
         if !has_is_internal {
             let mut tx = self.pool.begin().await.map_err(|err| {
@@ -291,15 +307,12 @@ impl DatabaseManager {
 
         let mut has_provider_model_unique = false;
         for row in indexes {
-            let is_unique: i64 = row.try_get("unique").unwrap_or(0);
+            let is_unique = pragma_i64_column(&row, "unique", "ai_models index_list")?;
             if is_unique == 0 {
                 continue;
             }
-            let name: String = row.try_get("name").unwrap_or_default();
-            if name.is_empty() {
-                continue;
-            }
-            let columns = sqlx::query(format!("PRAGMA index_info({})", name).as_str())
+            let name = pragma_text_column(&row, "name", "ai_models index_list")?;
+            let columns = sqlx::query(format!("PRAGMA index_info({name})").as_str())
                 .fetch_all(&self.pool)
                 .await
                 .map_err(|err| {
@@ -309,10 +322,7 @@ impl DatabaseManager {
                 })?;
             let mut column_names = Vec::new();
             for col in columns {
-                let col_name: String = col.try_get("name").unwrap_or_default();
-                if !col_name.is_empty() {
-                    column_names.push(col_name);
-                }
+                column_names.push(pragma_text_column(&col, "name", "ai_models index_info")?);
             }
             if column_names.len() == 2
                 && column_names.contains(&"provider".to_string())
@@ -330,11 +340,13 @@ impl DatabaseManager {
                 DatabaseError::internal(format!("Failed to inspect ai_models columns: {err}"))
             })?;
 
-        let has_display_name = columns.iter().any(|row| {
-            row.try_get::<String, _>("name")
-                .unwrap_or_default()
-                == "display_name"
-        });
+        let mut has_display_name = false;
+        for row in &columns {
+            if pragma_text_column(row, "name", "ai_models table_info")? == "display_name" {
+                has_display_name = true;
+                break;
+            }
+        }
 
         if !has_display_name {
             sqlx::query("ALTER TABLE ai_models ADD COLUMN display_name TEXT")
@@ -384,7 +396,6 @@ impl DatabaseManager {
                 display_name TEXT,
                 model_type TEXT DEFAULT 'chat' CHECK (model_type IN ('chat', 'embedding')),
                 config_json TEXT,
-                use_custom_base_url INTEGER DEFAULT 0,
                 auth_type TEXT NOT NULL DEFAULT 'api_key' CHECK (auth_type IN ('api_key', 'oauth')),
                 oauth_provider TEXT CHECK (oauth_provider IN ('openai_codex', 'claude_pro', 'gemini_advanced') OR oauth_provider IS NULL),
                 oauth_refresh_token_encrypted TEXT,
@@ -408,13 +419,13 @@ impl DatabaseManager {
             r#"
             INSERT INTO ai_models_new (
                 id, provider, api_url, api_key_encrypted, model_name, display_name, model_type,
-                config_json, use_custom_base_url, created_at, updated_at,
+                config_json, created_at, updated_at,
                 auth_type, oauth_provider, oauth_refresh_token_encrypted,
                 oauth_access_token_encrypted, oauth_token_expires_at, oauth_metadata
             )
             SELECT
                 id, provider, api_url, api_key_encrypted, model_name, model_name, model_type,
-                config_json, use_custom_base_url, created_at, updated_at,
+                config_json, created_at, updated_at,
                 auth_type, oauth_provider, oauth_refresh_token_encrypted,
                 oauth_access_token_encrypted, oauth_token_expires_at, oauth_metadata
             FROM ai_models
@@ -470,9 +481,14 @@ impl DatabaseManager {
                 DatabaseError::internal(format!("Failed to inspect workspaces schema: {err}"))
             })?;
 
-        let has_selected_run_action_id = rows.iter().any(|row| {
-            row.try_get::<String, _>("name").unwrap_or_default() == "selected_run_action_id"
-        });
+        let mut has_selected_run_action_id = false;
+        for row in &rows {
+            if pragma_text_column(row, "name", "workspaces table_info")? == "selected_run_action_id"
+            {
+                has_selected_run_action_id = true;
+                break;
+            }
+        }
 
         if !has_selected_run_action_id {
             let mut tx = self.pool.begin().await.map_err(|err| {
@@ -491,6 +507,36 @@ impl DatabaseManager {
             tx.commit().await.map_err(|err| {
                 DatabaseError::internal(format!("Failed to commit transaction: {err}"))
             })?;
+        }
+
+        Ok(())
+    }
+
+    async fn ensure_sessions_schema(&self) -> DatabaseResult<()> {
+        let rows = sqlx::query("PRAGMA table_info(sessions)")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|err| {
+                DatabaseError::internal(format!("Failed to inspect sessions schema: {err}"))
+            })?;
+
+        let mut has_worktree_path = false;
+        for row in &rows {
+            if pragma_text_column(row, "name", "sessions table_info")? == "worktree_path" {
+                has_worktree_path = true;
+                break;
+            }
+        }
+
+        if !has_worktree_path {
+            sqlx::query("ALTER TABLE sessions ADD COLUMN worktree_path TEXT")
+                .execute(&self.pool)
+                .await
+                .map_err(|err| {
+                    DatabaseError::internal(format!(
+                        "Failed to migrate sessions schema (add worktree_path): {err}"
+                    ))
+                })?;
         }
 
         Ok(())
@@ -544,12 +590,14 @@ impl KeyVault {
             return Ok(key);
         }
 
-        let key = match self.load_from_disk().await {
-            Ok(Some(k)) => k,
-            _ => self.derive_from_device().await?,
+        let key = match self.load_from_disk().await? {
+            Some(key) => key,
+            None => self.derive_from_device().await?,
         };
 
-        let _ = self.key.set(key);
+        if self.key.set(key).is_err() {
+            tracing::warn!("master key cache was already initialized before set");
+        }
         Ok(key)
     }
 
@@ -561,9 +609,16 @@ impl KeyVault {
             DatabaseError::io(format!("read key file {}", self.path.display()), err)
         })?;
         let mut lines = raw.lines();
-        let first = lines.next().unwrap_or_default();
+        let Some(first) = lines.next() else {
+            return Ok(None);
+        };
         let encoded = if first == KEY_FILE_VERSION {
-            lines.next().unwrap_or_default()
+            lines.next().ok_or_else(|| {
+                DatabaseError::internal(format!(
+                    "Invalid key file format at {}: missing payload after version header",
+                    self.path.display()
+                ))
+            })?
         } else {
             first
         };
@@ -601,17 +656,9 @@ impl KeyVault {
         // Linux: Read /var/lib/dbus/machine-id or /etc/machine-id
         match machine_uid::get() {
             Ok(uid) => Ok(uid),
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to get machine UID: {}, using hostname as fallback",
-                    e
-                );
-
-                // If machine UID retrieval fails, use hostname as fallback
-                hostname::get()
-                    .map(|h| h.to_string_lossy().to_string())
-                    .map_err(|e| DatabaseError::internal(format!("Failed to get hostname: {e}")))
-            }
+            Err(err) => Err(DatabaseError::internal(format!(
+                "Failed to get machine UID: {err}"
+            ))),
         }
     }
 
@@ -652,30 +699,51 @@ impl KeyVault {
     }
 }
 
-fn resolve_sql_dir(options: &DatabaseOptions) -> PathBuf {
+fn pragma_text_column(
+    row: &sqlx::sqlite::SqliteRow,
+    column: &str,
+    context: &str,
+) -> DatabaseResult<String> {
+    row.try_get(column).map_err(|err| {
+        DatabaseError::internal(format!("Failed to read `{column}` from {context}: {err}"))
+    })
+}
+
+fn pragma_i64_column(
+    row: &sqlx::sqlite::SqliteRow,
+    column: &str,
+    context: &str,
+) -> DatabaseResult<i64> {
+    row.try_get(column).map_err(|err| {
+        DatabaseError::internal(format!("Failed to read `{column}` from {context}: {err}"))
+    })
+}
+
+fn resolve_sql_dir(options: &DatabaseOptions) -> DatabaseResult<PathBuf> {
     if let Some(custom) = &options.sql_dir {
-        return custom.clone();
+        return Ok(custom.clone());
     }
 
     if cfg!(debug_assertions) {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sql")
+        Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sql"))
     } else {
-        let exe = match std::env::current_exe() {
-            Ok(exe) => exe,
-            Err(err) => {
-                tracing::warn!("Failed to get current executable path: {err}");
-                PathBuf::from(".")
-            }
-        };
+        let exe = std::env::current_exe().map_err(|err| {
+            DatabaseError::internal(format!("Failed to get current executable path: {err}"))
+        })?;
+
         if let Some(contents) = exe
             .ancestors()
             .find(|p| p.file_name() == Some(std::ffi::OsStr::new("Contents")))
         {
-            contents.join("Resources/sql")
+            Ok(contents.join("Resources/sql"))
         } else {
-            exe.parent()
-                .unwrap_or_else(|| std::path::Path::new("."))
-                .join("sql")
+            let parent = exe.parent().ok_or_else(|| {
+                DatabaseError::internal(format!(
+                    "Executable path '{}' has no parent directory",
+                    exe.display()
+                ))
+            })?;
+            Ok(parent.join("sql"))
         }
     }
 }

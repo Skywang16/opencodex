@@ -189,14 +189,30 @@ Examples:
 
                 // Track found files
                 for file_path in &paths {
-                    if let Ok(p) = PathBuf::from(file_path).canonicalize() {
-                        let _ = context
-                            .file_tracker()
-                            .track_file_operation(FileOperationRecord::new(
-                                p.as_path(),
-                                FileRecordSource::FileMentioned,
-                            ))
-                            .await;
+                    match PathBuf::from(file_path).canonicalize() {
+                        Ok(p) => {
+                            if let Err(err) = context
+                                .file_tracker()
+                                .track_file_operation(FileOperationRecord::new(
+                                    p.as_path(),
+                                    FileRecordSource::FileMentioned,
+                                ))
+                                .await
+                            {
+                                tracing::warn!(
+                                    path = %p.display(),
+                                    "Failed to track glob-discovered file: {}",
+                                    err
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                "Failed to canonicalize glob-discovered file '{}': {}",
+                                file_path,
+                                err
+                            );
+                        }
                     }
                 }
 
@@ -249,7 +265,10 @@ fn glob_search_sync(
             if entry.depth() == 0 {
                 return true;
             }
-            let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+            let Some(file_type) = entry.file_type() else {
+                return false;
+            };
+            let is_dir = file_type.is_dir();
             if is_dir {
                 let name = entry.file_name().to_string_lossy();
                 if BUILTIN_SKIP_DIRS.contains(&name.as_ref()) {
@@ -272,23 +291,40 @@ fn glob_search_sync(
         }
 
         // Match against relative path from search root
-        let rel = entry_path.strip_prefix(path).unwrap_or(entry_path);
+        let rel = entry_path.strip_prefix(path).map_err(|err| {
+            format!(
+                "Failed to compute relative path for {}: {err}",
+                entry_path.display()
+            )
+        })?;
         let rel_str = rel.to_string_lossy();
 
         // Also try matching just the filename
         let file_name = entry_path
             .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
+            .ok_or_else(|| format!("Path has no filename: {}", entry_path.display()))?
+            .to_string_lossy()
+            .to_string();
 
         if matcher.matches(&rel_str) || matcher.matches(&file_name) {
-            let mtime = entry_path
-                .metadata()
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
+            let metadata = entry_path.metadata().map_err(|err| {
+                format!(
+                    "Failed to read metadata for {}: {err}",
+                    entry_path.display()
+                )
+            })?;
+            let modified = metadata.modified().map_err(|err| {
+                format!(
+                    "Failed to read modified time for {}: {err}",
+                    entry_path.display()
+                )
+            })?;
+            let mtime = modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|err| {
+                    format!("Invalid modified time for {}: {err}", entry_path.display())
+                })?
+                .as_secs();
 
             results.push((entry_path.display().to_string(), mtime));
         }

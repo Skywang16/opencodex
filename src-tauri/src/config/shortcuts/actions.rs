@@ -190,201 +190,205 @@ impl ActionRegistry {
         self.register_system_actions().await;
     }
 
+    async fn register_default_action<F>(&mut self, metadata: ActionMetadata, handler: F)
+    where
+        F: Fn(&ActionContext) -> ShortcutsActionResult<serde_json::Value> + Send + Sync + 'static,
+    {
+        let action_name = metadata.name.clone();
+        if let Err(err) = self.register_action(metadata, handler).await {
+            warn!(
+                "Failed to register default shortcut action '{}': {}",
+                action_name, err
+            );
+        }
+    }
+
     async fn register_global_actions(&mut self) {
-        let _ = self
-            .register_action(
-                ActionMetadata {
-                    name: "copy_to_clipboard".to_string(),
-                    description: "Copy selected content to clipboard".to_string(),
+        self.register_default_action(
+            ActionMetadata {
+                name: "copy_to_clipboard".to_string(),
+                description: "Copy selected content to clipboard".to_string(),
 
-                    requires_terminal: false,
-                    is_system_action: false,
-                    supported_platforms: vec![
-                        "windows".to_string(),
-                        "macos".to_string(),
-                        "linux".to_string(),
-                    ],
-                },
-                |_context| {
-                    Ok(serde_json::Value::String(
-                        "🔥 Copy function triggered!".to_string(),
-                    ))
-                },
-            )
-            .await;
+                requires_terminal: false,
+                is_system_action: false,
+                supported_platforms: vec![
+                    "windows".to_string(),
+                    "macos".to_string(),
+                    "linux".to_string(),
+                ],
+            },
+            |_context| {
+                Ok(serde_json::Value::String(
+                    "🔥 Copy function triggered!".to_string(),
+                ))
+            },
+        )
+        .await;
 
-        let _ = self
-            .register_action(
-                ActionMetadata {
-                    name: "paste_from_clipboard".to_string(),
-                    description: "Paste content from clipboard".to_string(),
-                    requires_terminal: false,
-                    is_system_action: false,
-                    supported_platforms: vec![
-                        "windows".to_string(),
-                        "macos".to_string(),
-                        "linux".to_string(),
-                    ],
-                },
-                |_context| {
-                    Ok(serde_json::Value::String(
-                        "🔥 Paste function triggered!".to_string(),
-                    ))
-                },
-            )
-            .await;
+        self.register_default_action(
+            ActionMetadata {
+                name: "paste_from_clipboard".to_string(),
+                description: "Paste content from clipboard".to_string(),
+                requires_terminal: false,
+                is_system_action: false,
+                supported_platforms: vec![
+                    "windows".to_string(),
+                    "macos".to_string(),
+                    "linux".to_string(),
+                ],
+            },
+            |_context| {
+                Ok(serde_json::Value::String(
+                    "🔥 Paste function triggered!".to_string(),
+                ))
+            },
+        )
+        .await;
 
-        let _ = self
-            .register_action(
-                ActionMetadata {
-                    name: "terminal_search".to_string(),
-                    description: "Terminal search".to_string(),
-                    requires_terminal: false,
-                    is_system_action: false,
-                    supported_platforms: vec![
-                        "windows".to_string(),
-                        "macos".to_string(),
-                        "linux".to_string(),
-                    ],
-                },
-                |_context| {
-                    Ok(serde_json::Value::String(
-                        "🔥 Search function triggered!".to_string(),
-                    ))
-                },
-            )
-            .await;
+        self.register_default_action(
+            ActionMetadata {
+                name: "terminal_search".to_string(),
+                description: "Terminal search".to_string(),
+                requires_terminal: false,
+                is_system_action: false,
+                supported_platforms: vec![
+                    "windows".to_string(),
+                    "macos".to_string(),
+                    "linux".to_string(),
+                ],
+            },
+            |_context| {
+                Ok(serde_json::Value::String(
+                    "🔥 Search function triggered!".to_string(),
+                ))
+            },
+        )
+        .await;
     }
 
     async fn register_terminal_actions(&mut self) {
-        let _ = self
-            .register_action(
-                ActionMetadata {
-                    name: "new_terminal".to_string(),
-                    description: "New terminal".to_string(),
-                    requires_terminal: false,
-                    is_system_action: false,
-                    supported_platforms: vec![
-                        "windows".to_string(),
-                        "macos".to_string(),
-                        "linux".to_string(),
-                    ],
-                },
-                |_context| {
-                    Ok(serde_json::Value::String(
-                        "🔥 New terminal function triggered!".to_string(),
-                    ))
-                },
-            )
-            .await;
+        self.register_default_action(
+            ActionMetadata {
+                name: "new_terminal".to_string(),
+                description: "New terminal".to_string(),
+                requires_terminal: false,
+                is_system_action: false,
+                supported_platforms: vec![
+                    "windows".to_string(),
+                    "macos".to_string(),
+                    "linux".to_string(),
+                ],
+            },
+            |_context| {
+                Ok(serde_json::Value::String(
+                    "🔥 New terminal function triggered!".to_string(),
+                ))
+            },
+        )
+        .await;
     }
 
     async fn register_system_actions(&mut self) {
-        let _ = self
-            .register_action(
-                ActionMetadata {
-                    name: "clear_terminal".to_string(),
-                    description: "Clear terminal".to_string(),
+        self.register_default_action(
+            ActionMetadata {
+                name: "clear_terminal".to_string(),
+                description: "Clear terminal".to_string(),
 
-                    requires_terminal: true,
-                    is_system_action: false,
-                    supported_platforms: vec![
-                        "windows".to_string(),
-                        "macos".to_string(),
-                        "linux".to_string(),
-                    ],
-                },
-                |_context| {
-                    Ok(serde_json::Value::String(
-                        "🔥 Clear terminal function triggered!".to_string(),
-                    ))
-                },
-            )
-            .await;
+                requires_terminal: true,
+                is_system_action: false,
+                supported_platforms: vec![
+                    "windows".to_string(),
+                    "macos".to_string(),
+                    "linux".to_string(),
+                ],
+            },
+            |_context| {
+                Ok(serde_json::Value::String(
+                    "🔥 Clear terminal function triggered!".to_string(),
+                ))
+            },
+        )
+        .await;
 
-        let _ = self
-            .register_action(
-                ActionMetadata {
-                    name: "open_settings".to_string(),
-                    description: "Open settings".to_string(),
+        self.register_default_action(
+            ActionMetadata {
+                name: "open_settings".to_string(),
+                description: "Open settings".to_string(),
 
-                    requires_terminal: false,
-                    is_system_action: false,
-                    supported_platforms: vec![
-                        "windows".to_string(),
-                        "macos".to_string(),
-                        "linux".to_string(),
-                    ],
-                },
-                |_context| {
-                    Ok(serde_json::Value::String(
-                        "🔥 Open settings function triggered!".to_string(),
-                    ))
-                },
-            )
-            .await;
+                requires_terminal: false,
+                is_system_action: false,
+                supported_platforms: vec![
+                    "windows".to_string(),
+                    "macos".to_string(),
+                    "linux".to_string(),
+                ],
+            },
+            |_context| {
+                Ok(serde_json::Value::String(
+                    "🔥 Open settings function triggered!".to_string(),
+                ))
+            },
+        )
+        .await;
 
-        let _ = self
-            .register_action(
-                ActionMetadata {
-                    name: "command_palette".to_string(),
-                    description: "Toggle command palette".to_string(),
+        self.register_default_action(
+            ActionMetadata {
+                name: "command_palette".to_string(),
+                description: "Toggle command palette".to_string(),
 
-                    requires_terminal: false,
-                    is_system_action: false,
-                    supported_platforms: vec![
-                        "windows".to_string(),
-                        "macos".to_string(),
-                        "linux".to_string(),
-                    ],
-                },
-                |_context| {
-                    Ok(serde_json::Value::String(
-                        "Command palette toggled".to_string(),
-                    ))
-                },
-            )
-            .await;
+                requires_terminal: false,
+                is_system_action: false,
+                supported_platforms: vec![
+                    "windows".to_string(),
+                    "macos".to_string(),
+                    "linux".to_string(),
+                ],
+            },
+            |_context| {
+                Ok(serde_json::Value::String(
+                    "Command palette toggled".to_string(),
+                ))
+            },
+        )
+        .await;
 
-        let _ = self
-            .register_action(
-                ActionMetadata {
-                    name: "toggle_terminal_panel".to_string(),
-                    description: "Toggle terminal panel".to_string(),
+        self.register_default_action(
+            ActionMetadata {
+                name: "toggle_terminal_panel".to_string(),
+                description: "Toggle terminal panel".to_string(),
 
-                    requires_terminal: false,
-                    is_system_action: false,
-                    supported_platforms: vec![
-                        "windows".to_string(),
-                        "macos".to_string(),
-                        "linux".to_string(),
-                    ],
-                },
-                |_context| {
-                    Ok(serde_json::Value::String(
-                        "Terminal panel toggled".to_string(),
-                    ))
-                },
-            )
-            .await;
+                requires_terminal: false,
+                is_system_action: false,
+                supported_platforms: vec![
+                    "windows".to_string(),
+                    "macos".to_string(),
+                    "linux".to_string(),
+                ],
+            },
+            |_context| {
+                Ok(serde_json::Value::String(
+                    "Terminal panel toggled".to_string(),
+                ))
+            },
+        )
+        .await;
 
-        let _ = self
-            .register_action(
-                ActionMetadata {
-                    name: "toggle_window_pin".to_string(),
-                    description: "Pin/unpin window".to_string(),
+        self.register_default_action(
+            ActionMetadata {
+                name: "toggle_window_pin".to_string(),
+                description: "Pin/unpin window".to_string(),
 
-                    requires_terminal: false,
-                    is_system_action: false,
-                    supported_platforms: vec![
-                        "windows".to_string(),
-                        "macos".to_string(),
-                        "linux".to_string(),
-                    ],
-                },
-                |_context| Ok(serde_json::Value::String("Window pin toggled".to_string())),
-            )
-            .await;
+                requires_terminal: false,
+                is_system_action: false,
+                supported_platforms: vec![
+                    "windows".to_string(),
+                    "macos".to_string(),
+                    "linux".to_string(),
+                ],
+            },
+            |_context| Ok(serde_json::Value::String("Window pin toggled".to_string())),
+        )
+        .await;
     }
 }
 

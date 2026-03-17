@@ -74,12 +74,27 @@ impl IndexManager {
         };
         let file_hash = blake3_hash_bytes(content.as_bytes());
         let _language = crate::vector_db::core::Language::from_path(file_path);
-        let last_modified = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let last_modified = match meta.modified() {
+            Ok(modified) => match modified.duration_since(std::time::UNIX_EPOCH) {
+                Ok(duration) => duration.as_secs(),
+                Err(err) => {
+                    tracing::warn!(
+                        "File modified time predates unix epoch for '{}': {}",
+                        file_path.display(),
+                        err
+                    );
+                    0
+                }
+            },
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to read modified time for '{}': {}",
+                    file_path.display(),
+                    err
+                );
+                0
+            }
+        };
 
         // 2. Clean old chunks (if they exist)
         {
@@ -92,7 +107,13 @@ impl IndexManager {
             drop(guard);
             if !existing_ids.is_empty() {
                 // Delete vector file for this file
-                let _ = self.store.delete_file_vectors(file_path);
+                if let Err(err) = self.store.delete_file_vectors(file_path) {
+                    tracing::warn!(
+                        "Failed to delete stale vectors for '{}': {}",
+                        file_path.display(),
+                        err
+                    );
+                }
                 let mut manifest = self.manifest.write();
                 for chunk_id in existing_ids {
                     manifest.remove_chunk(&chunk_id);
@@ -189,7 +210,13 @@ impl IndexManager {
 
     pub fn remove_file(&self, file_path: &Path) -> Result<()> {
         // Delete vector file for this file
-        let _ = self.store.delete_file_vectors(file_path);
+        if let Err(err) = self.store.delete_file_vectors(file_path) {
+            tracing::warn!(
+                "Failed to delete vectors for '{}' while removing index entry: {}",
+                file_path.display(),
+                err
+            );
+        }
 
         let mut manifest = self.manifest.write();
         let chunk_ids: Vec<_> = manifest

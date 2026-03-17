@@ -79,8 +79,8 @@
         if (ws.path === currentPath) continue
         try {
           addSkills(await agentApi.listSkills(ws.path), ws.path)
-        } catch {
-          // skip unreachable workspaces
+        } catch (error) {
+          console.warn(`Failed to load skills for workspace '${ws.path}', skipping:`, error)
         }
       }
 

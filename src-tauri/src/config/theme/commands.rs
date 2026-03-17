@@ -201,8 +201,11 @@ pub async fn theme_get_available(
 
     let mut themes = Vec::new();
     for entry in theme_list {
-        if let Ok(theme) = theme_service.theme_manager().load_theme(&entry.name).await {
-            themes.push(theme);
+        match theme_service.theme_manager().load_theme(&entry.name).await {
+            Ok(theme) => themes.push(theme),
+            Err(err) => {
+                warn!("Failed to load theme '{}': {}", entry.name, err);
+            }
         }
     }
 

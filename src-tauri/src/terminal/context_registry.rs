@@ -271,11 +271,16 @@ impl ActiveTerminalContextRegistry {
     /// * `RegistryStats` - Registry statistics
     pub fn get_stats(&self) -> RegistryStats {
         let global_active = self.terminal_context_get_active_pane();
-        let window_count = self
-            .window_active_panes
-            .read()
-            .map(|panes| panes.len())
-            .unwrap_or(0);
+        let window_count = match self.window_active_panes.read() {
+            Ok(panes) => panes.len(),
+            Err(err) => {
+                tracing::warn!(
+                    "failed to acquire window_active_panes read lock while collecting stats: {}",
+                    err
+                );
+                0
+            }
+        };
         let subscriber_count = self.event_sender.receiver_count();
 
         RegistryStats {

@@ -66,7 +66,16 @@ pub async fn terminal_create<R: Runtime>(
 
     // Choose creation method based on whether initial directory is specified
     let result = if let Some(working_dir) = cwd {
-        let mut shell_config = MuxShellConfig::with_default_shell();
+        let mut shell_config = match MuxShellConfig::with_default_shell() {
+            Ok(shell_config) => shell_config,
+            Err(err) => {
+                error!(
+                    "Failed to resolve default shell for terminal creation: {}",
+                    err
+                );
+                return Ok(api_error!("shell.shell_not_found"));
+            }
+        };
         shell_config.working_directory = Some(working_dir.clone().into());
         let config = MuxSessionConfig::with_shell(shell_config);
 
@@ -186,8 +195,13 @@ pub async fn terminal_get_available_shells() -> TauriApiResult<Vec<ShellInfo>> {
 ///
 #[tauri::command]
 pub async fn terminal_get_default_shell() -> TauriApiResult<ShellInfo> {
-    let default_shell = ShellManager::terminal_get_default_shell();
-    Ok(api_success!(default_shell))
+    match ShellManager::terminal_get_default_shell() {
+        Ok(default_shell) => Ok(api_success!(default_shell)),
+        Err(err) => {
+            error!("Failed to resolve default shell: {}", err);
+            Ok(api_error!("shell.shell_not_found"))
+        }
+    }
 }
 
 /// Validate if shell path is valid
@@ -224,7 +238,13 @@ pub async fn terminal_create_with_shell<R: Runtime>(
                 return Ok(api_error!("shell.shell_not_found"));
             }
         },
-        None => ShellManager::terminal_get_default_shell(),
+        None => match ShellManager::terminal_get_default_shell() {
+            Ok(shell) => shell,
+            Err(err) => {
+                error!("Failed to resolve default shell: {}", err);
+                return Ok(api_error!("shell.shell_not_found"));
+            }
+        },
     };
 
     let mux = get_mux();

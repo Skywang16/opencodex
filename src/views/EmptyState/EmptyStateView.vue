@@ -134,7 +134,7 @@
 
   const handleOpenWorkspace = async (path: string) => {
     try {
-      await workspaceStore.loadSessions(path)
+      await workspaceStore.loadSessionViews(path)
     } catch (error) {
       console.error('Failed to open workspace:', error)
     }

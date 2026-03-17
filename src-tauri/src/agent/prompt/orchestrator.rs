@@ -18,6 +18,13 @@ pub struct PromptOrchestrator {
     settings_manager: Arc<SettingsManager>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct TaskPrompts {
+    pub instructions: String,
+    pub developer_context: Vec<String>,
+    pub user_prompt: String,
+}
+
 impl PromptOrchestrator {
     pub fn new(
         cache: Arc<UnifiedCache>,
@@ -56,8 +63,12 @@ impl PromptOrchestrator {
             .await
             .map_err(|e| TaskExecutorError::StatePersistenceFailed(e.to_string()))?;
 
-        let _ = self.cache.set_global_rules(global_rules.clone()).await;
-        let _ = self.cache.set_project_rules(project_rules.clone()).await;
+        if let Err(err) = self.cache.set_global_rules(global_rules.clone()).await {
+            tracing::warn!("Failed to sync global rules cache: {}", err);
+        }
+        if let Err(err) = self.cache.set_project_rules(project_rules.clone()).await {
+            tracing::warn!("Failed to sync project rules cache: {}", err);
+        }
 
         Ok((global_rules, project_rules))
     }
@@ -93,21 +104,56 @@ impl PromptOrchestrator {
 
     fn get_directory_listing(workspace_path: &str) -> Option<String> {
         let path = Path::new(workspace_path);
-        let mut entries: Vec<String> = std::fs::read_dir(path)
-            .ok()?
-            .filter_map(|entry| {
-                let entry = entry.ok()?;
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with('.') || name == "~" {
-                    return None;
+        let read_dir = match std::fs::read_dir(path) {
+            Ok(entries) => entries,
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to read top-level directory listing for '{}': {}",
+                    workspace_path,
+                    err
+                );
+                return None;
+            }
+        };
+
+        let mut entries = Vec::new();
+        for entry in read_dir {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to read directory entry in '{}': {}",
+                        workspace_path,
+                        err
+                    );
+                    continue;
                 }
-                Some(if entry.file_type().ok()?.is_dir() {
-                    format!("{name}/")
-                } else {
-                    name
-                })
-            })
-            .collect();
+            };
+
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || name == "~" {
+                continue;
+            }
+
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to read file type for '{}' entry '{}': {}",
+                        workspace_path,
+                        name,
+                        err
+                    );
+                    continue;
+                }
+            };
+
+            if file_type.is_dir() {
+                entries.push(format!("{name}/"));
+            } else {
+                entries.push(name);
+            }
+        }
 
         entries.sort();
         (!entries.is_empty()).then(|| {
@@ -119,8 +165,6 @@ impl PromptOrchestrator {
     }
 
     fn get_git_info(workspace_path: &str) -> Option<String> {
-        use std::process::Command;
-
         let path = Path::new(workspace_path);
         if !path.join(".git").exists() {
             return None;
@@ -129,31 +173,21 @@ impl PromptOrchestrator {
         let mut info_parts = Vec::new();
 
         // Get current branch
-        if let Ok(output) = Command::new("git")
-            .args(["rev-parse", "--abbrev-ref", "HEAD"])
-            .current_dir(workspace_path)
-            .output()
+        if let Some(output) =
+            run_git_command(workspace_path, &["rev-parse", "--abbrev-ref", "HEAD"])
         {
-            if output.status.success() {
-                let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                info_parts.push(format!("Git branch: {branch}"));
-            }
+            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            info_parts.push(format!("Git branch: {branch}"));
         }
 
         // Get short status (dirty/clean)
-        if let Ok(output) = Command::new("git")
-            .args(["status", "--porcelain"])
-            .current_dir(workspace_path)
-            .output()
-        {
-            if output.status.success() {
-                let status = String::from_utf8_lossy(&output.stdout);
-                let changed_count = status.lines().count();
-                if changed_count > 0 {
-                    info_parts.push(format!("Git status: {changed_count} file(s) changed"));
-                } else {
-                    info_parts.push("Git status: clean".to_string());
-                }
+        if let Some(output) = run_git_command(workspace_path, &["status", "--porcelain"]) {
+            let status = String::from_utf8_lossy(&output.stdout);
+            let changed_count = status.lines().count();
+            if changed_count > 0 {
+                info_parts.push(format!("Git status: {changed_count} file(s) changed"));
+            } else {
+                info_parts.push("Git status: clean".to_string());
             }
         }
 
@@ -173,17 +207,15 @@ impl PromptOrchestrator {
         workspace_path: &str,
         _tool_registry: &ToolRegistry,
         model_id: Option<&str>,
-    ) -> TaskExecutorResult<(String, String)> {
+    ) -> TaskExecutorResult<TaskPrompts> {
         let cwd = workspace_path;
 
         // Load agent configuration
         let agent_configs = AgentConfigLoader::load_for_workspace(&std::path::PathBuf::from(cwd))
             .await
-            .unwrap_or_default();
+            .map_err(|err| TaskExecutorError::ConfigurationError(err.to_string()))?;
 
-        let agent_cfg = agent_configs
-            .get(agent_type)
-            .or_else(|| agent_configs.get("coder"));
+        let agent_cfg = agent_configs.get(agent_type);
 
         // Load rules
         let (global_rules, project_rules) = self.load_rules(workspace_path).await?;
@@ -208,10 +240,7 @@ impl PromptOrchestrator {
         };
 
         // Get reminder
-        let has_plan_history = self
-            .has_agent_messages(session_id, "plan")
-            .await
-            .unwrap_or(false);
+        let has_plan_history = self.has_agent_messages(session_id, "plan").await?;
         let reminder = self.get_reminder(agent_type, has_plan_history);
 
         // Build environment info with directory listing and git status
@@ -251,17 +280,49 @@ impl PromptOrchestrator {
             prompt_builder.get_model_profile_prompt("generic").await
         };
 
-        let system_prompt = prompt_builder
-            .build_system_prompt(SystemPromptParts {
-                agent_prompt,
-                model_profile,
-                env_info: Some(env_info),
-                reminder,
-                custom_instructions,
-                user_system: None,
-            })
-            .await;
+        let layers = prompt_builder.build_prompt_layers(SystemPromptParts {
+            agent_prompt,
+            model_profile,
+            env_info: Some(env_info),
+            reminder,
+            custom_instructions,
+            user_system: None,
+        });
 
-        Ok((system_prompt, user_prompt.to_string()))
+        Ok(TaskPrompts {
+            instructions: layers.instructions,
+            developer_context: layers.developer_context,
+            user_prompt: user_prompt.to_string(),
+        })
+    }
+}
+
+fn run_git_command(workspace_path: &str, args: &[&str]) -> Option<std::process::Output> {
+    use std::process::Command;
+
+    match Command::new("git")
+        .args(args)
+        .current_dir(workspace_path)
+        .output()
+    {
+        Ok(output) if output.status.success() => Some(output),
+        Ok(output) => {
+            tracing::warn!(
+                "Git command failed in '{}': git {} (status={})",
+                workspace_path,
+                args.join(" "),
+                output.status
+            );
+            None
+        }
+        Err(err) => {
+            tracing::warn!(
+                "Failed to execute git command in '{}': git {} ({})",
+                workspace_path,
+                args.join(" "),
+                err
+            );
+            None
+        }
     }
 }

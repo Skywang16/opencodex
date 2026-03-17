@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use tokio::sync::RwLock;
+use tracing::warn;
 
 use crate::agent::error::AgentResult;
 
@@ -98,11 +99,16 @@ impl FileContextTracker {
         let normalized_path = self.normalized_path(record.path);
         let now = record.recorded_at;
 
-        let state = record.state_override.unwrap_or(match record.source {
-            FileRecordSource::ReadTool | FileRecordSource::AgentEdited => FileRecordState::Active,
-            FileRecordSource::UserEdited => FileRecordState::Stale,
-            FileRecordSource::FileMentioned => FileRecordState::Active,
-        });
+        let state = match record.state_override {
+            Some(state) => state,
+            None => match record.source {
+                FileRecordSource::ReadTool | FileRecordSource::AgentEdited => {
+                    FileRecordState::Active
+                }
+                FileRecordSource::UserEdited => FileRecordState::Stale,
+                FileRecordSource::FileMentioned => FileRecordState::Active,
+            },
+        };
 
         match state {
             FileRecordState::Active => {
@@ -173,15 +179,27 @@ impl FileContextTracker {
     /// Record the modification time of a file when it's read
     pub async fn record_file_mtime(&self, path: impl AsRef<Path>) -> AgentResult<()> {
         let normalized = self.normalized_path(path.as_ref());
-        let absolute_path = self
-            .workspace_root
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(&self.workspace_path))
-            .join(&normalized);
+        let absolute_path = self.workspace_base_path().join(&normalized);
 
-        if let Ok(metadata) = tokio::fs::metadata(&absolute_path).await {
-            if let Ok(mtime) = metadata.modified() {
-                self.file_mtimes.write().await.insert(normalized, mtime);
+        match tokio::fs::metadata(&absolute_path).await {
+            Ok(metadata) => match metadata.modified() {
+                Ok(mtime) => {
+                    self.file_mtimes.write().await.insert(normalized, mtime);
+                }
+                Err(err) => {
+                    warn!(
+                        "Failed to read modified time for tracked file '{}': {}",
+                        absolute_path.display(),
+                        err
+                    );
+                }
+            },
+            Err(err) => {
+                warn!(
+                    "Failed to read metadata for tracked file '{}': {}",
+                    absolute_path.display(),
+                    err
+                );
             }
         }
         Ok(())
@@ -191,11 +209,7 @@ impl FileContextTracker {
     /// Returns an error if the file has not been read yet or has been modified
     pub async fn assert_file_not_modified(&self, path: impl AsRef<Path>) -> AgentResult<()> {
         let normalized = self.normalized_path(path.as_ref());
-        let absolute_path = self
-            .workspace_root
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(&self.workspace_path))
-            .join(&normalized);
+        let absolute_path = self.workspace_base_path().join(&normalized);
 
         let mtimes = self.file_mtimes.read().await;
         let recorded_mtime = mtimes.get(&normalized).ok_or_else(|| {
@@ -204,13 +218,29 @@ impl FileContextTracker {
             ))
         })?;
 
-        if let Ok(metadata) = tokio::fs::metadata(&absolute_path).await {
-            if let Ok(current_mtime) = metadata.modified() {
-                if current_mtime > *recorded_mtime {
-                    return Err(crate::agent::error::AgentError::Internal(format!(
-                        "File '{normalized}' has been modified since it was last read. Please read the file again before editing."
-                    )));
+        match tokio::fs::metadata(&absolute_path).await {
+            Ok(metadata) => match metadata.modified() {
+                Ok(current_mtime) => {
+                    if current_mtime > *recorded_mtime {
+                        return Err(crate::agent::error::AgentError::Internal(format!(
+                            "File '{normalized}' has been modified since it was last read. Please read the file again before editing."
+                        )));
+                    }
                 }
+                Err(err) => {
+                    warn!(
+                        "Failed to read modified time while checking tracked file '{}': {}",
+                        absolute_path.display(),
+                        err
+                    );
+                }
+            },
+            Err(err) => {
+                warn!(
+                    "Failed to read metadata while checking tracked file '{}': {}",
+                    absolute_path.display(),
+                    err
+                );
             }
         }
 
@@ -226,15 +256,12 @@ impl FileContextTracker {
             PathBuf::from(&self.workspace_path).join(path)
         };
 
-        let workspace_root = self
-            .workspace_root
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(&self.workspace_path));
+        let workspace_root = self.workspace_base_path();
 
         let relative = resolved
             .strip_prefix(&workspace_root)
             .map(|p| p.to_path_buf())
-            .unwrap_or(resolved);
+            .unwrap_or_else(|_| resolved.clone());
 
         relative
             .components()
@@ -242,5 +269,12 @@ impl FileContextTracker {
             .to_string_lossy()
             .trim_start_matches(std::path::MAIN_SEPARATOR)
             .replace('\\', "/")
+    }
+
+    fn workspace_base_path(&self) -> PathBuf {
+        match &self.workspace_root {
+            Some(root) => root.clone(),
+            None => PathBuf::from(&self.workspace_path),
+        }
     }
 }

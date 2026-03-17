@@ -63,7 +63,9 @@ impl SkillValidator {
             return;
         }
 
-        let frontmatter = frontmatter.unwrap();
+        let Some(frontmatter) = frontmatter else {
+            return;
+        };
 
         // Parse frontmatter
         let parsed = crate::agent::agents::frontmatter::parse_frontmatter(frontmatter);
@@ -101,9 +103,22 @@ impl SkillValidator {
             let dir = skill_dir.join(dir_name);
             if dir.exists() && dir.is_dir() {
                 // Check if directory is empty
-                if let Ok(mut entries) = fs::read_dir(&dir).await {
-                    if entries.next_entry().await.ok().flatten().is_none() {
-                        warnings.push(format!("Directory '{dir_name}' exists but is empty"));
+                match fs::read_dir(&dir).await {
+                    Ok(mut entries) => match entries.next_entry().await {
+                        Ok(None) => {
+                            warnings.push(format!("Directory '{dir_name}' exists but is empty"));
+                        }
+                        Ok(Some(_)) => {}
+                        Err(err) => {
+                            warnings.push(format!(
+                                "Failed to inspect optional directory '{dir_name}': {err}"
+                            ));
+                        }
+                    },
+                    Err(err) => {
+                        warnings.push(format!(
+                            "Failed to read optional directory '{dir_name}': {err}"
+                        ));
                     }
                 }
             }

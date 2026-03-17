@@ -102,7 +102,8 @@ impl RunnableTool for ShellTool {
 
 Usage:
 - Use cwd parameter to change directory (NOT cd && command)
-- Use background=true for long-running processes (dev servers, watchers)
+- Commands run in blocking mode unless you set background=true explicitly
+- Use background=true for long-running commands (dev servers, watchers, log tails, `cargo run`, `npm run dev`)
 - Quote paths with spaces
 - Run independent commands in parallel
 
@@ -127,7 +128,7 @@ Git safety: Never commit/push/amend without explicit user request."#
                 },
                 "background": {
                     "type": "boolean",
-                    "description": "Run command in background without waiting. Use for long-running commands like dev servers."
+                    "description": "Set true to run the command in the background. If omitted, the command runs in blocking mode."
                 },
                 "timeoutMs": {
                     "type": "integer",
@@ -188,7 +189,6 @@ Git safety: Never commit/push/amend without explicit user request."#
             .map(Duration::from_millis)
             .unwrap_or(Duration::from_millis(DEFAULT_TIMEOUT_MS));
 
-        // Whether to run in background
         let is_background = args.background.unwrap_or(false);
         let mode = if is_background {
             TerminalExecutionMode::Background
@@ -248,9 +248,10 @@ Git safety: Never commit/push/amend without explicit user request."#
         };
 
         let duration_secs = exec_start.elapsed().as_secs_f32();
-        let raw_output = manager
-            .get_terminal_last_command_output(&terminal.id)
-            .unwrap_or_default();
+        let raw_output = match manager.get_terminal_last_command_output(&terminal.id) {
+            Ok(output) => output,
+            Err(err) => return Ok(tool_error(err, &args.command, cwd)),
+        };
         let exit_code = match status {
             TerminalStatus::Completed { exit_code } => exit_code,
             _ => None,

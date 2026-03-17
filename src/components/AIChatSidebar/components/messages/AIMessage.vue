@@ -5,6 +5,8 @@
   import { useI18n } from 'vue-i18n'
   import { useAIChatStore } from '../../store'
   import AgentSwitchBlock from './blocks/AgentSwitchBlock.vue'
+  import ExploredGroup from './blocks/ExploredGroup.vue'
+  import SubtaskGroup from './blocks/SubtaskGroup.vue'
   import SubtaskBlock from './blocks/SubtaskBlock.vue'
   import ThinkingBlock from './blocks/ThinkingBlock.vue'
   import ToolBlock from './blocks/ToolBlock.vue'
@@ -25,6 +27,77 @@
   }
 
   const blocks = computed<Block[]>(() => props.message.blocks.map(normalizeBlockType))
+
+  type RenderItem =
+    | { kind: 'block'; block: Block; key: string }
+    | { kind: 'explored-group'; blocks: Extract<Block, { type: 'tool' }>[]; key: string }
+    | { kind: 'subtask-group'; blocks: Extract<Block, { type: 'subtask' }>[]; key: string }
+
+  const isExplorationTool = (block: Block): block is Extract<Block, { type: 'tool' }> => {
+    return (
+      block.type === 'tool' &&
+      ['grep', 'semantic_search', 'read_file', 'list_files', 'glob', 'read_terminal', 'web_search', 'web_fetch'].includes(
+        block.name
+      )
+    )
+  }
+
+  const renderItems = computed<RenderItem[]>(() => {
+    const items: RenderItem[] = []
+    let pendingExplorationTools: Extract<Block, { type: 'tool' }>[] = []
+    let pendingSubtasks: Extract<Block, { type: 'subtask' }>[] = []
+
+    const flushExplorationTools = () => {
+      if (pendingExplorationTools.length === 0) return
+      items.push({
+        kind: 'explored-group',
+        blocks: pendingExplorationTools,
+        key: pendingExplorationTools.map(block => block.id).join('-'),
+      })
+      pendingExplorationTools = []
+    }
+
+    const flushSubtasks = () => {
+      if (pendingSubtasks.length === 0) return
+      if (pendingSubtasks.length === 1) {
+        const block = pendingSubtasks[0]
+        items.push({ kind: 'block', block, key: block.id })
+      } else {
+        items.push({
+          kind: 'subtask-group',
+          blocks: pendingSubtasks,
+          key: pendingSubtasks.map(block => block.id).join('-'),
+        })
+      }
+      pendingSubtasks = []
+    }
+
+    for (const [index, block] of blocks.value.entries()) {
+      if (isExplorationTool(block)) {
+        flushSubtasks()
+        pendingExplorationTools.push(block)
+        continue
+      }
+
+      if (block.type === 'subtask') {
+        flushExplorationTools()
+        pendingSubtasks.push(block)
+        continue
+      }
+
+      flushExplorationTools()
+      flushSubtasks()
+      items.push({
+        kind: 'block',
+        block,
+        key: ('id' in block && block.id) || `${props.message.id}-${block.type}-${index}`,
+      })
+    }
+
+    flushExplorationTools()
+    flushSubtasks()
+    return items
+  })
 
   const STREAMING_HINTS = [
     'Thinking...',
@@ -124,52 +197,60 @@
     </div>
 
     <template v-else-if="blocks.length > 0">
-      <div
-        v-for="(block, index) in blocks"
-        :key="('id' in block && block.id) || `${message.id}-${block.type}-${index}`"
-        :class="{ 'block-fade-in': isStreaming }"
-      >
-        <ThinkingBlock v-if="block.type === 'thinking'" :block="block" :disable-expand="disableToolExpand" />
+      <div v-for="item in renderItems" :key="item.key" :class="{ 'block-fade-in': isStreaming }">
+        <ExploredGroup v-if="item.kind === 'explored-group'" :blocks="item.blocks" />
+
+        <SubtaskGroup v-else-if="item.kind === 'subtask-group'" :blocks="item.blocks" />
+
+        <ThinkingBlock
+          v-else-if="item.block.type === 'thinking'"
+          :block="item.block"
+          :disable-expand="disableToolExpand"
+        />
 
         <ToolBlock
-          v-else-if="block.type === 'tool' && block.name !== 'task'"
-          :block="block"
+          v-else-if="item.block.type === 'tool' && item.block.name !== 'task'"
+          :block="item.block"
           :disable-expand="disableToolExpand"
         />
 
         <!-- `task` is orchestration-only; don't render it as a normal tool block -->
-        <template v-else-if="block.type === 'tool' && block.name === 'task'"></template>
+        <template v-else-if="item.block.type === 'tool' && item.block.name === 'task'"></template>
 
-        <AgentSwitchBlock v-else-if="block.type === 'agent_switch'" :block="block" />
+        <AgentSwitchBlock v-else-if="item.block.type === 'agent_switch'" :block="item.block" />
 
-        <SubtaskBlock v-else-if="block.type === 'subtask'" :block="block" />
+        <SubtaskBlock v-else-if="item.block.type === 'subtask'" :block="item.block" />
 
-        <div v-else-if="block.type === 'user_text'" class="ai-message-text step-block" @click="handleMessageClick">
-          <div v-html="renderMarkdown(block.content)"></div>
+        <div v-else-if="item.block.type === 'user_text'" class="ai-message-text step-block" @click="handleMessageClick">
+          <div v-html="renderMarkdown(item.block.content)"></div>
         </div>
 
-        <div v-else-if="block.type === 'user_image'" class="ai-message-text step-block">
-          <img :src="block.dataUrl" :alt="block.fileName || 'image'" style="max-width: 100%; border-radius: 8px" />
+        <div v-else-if="item.block.type === 'user_image'" class="ai-message-text step-block">
+          <img
+            :src="item.block.dataUrl"
+            :alt="item.block.fileName || 'image'"
+            style="max-width: 100%; border-radius: 8px"
+          />
         </div>
 
-        <div v-else-if="block.type === 'text'" class="ai-message-text step-block" @click="handleMessageClick">
-          <div v-html="renderMarkdown(block.content)"></div>
+        <div v-else-if="item.block.type === 'text'" class="ai-message-text step-block" @click="handleMessageClick">
+          <div v-html="renderMarkdown(item.block.content)"></div>
         </div>
 
-        <div v-else-if="block.type === 'error'" class="error-inline step-block">
-          <span class="error-message">{{ block.message }}</span>
+        <div v-else-if="item.block.type === 'error'" class="error-inline step-block">
+          <span class="error-message">{{ item.block.message }}</span>
         </div>
 
         <div v-else class="unknown-step step-block">
           <div class="unknown-header">
             <span class="unknown-icon">❓</span>
-            <span class="unknown-label">Unknown block type: {{ block.type }}</span>
+            <span class="unknown-label">Unknown block type: {{ item.block.type }}</span>
           </div>
         </div>
       </div>
     </template>
 
-    <div v-if="isStreaming && showHint && !aiChatStore.retryStatus" class="streaming-hint">
+    <div v-if="isStreaming && showHint && !aiChatStore.retryStatus && !message.isSummary" class="streaming-hint">
       <span class="streaming-hint-text">{{ currentHint }}</span>
     </div>
 

@@ -90,8 +90,15 @@ impl StdioTransport {
                 match response {
                     Ok(resp) => {
                         if let JsonRpcId::Number(id) = &resp.id {
-                            if let Some((_, tx)) = pending.remove(id) {
-                                let _ = tx.send(Ok(resp));
+                            let id = *id;
+                            if let Some((_, tx)) = pending.remove(&id) {
+                                if tx.send(Ok(resp)).is_err() {
+                                    tracing::warn!(
+                                        target: "mcp",
+                                        "Failed to deliver MCP stdio response for request {}",
+                                        id
+                                    );
+                                }
                             }
                         }
                     }
@@ -107,7 +114,13 @@ impl StdioTransport {
             for entry in pending.iter() {
                 let id = *entry.key();
                 if let Some((_, tx)) = pending.remove(&id) {
-                    let _ = tx.send(Err(McpError::Closed));
+                    if tx.send(Err(McpError::Closed)).is_err() {
+                        tracing::warn!(
+                            target: "mcp",
+                            "Failed to notify pending MCP stdio request {} about close",
+                            id
+                        );
+                    }
                 }
             }
         });
@@ -181,7 +194,9 @@ impl StdioTransport {
 
         let mut child_guard = self.child.lock().await;
         if let Some(mut child) = child_guard.take() {
-            let _ = child.kill().await;
+            if let Err(err) = child.kill().await {
+                tracing::warn!("Failed to kill MCP child process during close: {}", err);
+            }
         }
 
         Ok(())
@@ -226,9 +241,16 @@ impl Drop for StdioTransport {
     fn drop(&mut self) {
         self.connected.store(false, Ordering::SeqCst);
 
-        if let Ok(mut child_guard) = self.child.try_lock() {
-            if let Some(ref mut child) = *child_guard {
-                let _ = child.start_kill();
+        match self.child.try_lock() {
+            Ok(mut child_guard) => {
+                if let Some(ref mut child) = *child_guard {
+                    if let Err(err) = child.start_kill() {
+                        tracing::warn!("Failed to start MCP child kill during drop: {}", err);
+                    }
+                }
+            }
+            Err(err) => {
+                tracing::warn!("Failed to lock MCP child during drop: {}", err);
             }
         }
     }

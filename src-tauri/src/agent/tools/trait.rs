@@ -14,6 +14,8 @@ use crate::agent::error::ToolExecutorResult;
 #[derive(Debug, Clone)]
 pub struct ToolDescriptionContext {
     pub cwd: String,
+    pub agent_type: Option<String>,
+    pub allowed_task_profiles: Vec<String>,
 }
 
 /// Context for checking tool availability at registration time

@@ -112,6 +112,14 @@ export class TerminalApi {
     return listen<{ paneId: number; exitCode: number | null }>('terminal_exit', event => callback(event.payload))
   }
 
+  onTerminalCreated = async (callback: (payload: { paneId: number }) => void): Promise<UnlistenFn> => {
+    return listen<{ paneId: number }>('terminal_created', event => callback(event.payload))
+  }
+
+  onTerminalClosed = async (callback: (payload: { paneId: number }) => void): Promise<UnlistenFn> => {
+    return listen<{ paneId: number }>('terminal_closed', event => callback(event.payload))
+  }
+
   /**
    * Listen to CWD change event
    */

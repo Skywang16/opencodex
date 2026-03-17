@@ -136,7 +136,8 @@
     try {
       const result = hljs.highlight(text, { language: fileLanguage.value })
       return result.value
-    } catch {
+    } catch (error) {
+      console.warn(`Failed to highlight diff with language '${fileLanguage.value}':`, error)
       return text
     }
   }

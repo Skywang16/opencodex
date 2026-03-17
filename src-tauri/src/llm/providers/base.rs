@@ -11,6 +11,9 @@ use crate::llm::types::{EmbeddingRequest, EmbeddingResponse};
 /// "Never break userspace": From the caller's perspective, only Anthropic types are visible.
 #[async_trait]
 pub trait LLMProvider: Send + Sync {
+    /// Stable provider identifier for logging and error reporting.
+    fn provider_name(&self) -> &'static str;
+
     /// Non-streaming call
     ///
     /// Accepts Anthropic CreateMessageRequest, returns Anthropic Message.
@@ -42,7 +45,7 @@ pub trait LLMProvider: Send + Sync {
         _request: EmbeddingRequest,
     ) -> LlmProviderResult<EmbeddingResponse> {
         Err(LlmProviderError::UnsupportedOperation {
-            provider: "unknown",
+            provider: self.provider_name(),
             operation: "embeddings",
         })
     }

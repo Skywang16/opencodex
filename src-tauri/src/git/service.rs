@@ -1,6 +1,31 @@
 use crate::git::types::*;
+use serde::{Deserialize, Serialize};
 use std::io;
 use tokio::process::Command as AsyncCommand;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeInfo {
+    pub path: String,
+    pub branch: String,
+    pub is_main: bool,
+}
+
+/// Find the git repository root for the given path.
+/// Returns `None` if path is not inside a git repo.
+pub async fn find_repo_root(path: &str) -> Option<String> {
+    match GitService::is_repository(path).await {
+        Ok(root) => root,
+        Err(err) => {
+            tracing::warn!(
+                "Failed to detect git repository root for '{}': {:?}",
+                path,
+                err
+            );
+            None
+        }
+    }
+}
 
 pub struct GitService;
 
@@ -70,7 +95,7 @@ impl GitService {
     }
 
     async fn execute_no_output(args: &[&str], cwd: &str) -> Result<(), GitError> {
-        let _ = Self::execute(args, cwd).await?;
+        Self::execute(args, cwd).await?;
         Ok(())
     }
 
@@ -208,12 +233,32 @@ impl GitService {
             }
 
             let mut parts = line.split('\t');
-            let name = parts.next().unwrap_or_default().trim();
+            let Some(name) = parts.next().map(str::trim) else {
+                return Err(GitError::parse_error(
+                    "Missing branch name in local branch output".to_string(),
+                ));
+            };
             if name.is_empty() {
-                continue;
+                return Err(GitError::parse_error(
+                    "Empty branch name in local branch output".to_string(),
+                ));
             }
-            let head = parts.next().unwrap_or_default().trim();
-            let upstream = parts.next().unwrap_or_default().trim();
+            let head = match parts.next().map(str::trim) {
+                Some(head) => head,
+                None => {
+                    return Err(GitError::parse_error(
+                        "Missing HEAD marker in local branch output".to_string(),
+                    ));
+                }
+            };
+            let upstream = match parts.next().map(str::trim) {
+                Some(upstream) => upstream,
+                None => {
+                    return Err(GitError::parse_error(
+                        "Missing upstream field in local branch output".to_string(),
+                    ));
+                }
+            };
 
             let is_current = head == "*";
             let upstream_opt = (!upstream.is_empty()).then(|| upstream.to_string());
@@ -248,10 +293,22 @@ impl GitService {
         }
 
         if let Some((branch, Some(upstream))) = current_local {
-            if let Ok((ahead, behind)) = Self::get_ahead_behind(&root, &branch, &upstream).await {
-                if let Some(current) = branches.iter_mut().find(|b| b.is_current && !b.is_remote) {
-                    current.ahead = Some(ahead);
-                    current.behind = Some(behind);
+            match Self::get_ahead_behind(&root, &branch, &upstream).await {
+                Ok((ahead, behind)) => {
+                    if let Some(current) =
+                        branches.iter_mut().find(|b| b.is_current && !b.is_remote)
+                    {
+                        current.ahead = Some(ahead);
+                        current.behind = Some(behind);
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        "failed to compute ahead/behind for branch {} vs {}: {}",
+                        branch,
+                        upstream,
+                        err.message
+                    );
                 }
             }
         }
@@ -412,35 +469,71 @@ impl GitService {
             }
 
             let mut parts = line.split('\t');
-            let status_field = parts.next().unwrap_or_default();
-            let status_char = status_field.chars().next().unwrap_or(' ');
+            let Some(status_field) = parts.next() else {
+                return Err(GitError::parse_error(
+                    "Missing status field in name-status output".to_string(),
+                ));
+            };
+            let Some(status_char) = status_field.chars().next() else {
+                return Err(GitError::parse_error(
+                    "Empty status field in name-status output".to_string(),
+                ));
+            };
             let (status, file_path, old_path) = match status_char {
                 'A' => {
-                    let path = parts.next().unwrap_or_default();
+                    let Some(path) = parts.next() else {
+                        return Err(GitError::parse_error(
+                            "Missing added path in name-status output".to_string(),
+                        ));
+                    };
                     if path.is_empty() {
-                        continue;
+                        return Err(GitError::parse_error(
+                            "Empty added path in name-status output".to_string(),
+                        ));
                     }
                     (FileChangeStatus::Added, path.to_string(), None)
                 }
                 'M' => {
-                    let path = parts.next().unwrap_or_default();
+                    let Some(path) = parts.next() else {
+                        return Err(GitError::parse_error(
+                            "Missing modified path in name-status output".to_string(),
+                        ));
+                    };
                     if path.is_empty() {
-                        continue;
+                        return Err(GitError::parse_error(
+                            "Empty modified path in name-status output".to_string(),
+                        ));
                     }
                     (FileChangeStatus::Modified, path.to_string(), None)
                 }
                 'D' => {
-                    let path = parts.next().unwrap_or_default();
+                    let Some(path) = parts.next() else {
+                        return Err(GitError::parse_error(
+                            "Missing deleted path in name-status output".to_string(),
+                        ));
+                    };
                     if path.is_empty() {
-                        continue;
+                        return Err(GitError::parse_error(
+                            "Empty deleted path in name-status output".to_string(),
+                        ));
                     }
                     (FileChangeStatus::Deleted, path.to_string(), None)
                 }
                 'R' => {
-                    let old = parts.next().unwrap_or_default();
-                    let new = parts.next().unwrap_or_default();
+                    let Some(old) = parts.next() else {
+                        return Err(GitError::parse_error(
+                            "Missing rename source path in name-status output".to_string(),
+                        ));
+                    };
+                    let Some(new) = parts.next() else {
+                        return Err(GitError::parse_error(
+                            "Missing rename target path in name-status output".to_string(),
+                        ));
+                    };
                     if old.is_empty() || new.is_empty() {
-                        continue;
+                        return Err(GitError::parse_error(
+                            "Empty rename path in name-status output".to_string(),
+                        ));
                     }
                     (
                         FileChangeStatus::Renamed,
@@ -449,10 +542,20 @@ impl GitService {
                     )
                 }
                 'C' => {
-                    let old = parts.next().unwrap_or_default();
-                    let new = parts.next().unwrap_or_default();
+                    let Some(old) = parts.next() else {
+                        return Err(GitError::parse_error(
+                            "Missing copy source path in name-status output".to_string(),
+                        ));
+                    };
+                    let Some(new) = parts.next() else {
+                        return Err(GitError::parse_error(
+                            "Missing copy target path in name-status output".to_string(),
+                        ));
+                    };
                     if old.is_empty() || new.is_empty() {
-                        continue;
+                        return Err(GitError::parse_error(
+                            "Empty copy path in name-status output".to_string(),
+                        ));
                     }
                     (
                         FileChangeStatus::Copied,
@@ -463,8 +566,14 @@ impl GitService {
                 _ => continue,
             };
 
-            let (additions, deletions) =
-                numstat_map.get(&file_path).copied().unwrap_or((None, None));
+            let (additions, deletions) = match numstat_map.get(&file_path).copied() {
+                Some(stats) => stats,
+                None => {
+                    return Err(GitError::parse_error(format!(
+                        "Missing numstat entry for changed file: {file_path}"
+                    )));
+                }
+            };
 
             files.push(CommitFileChange {
                 path: file_path,
@@ -571,11 +680,27 @@ impl GitService {
             let parts: Vec<&str> = line.split('\t').collect();
             if parts.len() >= 2 {
                 // Binary files show "-" instead of numbers
-                if let Ok(add) = parts[0].parse::<u32>() {
-                    additions += add;
+                match parts[0].parse::<u32>() {
+                    Ok(add) => additions += add,
+                    Err(err) if parts[0] != "-" => {
+                        tracing::warn!(
+                            "Failed to parse git numstat additions '{}': {}",
+                            parts[0],
+                            err
+                        );
+                    }
+                    Err(_) => {}
                 }
-                if let Ok(del) = parts[1].parse::<u32>() {
-                    deletions += del;
+                match parts[1].parse::<u32>() {
+                    Ok(del) => deletions += del,
+                    Err(err) if parts[1] != "-" => {
+                        tracing::warn!(
+                            "Failed to parse git numstat deletions '{}': {}",
+                            parts[1],
+                            err
+                        );
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -808,9 +933,19 @@ impl GitService {
             for part in bracket.split(',') {
                 let p = part.trim();
                 if let Some(num) = p.strip_prefix("ahead ") {
-                    parsed.ahead = num.trim().parse::<u32>().ok();
+                    match num.trim().parse::<u32>() {
+                        Ok(value) => parsed.ahead = Some(value),
+                        Err(err) => {
+                            tracing::warn!("failed to parse git ahead count '{}': {}", num, err)
+                        }
+                    }
                 } else if let Some(num) = p.strip_prefix("behind ") {
-                    parsed.behind = num.trim().parse::<u32>().ok();
+                    match num.trim().parse::<u32>() {
+                        Ok(value) => parsed.behind = Some(value),
+                        Err(err) => {
+                            tracing::warn!("failed to parse git behind count '{}': {}", num, err)
+                        }
+                    }
                 }
             }
         }
@@ -1036,20 +1171,112 @@ impl GitService {
         };
 
         if let Some(old_part) = old.strip_prefix('-') {
-            old_start = old_part
-                .split(',')
-                .next()
-                .and_then(|s| s.parse::<u32>().ok());
+            if let Some(value) = old_part.split(',').next() {
+                match value.parse::<u32>() {
+                    Ok(parsed) => old_start = Some(parsed),
+                    Err(err) => {
+                        tracing::warn!("failed to parse old hunk start '{}': {}", value, err)
+                    }
+                }
+            }
         }
 
         if let Some(new_part) = new.strip_prefix('+') {
-            new_start = new_part
-                .split(',')
-                .next()
-                .and_then(|s| s.parse::<u32>().ok());
+            if let Some(value) = new_part.split(',').next() {
+                match value.parse::<u32>() {
+                    Ok(parsed) => new_start = Some(parsed),
+                    Err(err) => {
+                        tracing::warn!("failed to parse new hunk start '{}': {}", value, err)
+                    }
+                }
+            }
         }
 
         (old_start, new_start)
+    }
+
+    /// Create an isolated git worktree at `worktree_path` on a new branch `branch_name`.
+    /// The branch is created from HEAD of the current repo.
+    pub async fn worktree_add(
+        repo_path: &str,
+        branch_name: &str,
+        worktree_path: &str,
+    ) -> Result<String, GitError> {
+        Self::ensure_repo_root(repo_path).await?;
+        // Ensure parent directory exists
+        if let Some(parent) = std::path::Path::new(worktree_path).parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| GitError {
+                    code: GitErrorCode::IoError,
+                    message: format!("Failed to create worktree parent dir: {e}"),
+                })?;
+        }
+        Self::execute_no_output(
+            &["worktree", "add", "-b", branch_name, worktree_path],
+            repo_path,
+        )
+        .await?;
+        Ok(worktree_path.to_string())
+    }
+
+    /// Remove a worktree. If `force` is true, removes even if the worktree has uncommitted changes.
+    pub async fn worktree_remove(
+        repo_path: &str,
+        worktree_path: &str,
+        force: bool,
+    ) -> Result<(), GitError> {
+        let mut args = vec!["worktree", "remove"];
+        if force {
+            args.push("--force");
+        }
+        args.push(worktree_path);
+        Self::execute_no_output(&args, repo_path).await
+    }
+
+    /// List all worktrees for the repository at `repo_path`.
+    pub async fn worktree_list(repo_path: &str) -> Result<Vec<WorktreeInfo>, GitError> {
+        let output = Self::execute_text(&["worktree", "list", "--porcelain"], repo_path).await?;
+        let mut result = Vec::new();
+        let mut current_path: Option<String> = None;
+        let mut current_branch: Option<String> = None;
+        let mut is_first = true;
+
+        for line in output.lines() {
+            if let Some(worktree_path) = line.strip_prefix("worktree ") {
+                // Flush the previous entry
+                if let (Some(path), Some(branch)) = (current_path.take(), current_branch.take()) {
+                    result.push(WorktreeInfo {
+                        path,
+                        branch,
+                        is_main: is_first,
+                    });
+                    is_first = false;
+                }
+                current_path = Some(worktree_path.to_string());
+                current_branch = None;
+            } else if let Some(raw) = line.strip_prefix("branch ") {
+                // refs/heads/branch-name or refs/heads/...
+                let name = match raw.strip_prefix("refs/heads/") {
+                    Some(name) => name.to_string(),
+                    None => raw.to_string(),
+                };
+                current_branch = Some(name);
+            } else if line == "detached" {
+                current_branch = Some("(detached HEAD)".to_string());
+            }
+        }
+
+        // Flush the last entry
+        if let (Some(path), Some(branch)) = (current_path, current_branch) {
+            result.push(WorktreeInfo {
+                path,
+                branch,
+                is_main: is_first,
+            });
+        }
+
+        Ok(result)
     }
 }
 

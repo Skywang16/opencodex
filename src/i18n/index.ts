@@ -37,7 +37,8 @@ export const initLocale = async () => {
   let locale: SupportedLanguage | null = null
   try {
     locale = await getPersistedLanguage()
-  } catch {
+  } catch (error) {
+    console.warn('Failed to read persisted language, falling back to browser locale:', error)
     locale = null
   }
 

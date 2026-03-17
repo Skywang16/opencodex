@@ -34,7 +34,9 @@ export const useFileWatcherStore = defineStore('fileWatcher', () => {
     if (startInFlight) await startInFlight
     watchedPath = null
     status.value = null
-    await fileWatcherApi.stop().catch(() => {})
+    await fileWatcherApi.stop().catch(error => {
+      console.warn('Failed to stop file watcher:', error)
+    })
   }
 
   const start = async (path: string | null) => {

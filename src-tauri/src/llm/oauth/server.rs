@@ -53,7 +53,7 @@ impl OAuthCallbackServer {
         use tiny_http::{Response, Server};
 
         let http_server = Server::http(format!("127.0.0.1:{OAUTH_PORT}"))
-            .map_err(|e| OAuthError::Other(format!("Failed to bind server: {}", e)))?;
+            .map_err(|e| OAuthError::Other(format!("Failed to bind server: {e}")))?;
 
         info!("OAuth callback server started on port {}", OAUTH_PORT);
 
@@ -81,38 +81,76 @@ impl OAuthCallbackServer {
                     if let Some(state_val) = state {
                         if let Some(pending) = flows.remove(state_val) {
                             if let Some(err) = error {
-                                let _ = pending
+                                if pending
                                     .sender
-                                    .send(Err(OAuthError::Other(format!("OAuth error: {}", err))));
-                                let _ =
-                                    request.respond(Response::from_string(Self::html_error(err)));
+                                    .send(Err(OAuthError::Other(format!("OAuth error: {err}"))))
+                                    .is_err()
+                                {
+                                    warn!("Failed to deliver OAuth error result to waiting flow");
+                                }
+                                if let Err(respond_err) =
+                                    request.respond(Response::from_string(Self::html_error(err)))
+                                {
+                                    warn!(
+                                        "Failed to respond to OAuth callback with provider error: {}",
+                                        respond_err
+                                    );
+                                }
                             } else if let Some(code_val) = code {
-                                let _ = pending
+                                if pending
                                     .sender
-                                    .send(Ok((code_val.to_string(), pending.pkce)));
-                                let _ =
-                                    request.respond(Response::from_string(Self::html_success()));
+                                    .send(Ok((code_val.to_string(), pending.pkce)))
+                                    .is_err()
+                                {
+                                    warn!("Failed to deliver OAuth authorization code to waiting flow");
+                                }
+                                if let Err(respond_err) =
+                                    request.respond(Response::from_string(Self::html_success()))
+                                {
+                                    warn!(
+                                        "Failed to respond to successful OAuth callback: {}",
+                                        respond_err
+                                    );
+                                }
                             } else {
-                                let _ = pending
+                                if pending
                                     .sender
-                                    .send(Err(OAuthError::Other("Missing code".to_string())));
-                                let _ = request.respond(Response::from_string(Self::html_error(
-                                    "Missing code",
-                                )));
+                                    .send(Err(OAuthError::Other("Missing code".to_string())))
+                                    .is_err()
+                                {
+                                    warn!("Failed to deliver OAuth missing-code error to waiting flow");
+                                }
+                                if let Err(respond_err) = request.respond(Response::from_string(
+                                    Self::html_error("Missing code"),
+                                )) {
+                                    warn!(
+                                        "Failed to respond to OAuth callback with missing-code error: {}",
+                                        respond_err
+                                    );
+                                }
                             }
                             continue;
                         }
                     }
 
                     warn!("OAuth callback with invalid or missing state");
-                    let _ =
-                        request.respond(Response::from_string(Self::html_error("Invalid state")));
-                } else {
-                    let _ =
-                        request.respond(Response::from_string(Self::html_error("Invalid request")));
+                    if let Err(err) =
+                        request.respond(Response::from_string(Self::html_error("Invalid state")))
+                    {
+                        warn!(
+                            "Failed to respond to OAuth callback with invalid state: {}",
+                            err
+                        );
+                    }
+                } else if let Err(err) =
+                    request.respond(Response::from_string(Self::html_error("Invalid request")))
+                {
+                    warn!("Failed to respond to invalid OAuth request: {}", err);
                 }
-            } else {
-                let _ = request.respond(Response::from_string("Not found").with_status_code(404));
+            } else if let Err(err) =
+                request.respond(Response::from_string("Not found").with_status_code(404))
+            {
+                warn!("Failed to respond to unknown OAuth route: {}", err);
             }
         }
 
@@ -164,8 +202,7 @@ impl OAuthCallbackServer {
 
     /// Error page HTML
     fn html_error(error: &str) -> String {
-        format!(
-            r#"<!DOCTYPE html>
+        let template = r#"<!DOCTYPE html>
 <html>
 <head>
     <title>OpenCodex - Authorization Failed</title>
@@ -181,12 +218,11 @@ impl OAuthCallbackServer {
     <div class="container">
         <h1>✗ Authorization Failed</h1>
         <p>An error occurred during authorization.</p>
-        <div class="error">{}</div>
+        <div class="error">{error}</div>
     </div>
 </body>
-</html>"#,
-            error
-        )
+</html>"#;
+        template.replace("{error}", error)
     }
 
     /// Get callback URL

@@ -97,10 +97,13 @@ impl TerminalMux {
         });
 
         {
-            let mut guard = mux
-                .notification_thread
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut guard = match mux.notification_thread.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    warn!("Notification thread mutex poisoned, recovering");
+                    poisoned.into_inner()
+                }
+            };
             *guard = Some(handle);
         }
 
@@ -144,7 +147,7 @@ impl TerminalMux {
 
     /// Create new pane
     pub async fn create_pane(&self, size: PtySize) -> TerminalMuxResult<PaneId> {
-        let config = MuxSessionConfig::default();
+        let config = MuxSessionConfig::with_default_shell().map_err(TerminalMuxError::Internal)?;
         self.create_pane_with_config(size, &config).await
     }
 
@@ -179,6 +182,10 @@ impl TerminalMux {
             crate::shell::ShellType::from_program(&config.shell_config.shell_info.path);
         self.shell_integration
             .set_pane_shell_type(pane_id, shell_type.clone());
+        if let Some(cwd) = config.shell_config.working_directory.as_ref() {
+            self.shell_integration
+                .update_current_working_directory(pane_id, cwd.to_string_lossy().into_owned());
+        }
 
         // Start I/O processing threads
         self.io_handler.spawn_io_threads(pane.clone())?;
@@ -190,16 +197,31 @@ impl TerminalMux {
 
     /// Get pane reference
     pub fn get_pane(&self, pane_id: PaneId) -> Option<Arc<dyn Pane>> {
-        let panes = self.panes.read().ok()?;
+        let panes = match self.panes.read() {
+            Ok(panes) => panes,
+            Err(err) => {
+                error!(
+                    "failed to acquire pane read lock for {:?}: {}",
+                    pane_id, err
+                );
+                return None;
+            }
+        };
         panes.get(&pane_id).cloned()
     }
 
     /// Check if pane exists
     pub fn pane_exists(&self, pane_id: PaneId) -> bool {
-        self.panes
-            .read()
-            .map(|panes| panes.contains_key(&pane_id))
-            .unwrap_or(false)
+        match self.panes.read() {
+            Ok(panes) => panes.contains_key(&pane_id),
+            Err(err) => {
+                error!(
+                    "failed to acquire pane read lock for {:?}: {}",
+                    pane_id, err
+                );
+                false
+            }
+        }
     }
 
     /// Remove pane
@@ -234,15 +256,30 @@ impl TerminalMux {
 
     /// Get list of all pane IDs
     pub fn list_panes(&self) -> Vec<PaneId> {
-        self.panes
-            .read()
-            .map(|panes| panes.keys().copied().collect())
-            .unwrap_or_default()
+        match self.panes.read() {
+            Ok(panes) => panes.keys().copied().collect(),
+            Err(err) => {
+                error!(
+                    "failed to acquire pane read lock while listing panes: {}",
+                    err
+                );
+                Vec::new()
+            }
+        }
     }
 
     /// Get pane count
     pub fn pane_count(&self) -> usize {
-        self.panes.read().map(|panes| panes.len()).unwrap_or(0)
+        match self.panes.read() {
+            Ok(panes) => panes.len(),
+            Err(err) => {
+                error!(
+                    "failed to acquire pane read lock while counting panes: {}",
+                    err
+                );
+                0
+            }
+        }
     }
 
     /// Write data to specified pane
@@ -283,10 +320,13 @@ impl TerminalMux {
     {
         let subscriber_id = self.next_subscriber_id();
 
-        if let Ok(mut subscribers) = self.subscribers.write() {
-            subscribers.insert(subscriber_id, Box::new(subscriber));
-        } else {
-            error!("Failed to acquire subscriber write lock");
+        match self.subscribers.write() {
+            Ok(mut subscribers) => {
+                subscribers.insert(subscriber_id, Box::new(subscriber));
+            }
+            Err(err) => {
+                error!("Failed to acquire subscriber write lock: {}", err);
+            }
         }
 
         subscriber_id
@@ -294,11 +334,12 @@ impl TerminalMux {
 
     /// Unsubscribe
     pub fn unsubscribe(&self, subscriber_id: usize) -> bool {
-        if let Ok(mut subscribers) = self.subscribers.write() {
-            subscribers.remove(&subscriber_id).is_some()
-        } else {
-            error!("Failed to acquire subscriber write lock");
-            false
+        match self.subscribers.write() {
+            Ok(mut subscribers) => subscribers.remove(&subscriber_id).is_some(),
+            Err(err) => {
+                error!("Failed to acquire subscriber write lock: {}", err);
+                false
+            }
         }
     }
 
@@ -313,32 +354,42 @@ impl TerminalMux {
     fn notify_internal(&self, notification: &MuxNotification) {
         let mut dead_subscribers = Vec::new();
 
-        if let Ok(subscribers) = self.subscribers.read() {
-            for (&subscriber_id, callback) in subscribers.iter() {
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    callback(notification)
-                })) {
-                    Ok(true) => {
-                        // Subscriber handled successfully, keep subscription
-                    }
-                    Ok(false) => {
-                        // Subscriber returned false, mark for removal
-                        dead_subscribers.push(subscriber_id);
-                    }
-                    Err(_) => {
-                        // Subscriber callback panicked, mark for removal
-                        error!("Subscriber {} callback panicked", subscriber_id);
-                        dead_subscribers.push(subscriber_id);
+        match self.subscribers.read() {
+            Ok(subscribers) => {
+                for (&subscriber_id, callback) in subscribers.iter() {
+                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        callback(notification)
+                    })) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            dead_subscribers.push(subscriber_id);
+                        }
+                        Err(_) => {
+                            error!("Subscriber {} callback panicked", subscriber_id);
+                            dead_subscribers.push(subscriber_id);
+                        }
                     }
                 }
+            }
+            Err(err) => {
+                error!("Failed to acquire subscriber read lock: {}", err);
+                return;
             }
         }
 
         // Clean up invalid subscribers
         if !dead_subscribers.is_empty() {
-            if let Ok(mut subscribers) = self.subscribers.write() {
-                for subscriber_id in dead_subscribers {
-                    subscribers.remove(&subscriber_id);
+            match self.subscribers.write() {
+                Ok(mut subscribers) => {
+                    for subscriber_id in dead_subscribers {
+                        subscribers.remove(&subscriber_id);
+                    }
+                }
+                Err(err) => {
+                    error!(
+                        "Failed to acquire subscriber write lock for cleanup: {}",
+                        err
+                    );
                 }
             }
         }
@@ -350,8 +401,6 @@ impl TerminalMux {
         pane_id: PaneId,
         silent: bool,
     ) -> TerminalMuxResult<()> {
-        use crate::shell::ShellType;
-
         // Enable Shell Integration
         self.shell_integration.enable_integration(pane_id);
 
@@ -368,14 +417,15 @@ impl TerminalMux {
         let shell_type = self
             .shell_integration
             .with_pane_state(pane_id, |state| state.shell_type.clone())
-            .flatten()
-            .unwrap_or_else(|| {
-                warn!(
-                    "Pane {:?} has no Shell type set, using default Bash",
-                    pane_id
-                );
-                ShellType::Bash
-            });
+            .flatten();
+        let shell_type = match shell_type {
+            Some(shell_type) => shell_type,
+            None => {
+                return Err(TerminalMuxError::Internal(format!(
+                    "Pane {pane_id:?} has no shell type registered"
+                )));
+            }
+        };
 
         if !silent {
             let script = self
@@ -427,9 +477,19 @@ impl TerminalMux {
         self.shutting_down
             .store(true, std::sync::atomic::Ordering::Relaxed);
 
-        if let Ok(mut guard) = self.notification_thread.lock() {
-            if let Some(handle) = guard.take() {
-                let _ = handle.join();
+        match self.notification_thread.lock() {
+            Ok(mut guard) => {
+                if let Some(handle) = guard.take() {
+                    if handle.join().is_err() {
+                        tracing::warn!("Notification thread panicked during shutdown");
+                    }
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to lock notification thread during shutdown: {}",
+                    err
+                );
             }
         }
 
@@ -472,12 +532,17 @@ impl TerminalMux {
         }
 
         // Clean up all subscribers
-        if let Ok(mut subscribers) = self.subscribers.write() {
-            subscribers.clear();
+        match self.subscribers.write() {
+            Ok(mut subscribers) => subscribers.clear(),
+            Err(err) => {
+                tracing::warn!("Failed to clear subscribers during shutdown: {}", err);
+            }
         }
 
         // Shutdown I/O handler
-        let _ = self.io_handler.shutdown();
+        if let Err(err) = self.io_handler.shutdown() {
+            tracing::warn!("Failed to shut down I/O handler cleanly: {}", err);
+        }
 
         Ok(())
     }

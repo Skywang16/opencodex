@@ -27,10 +27,28 @@ impl SkillRegistry {
         let name = metadata.name.clone();
 
         // Get file modification time
-        let last_modified = std::fs::metadata(metadata.skill_dir.join("SKILL.md"))
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .unwrap_or_else(SystemTime::now);
+        let skill_md = metadata.skill_dir.join("SKILL.md");
+        let last_modified = match std::fs::metadata(&skill_md) {
+            Ok(metadata) => match metadata.modified() {
+                Ok(modified) => modified,
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to read modified time for skill '{}': {}",
+                        skill_md.display(),
+                        err
+                    );
+                    SystemTime::now()
+                }
+            },
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to stat skill file '{}': {}",
+                    skill_md.display(),
+                    err
+                );
+                SystemTime::now()
+            }
+        };
 
         let entry = SkillEntry {
             metadata,
@@ -104,17 +122,28 @@ impl SkillRegistry {
             .ok_or_else(|| AgentError::SkillNotFound(name.to_string()))?;
 
         let skill_md = entry.metadata.skill_dir.join("SKILL.md");
-        let current_modified = fs::metadata(&skill_md)
-            .await?
-            .modified()
-            .unwrap_or_else(|_| SystemTime::now());
+        let current_metadata = fs::metadata(&skill_md).await?;
+        let current_modified = match current_metadata.modified() {
+            Ok(modified) => modified,
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to read modified time for skill '{}': {}",
+                    skill_md.display(),
+                    err
+                );
+                SystemTime::now()
+            }
+        };
 
         if current_modified > entry.last_modified {
             // Reload
             drop(entry);
             self.clear_content_cache(name);
 
-            let skill_dir = self.get_metadata(name).unwrap().skill_dir;
+            let skill_dir = self
+                .get_metadata(name)
+                .ok_or_else(|| AgentError::SkillNotFound(name.to_string()))?
+                .skill_dir;
             let new_metadata = SkillLoader::load_metadata(&skill_dir).await?;
             self.register(new_metadata)?;
 

@@ -43,11 +43,18 @@ pub async fn build_search_engine_from_database(
         .map(|v| v as usize)
         .unwrap_or(1024);
 
+    let api_key = model.api_key.ok_or_else(|| {
+        crate::vector_db::core::VectorDbError::Config(format!(
+            "Embedding model '{}' is missing API key",
+            model.id
+        ))
+    })?;
+
     let config = VectorDbConfig {
         embedding: RemoteEmbeddingConfig {
             provider_config: LLMProviderConfig {
                 provider_type: model.provider.as_str().to_string(),
-                api_key: model.api_key.unwrap_or_default(),
+                api_key,
                 api_url: model.api_url,
                 options: model
                     .options

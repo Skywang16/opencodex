@@ -3,6 +3,10 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 export const useLayoutStore = defineStore('layout', () => {
+  const formatErrorMessage = (error: unknown): string => {
+    return error instanceof Error ? error.message : String(error)
+  }
+
   // Persisted UI state
   const sidebarVisible = ref(true)
   const sidebarWidth = ref(260)
@@ -49,8 +53,8 @@ export const useLayoutStore = defineStore('layout', () => {
 
   const persist = (key: string, value: string | null) => {
     if (initialized.value) {
-      workspaceApi.setPreference(key, value).catch(e => {
-        console.warn(`Failed to persist ${key}:`, e)
+      workspaceApi.setPreference(key, value).catch(error => {
+        console.warn(`Failed to persist layout preference '${key}': ${formatErrorMessage(error)}`)
       })
     }
   }

@@ -9,6 +9,7 @@ pub mod file_watcher;
 pub mod filesystem;
 pub mod git;
 pub mod llm;
+pub mod lsp;
 pub mod menu;
 pub mod mux;
 pub mod node;
@@ -47,7 +48,9 @@ pub fn run() {
             if argv.len() > 1 {
                 let file_path = &argv[1];
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.emit("file-dropped", file_path);
+                    if let Err(err) = window.emit("file-dropped", file_path) {
+                        tracing::warn!("Failed to emit single-instance file drop event: {}", err);
+                    }
                 }
             }
         }));
@@ -113,12 +116,14 @@ pub fn run() {
                 use window_vibrancy::{
                     apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState,
                 };
-                let _ = apply_vibrancy(
+                if let Err(err) = apply_vibrancy(
                     &window,
                     NSVisualEffectMaterial::HudWindow,
                     Some(NSVisualEffectState::Active),
                     None,
-                );
+                ) {
+                    tracing::warn!("Failed to apply macOS vibrancy effect: {}", err);
+                }
             }
 
             Ok(())
@@ -137,14 +142,21 @@ pub fn run() {
                 // User clicked Dock icon, check if main window is hidden
                 if let Some(window) = app_handle.get_webview_window("main") {
                     // Check if window is visible
-                    if let Ok(is_visible) = window.is_visible() {
-                        if !is_visible {
-                            // If window is hidden, show it again
-                            if let Err(e) = window.show() {
-                                eprintln!("Unable to show window: {e}");
+                    match window.is_visible() {
+                        Ok(is_visible) => {
+                            if !is_visible {
+                                // If window is hidden, show it again
+                                if let Err(e) = window.show() {
+                                    eprintln!("Unable to show window: {e}");
+                                }
+                                // Bring window to front
+                                if let Err(e) = window.set_focus() {
+                                    eprintln!("Unable to focus window: {e}");
+                                }
                             }
-                            // Bring window to front
-                            let _ = window.set_focus();
+                        }
+                        Err(e) => {
+                            eprintln!("Unable to inspect window visibility: {e}");
                         }
                     }
                 }

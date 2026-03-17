@@ -50,74 +50,90 @@ impl IoHandler {
         let handle = self.spawn_reader_thread(pane_id, reader, pane);
 
         // Store thread handle
-        if let Ok(mut threads) = self.reader_threads.write() {
-            threads.insert(pane_id, handle);
-        } else {
-            warn!("Unable to store thread handle for pane {:?}", pane_id);
+        match self.reader_threads.write() {
+            Ok(mut threads) => {
+                threads.insert(pane_id, handle);
+            }
+            Err(err) => {
+                warn!(
+                    "unable to store I/O thread handle for pane {:?}: {}",
+                    pane_id, err
+                );
+            }
         }
 
         Ok(())
     }
 
     pub fn stop_pane_io(&self, pane_id: PaneId) -> IoHandlerResult<()> {
-        if let Ok(mut threads) = self.reader_threads.write() {
-            if let Some(handle) = threads.remove(&pane_id) {
-                // Use thread::spawn to join in background, avoid blocking
-                thread::spawn(move || {
-                    if let Err(e) = handle.join() {
-                        warn!(
-                            "Error occurred when I/O thread for pane {:?} ended: {:?}",
-                            pane_id, e
-                        );
-                    }
-                });
+        match self.reader_threads.write() {
+            Ok(mut threads) => {
+                if let Some(handle) = threads.remove(&pane_id) {
+                    // Use thread::spawn to join in background, avoid blocking
+                    thread::spawn(move || {
+                        if let Err(e) = handle.join() {
+                            warn!(
+                                "Error occurred when I/O thread for pane {:?} ended: {:?}",
+                                pane_id, e
+                            );
+                        }
+                    });
+                }
+            }
+            Err(err) => {
+                warn!("failed to acquire I/O thread map write lock: {}", err);
             }
         }
         Ok(())
     }
 
     pub fn shutdown(&self) -> IoHandlerResult<()> {
-        if let Ok(mut threads) = self.reader_threads.write() {
-            if threads.is_empty() {
-                return Ok(());
-            }
+        match self.reader_threads.write() {
+            Ok(mut threads) => {
+                if threads.is_empty() {
+                    return Ok(());
+                }
 
-            // Use background thread to batch join, set timeout and record results
-            let handles: Vec<_> = threads.drain().collect();
-            let (tx, rx) = std::sync::mpsc::channel();
+                // Use background thread to batch join, set timeout and record results
+                let handles: Vec<_> = threads.drain().collect();
+                let (tx, rx) = std::sync::mpsc::channel();
 
-            thread::spawn(move || {
-                let start = std::time::Instant::now();
-                let mut joined = 0;
-                let mut panicked = 0;
+                thread::spawn(move || {
+                    let start = std::time::Instant::now();
+                    let mut joined = 0;
+                    let mut panicked = 0;
 
-                for (pane_id, handle) in handles {
-                    if start.elapsed() > Duration::from_secs(2) {
-                        warn!(
-                            "I/O thread shutdown timeout, giving up waiting for remaining threads"
-                        );
-                        break;
-                    }
+                    for (pane_id, handle) in handles {
+                        if start.elapsed() > Duration::from_secs(2) {
+                            warn!(
+                                "I/O thread shutdown timeout, giving up waiting for remaining threads"
+                            );
+                            break;
+                        }
 
-                    match handle.join() {
-                        Ok(_) => joined += 1,
-                        Err(e) => {
-                            warn!("I/O thread for pane {:?} panicked: {:?}", pane_id, e);
-                            panicked += 1;
+                        match handle.join() {
+                            Ok(_) => joined += 1,
+                            Err(e) => {
+                                warn!("I/O thread for pane {:?} panicked: {:?}", pane_id, e);
+                                panicked += 1;
+                            }
                         }
                     }
-                }
 
-                // Send result statistics
-                let _ = tx.send((joined, panicked));
-            });
+                    if tx.send((joined, panicked)).is_err() {
+                        warn!("failed to report I/O shutdown statistics");
+                    }
+                });
 
-            // Record results non-blockingly
-            thread::spawn(move || {
-                if rx.recv_timeout(Duration::from_secs(3)).is_err() {
-                    warn!("Timeout waiting for I/O thread shutdown result");
-                }
-            });
+                thread::spawn(move || {
+                    if rx.recv_timeout(Duration::from_secs(3)).is_err() {
+                        warn!("Timeout waiting for I/O thread shutdown result");
+                    }
+                });
+            }
+            Err(err) => {
+                warn!("failed to acquire I/O thread map write lock: {}", err);
+            }
         }
 
         Ok(())

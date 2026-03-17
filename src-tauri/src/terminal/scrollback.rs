@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+use tracing::warn;
 
 use crate::mux::ConfigManager;
 
@@ -74,17 +75,17 @@ impl TerminalScrollback {
         let max_size = config.buffer.max_size;
         let keep_size = config.buffer.keep_size;
 
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = self.lock_inner();
         let entry = inner.entry(pane_id).or_insert_with(ScrollbackEntry::new);
         entry.append(data, max_size, keep_size);
     }
 
     pub fn get_bytes(&self, pane_id: u32) -> Vec<u8> {
-        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner
-            .get(&pane_id)
-            .map(|entry| entry.bytes.clone())
-            .unwrap_or_default()
+        let inner = self.lock_inner();
+        match inner.get(&pane_id) {
+            Some(entry) => entry.bytes.clone(),
+            None => Vec::new(),
+        }
     }
 
     pub fn get_text_lossy(&self, pane_id: u32) -> String {
@@ -92,34 +93,51 @@ impl TerminalScrollback {
     }
 
     pub fn is_too_new(&self, pane_id: u32) -> bool {
-        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let inner = self.lock_inner();
         inner.get(&pane_id).is_some_and(|entry| entry.is_too_new())
     }
 
     pub fn remove(&self, pane_id: u32) {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = self.lock_inner();
         inner.remove(&pane_id);
-        let mut lco = self
-            .last_command_output
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut lco = self.lock_last_command_output();
         lco.remove(&pane_id);
     }
 
     pub fn set_last_command_output(&self, pane_id: u32, output: String) {
-        let mut lco = self
-            .last_command_output
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut lco = self.lock_last_command_output();
         lco.insert(pane_id, output);
     }
 
     pub fn get_last_command_output(&self, pane_id: u32) -> Option<String> {
-        let lco = self
-            .last_command_output
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let lco = self.lock_last_command_output();
         lco.get(&pane_id).cloned()
+    }
+
+    fn lock_inner(&self) -> std::sync::MutexGuard<'_, HashMap<u32, ScrollbackEntry>> {
+        match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(err) => {
+                warn!(
+                    "terminal scrollback inner mutex poisoned, recovering: {}",
+                    err
+                );
+                err.into_inner()
+            }
+        }
+    }
+
+    fn lock_last_command_output(&self) -> std::sync::MutexGuard<'_, HashMap<u32, String>> {
+        match self.last_command_output.lock() {
+            Ok(guard) => guard,
+            Err(err) => {
+                warn!(
+                    "terminal scrollback last_command_output mutex poisoned, recovering: {}",
+                    err
+                );
+                err.into_inner()
+            }
+        }
     }
 }
 

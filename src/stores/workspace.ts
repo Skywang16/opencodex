@@ -1,4 +1,9 @@
-import { workspaceApi, type SessionRecord, type WorkspaceRecord } from '@/api/workspace'
+import {
+  workspaceApi,
+  type SessionRecord,
+  type SessionViewRecord,
+  type WorkspaceRecord,
+} from '@/api/workspace'
 import type { Message } from '@/types'
 import { defineStore } from 'pinia'
 import { computed, reactive, ref, shallowRef } from 'vue'
@@ -9,7 +14,7 @@ const LOAD_MORE_PAGE_SIZE = 50
 
 export interface WorkspaceNode {
   workspace: WorkspaceRecord
-  sessions: SessionRecord[]
+  sessionViews: SessionViewRecord[]
   isLoading: boolean
 }
 
@@ -116,7 +121,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     for (const ws of list) {
       newTree.set(ws.path, {
         workspace: ws,
-        sessions: tree.value.get(ws.path)?.sessions || [],
+        sessionViews: tree.value.get(ws.path)?.sessionViews || [],
         isLoading: false,
       })
     }
@@ -133,7 +138,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const loadSessions = async (path: string) => {
+  const loadSessionViews = async (path: string) => {
     const node = tree.value.get(path)
     if (!node || node.isLoading) return
 
@@ -141,13 +146,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     tree.value = new Map(tree.value).set(path, { ...node, isLoading: true })
 
     try {
-      const sessions = await workspaceApi.listSessions(path)
+      const sessionViews = await workspaceApi.listSessionViews(path)
       tree.value = new Map(tree.value).set(path, {
         ...node,
-        sessions,
+        sessionViews,
         isLoading: false,
       })
-    } catch {
+      if (selectedSession.value?.workspacePath === path) {
+        const refreshed = sessionViews.find(item => item.session.id === selectedSession.value?.id)?.session
+        if (refreshed) {
+          selectedSession.value = refreshed
+        }
+      }
+    } catch (error) {
+      console.warn(`Failed to load sessions for workspace '${path}':`, error)
       tree.value = new Map(tree.value).set(path, { ...node, isLoading: false })
     }
   }
@@ -155,6 +167,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const getNode = (path: string | null): WorkspaceNode | undefined => {
     if (!path) return undefined
     return tree.value.get(path)
+  }
+
+  const getSessionViews = (path: string | null): SessionViewRecord[] => {
+    return getNode(path)?.sessionViews ?? []
+  }
+
+  const getSessions = (path: string | null): SessionRecord[] => {
+    return getSessionViews(path).map(item => item.session)
+  }
+
+  const getTopLevelSessions = (path: string | null): SessionRecord[] => {
+    return getSessions(path).filter(session => session.parentId == null)
+  }
+
+  const getSessionView = (sessionId: number, workspacePath?: string | null): SessionViewRecord | undefined => {
+    const path = workspacePath ?? selectedSession.value?.workspacePath ?? activeWorkspacePath.value
+    return getSessionViews(path).find(item => item.session.id === sessionId)
   }
 
   // Session operations
@@ -175,7 +204,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const selectSessionById = async (sessionId: number, workspacePath: string) => {
     if (selectedSession.value?.id === sessionId) return
-    const sessions = await workspaceApi.listSessions(workspacePath)
+    const sessionViews = await workspaceApi.listSessionViews(workspacePath)
     const existingNode = tree.value.get(workspacePath)
     const workspace: WorkspaceRecord = existingNode?.workspace ?? {
       path: workspacePath,
@@ -186,10 +215,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     tree.value = new Map(tree.value).set(workspacePath, {
       workspace,
-      sessions,
+      sessionViews,
       isLoading: false,
     })
-    const session = sessions.find(s => s.id === sessionId)
+    const session = sessionViews.find(item => item.session.id === sessionId)?.session
     if (session) {
       selectedSession.value = session
       activeWorkspacePath.value = workspacePath
@@ -227,7 +256,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (node) {
       tree.value = new Map(tree.value).set(workspacePath, {
         ...node,
-        sessions: node.sessions.filter(s => s.id !== sessionId),
+        sessionViews: node.sessionViews.filter(item => item.session.id !== sessionId),
       })
     }
     if (selectedSession.value?.id === sessionId) {
@@ -245,12 +274,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     await workspaceApi.deleteWorkspace(workspacePath)
     const node = tree.value.get(workspacePath)
     if (node) {
-      for (const session of node.sessions) {
-        const cached = messagesBySessionId.get(session.id)
+      for (const view of node.sessionViews) {
+        const cached = messagesBySessionId.get(view.session.id)
         if (cached) {
           for (const msg of cached) messageIdToSessionId.delete(msg.id)
         }
-        messagesBySessionId.delete(session.id)
+        messagesBySessionId.delete(view.session.id)
       }
     }
     const newTree = new Map(tree.value)
@@ -271,7 +300,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (node) {
       tree.value = new Map(tree.value).set(workspacePath, {
         ...node,
-        sessions: [session, ...node.sessions],
+        sessionViews: [{ session, timeline: [], executionTree: [] }, ...node.sessionViews],
       })
     }
     selectedSession.value = session
@@ -376,8 +405,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     hasWorkspace,
     // Tree
     loadTree,
-    loadSessions,
+    loadSessionViews,
     getNode,
+    getSessions,
+    getTopLevelSessions,
+    getSessionViews,
+    getSessionView,
     // Session
     selectSession,
     selectSessionById,

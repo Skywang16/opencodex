@@ -18,9 +18,14 @@ pub fn collect_source_files(root: &Path, max_size: u64) -> Vec<PathBuf> {
         if !path.is_file() {
             continue;
         }
-        if let Ok(meta) = std::fs::metadata(path) {
-            if meta.len() <= max_size {
-                files.push(path.to_path_buf());
+        match std::fs::metadata(path) {
+            Ok(meta) => {
+                if meta.len() <= max_size {
+                    files.push(path.to_path_buf());
+                }
+            }
+            Err(err) => {
+                tracing::warn!("Failed to stat walked file '{}': {}", path.display(), err);
             }
         }
     }

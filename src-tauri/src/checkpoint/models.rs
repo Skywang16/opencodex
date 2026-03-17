@@ -39,7 +39,13 @@ pub enum CheckpointError {
 pub type CheckpointResult<T> = Result<T, CheckpointError>;
 
 fn timestamp_to_datetime(ts: i64) -> DateTime<Utc> {
-    Utc.timestamp_opt(ts, 0).single().unwrap_or_default()
+    match Utc.timestamp_opt(ts, 0).single() {
+        Some(timestamp) => timestamp,
+        None => {
+            tracing::warn!("Invalid checkpoint timestamp '{}', using epoch", ts);
+            DateTime::<Utc>::default()
+        }
+    }
 }
 
 /// Checkpoint record

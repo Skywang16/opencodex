@@ -87,7 +87,8 @@
       if (newServerEnv.value.trim()) {
         try {
           JSON.parse(newServerEnv.value)
-        } catch {
+        } catch (error) {
+          console.warn('Invalid MCP server env JSON in create form:', error)
           formErrors.value.env = t('mcp_settings.invalid_json')
           isValid = false
         }
@@ -119,7 +120,8 @@
       if (newServerEnv.value.trim()) {
         try {
           JSON.parse(newServerEnv.value)
-        } catch {
+        } catch (error) {
+          console.warn('Invalid MCP server env JSON in edit form:', error)
           formErrors.value.env = t('mcp_settings.invalid_json')
           isValid = false
         }

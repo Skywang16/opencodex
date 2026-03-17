@@ -1,7 +1,7 @@
 ---
 name: explore
 description: Fast agent for exploring codebases with read-only tools
-mode: subagent
+mode: task_profile
 max_steps: 12
 tools: read_file, grep, glob, list_files, semantic_search
 ---

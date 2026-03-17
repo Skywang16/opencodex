@@ -28,11 +28,12 @@ impl I18nManager {
         let messages: HashMap<String, Value> = serde_json::from_str(&json_content)
             .map_err(|e| format!("Failed to parse language file {lang_code}: {e}"))?;
 
-        if let Ok(mut i18n_messages) = I18N_MESSAGES.write() {
-            i18n_messages.insert(lang_code, messages);
-            Ok(())
-        } else {
-            Err("Failed to write to i18n message store".to_string())
+        match I18N_MESSAGES.write() {
+            Ok(mut i18n_messages) => {
+                i18n_messages.insert(lang_code, messages);
+                Ok(())
+            }
+            Err(err) => Err(format!("Failed to write to i18n message store: {err}")),
         }
     }
 
@@ -82,7 +83,13 @@ impl I18nManager {
     /// * `lang_code` - Language code
     /// * `key` - Message key
     fn get_text_for_language(lang_code: &str, key: &str) -> Option<String> {
-        let i18n_messages = I18N_MESSAGES.read().ok()?;
+        let i18n_messages = match I18N_MESSAGES.read() {
+            Ok(messages) => messages,
+            Err(err) => {
+                tracing::warn!("Failed to read i18n message store: {}", err);
+                return None;
+            }
+        };
         let messages = i18n_messages.get(lang_code)?;
 
         Self::get_nested_value(messages, key)
@@ -99,7 +106,11 @@ impl I18nManager {
         let mut current = messages.get(parts[0])?;
 
         // Safe slicing
-        for &part in parts.get(1..).unwrap_or(&[]) {
+        let nested_parts = match parts.get(1..) {
+            Some(parts) => parts,
+            None => &[],
+        };
+        for &part in nested_parts {
             current = current.as_object()?.get(part)?;
         }
 
@@ -129,8 +140,11 @@ impl I18nManager {
     ///
     /// Used for dynamically updating translation content
     pub fn reload() -> Result<(), String> {
-        if let Ok(mut i18n_messages) = I18N_MESSAGES.write() {
-            i18n_messages.clear();
+        match I18N_MESSAGES.write() {
+            Ok(mut i18n_messages) => i18n_messages.clear(),
+            Err(err) => {
+                return Err(format!("Failed to clear i18n message store: {err}"));
+            }
         }
         Self::initialize()
     }

@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs;
+use tracing::warn;
 
 /// Compile-time embedded builtin prompts
 pub struct BuiltinPrompts;
@@ -23,6 +24,10 @@ impl BuiltinPrompts {
 
     pub fn agent_explore() -> &'static str {
         include_str!("../../../prompts/agents/explore.md")
+    }
+
+    pub fn agent_orchestrate() -> &'static str {
+        include_str!("../../../prompts/agents/orchestrate.md")
     }
 
     pub fn agent_general() -> &'static str {
@@ -148,9 +153,19 @@ impl PromptLoader {
                 .join(category)
                 .join(format!("{name}.md"));
 
-            if let Ok(content) = fs::read_to_string(&workspace_file).await {
-                self.cache.insert(cache_key, content.clone());
-                return Some(content);
+            match fs::read_to_string(&workspace_file).await {
+                Ok(content) => {
+                    self.cache.insert(cache_key, content.clone());
+                    return Some(content);
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => {
+                    warn!(
+                        "Failed to read workspace prompt '{}': {}",
+                        workspace_file.display(),
+                        err
+                    );
+                }
             }
         }
 
@@ -159,6 +174,7 @@ impl PromptLoader {
             ("agents", "coder") => Some(BuiltinPrompts::agent_coder()),
             ("agents", "plan") => Some(BuiltinPrompts::agent_plan()),
             ("agents", "explore") => Some(BuiltinPrompts::agent_explore()),
+            ("agents", "orchestrate") => Some(BuiltinPrompts::agent_orchestrate()),
             ("agents", "general") => Some(BuiltinPrompts::agent_general()),
             ("agents", "research") => Some(BuiltinPrompts::agent_research()),
             ("agents", "bulk_edit") => Some(BuiltinPrompts::agent_bulk_edit()),

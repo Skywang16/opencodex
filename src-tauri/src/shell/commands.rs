@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tauri::State;
 use tokio::process::Command as AsyncCommand;
-use tracing::error;
+use tracing::{error, warn};
 
 use super::{CommandInfo, PaneShellState};
 use crate::mux::{PaneId, TerminalMux};
@@ -27,17 +27,11 @@ pub struct FrontendCommandInfo {
 
 impl From<&CommandInfo> for FrontendCommandInfo {
     fn from(cmd: &CommandInfo) -> Self {
-        use std::time::UNIX_EPOCH;
-        let start_timestamp = cmd
-            .start_time_wallclock
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let start_timestamp =
+            unix_timestamp_secs(cmd.start_time_wallclock, "command start time").unwrap_or_default();
         let end_timestamp = cmd
             .end_time_wallclock
-            .as_ref()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs());
+            .and_then(|timestamp| unix_timestamp_secs(timestamp, "command end time"));
         let duration_ms = if cmd.is_finished() {
             Some(cmd.duration().as_millis() as u64)
         } else {
@@ -72,13 +66,8 @@ pub struct FrontendPaneState {
 
 impl From<&PaneShellState> for FrontendPaneState {
     fn from(state: &PaneShellState) -> Self {
-        use std::time::UNIX_EPOCH;
-
-        let last_activity = state
-            .last_activity
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let last_activity =
+            unix_timestamp_secs(state.last_activity, "pane last activity").unwrap_or_default();
 
         Self {
             integration_enabled: matches!(
@@ -188,7 +177,16 @@ pub async fn shell_execute_background_program(
     match cmd.output().await {
         Ok(output) => {
             let execution_time = start_time.elapsed().as_millis() as u64;
-            let exit_code = output.status.code().unwrap_or(-1);
+            let exit_code = match output.status.code() {
+                Some(code) => code,
+                None => {
+                    warn!(
+                        "Background command exited without status code: {} {:?}",
+                        program, args
+                    );
+                    -1
+                }
+            };
             let success = output.status.success();
 
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -207,6 +205,18 @@ pub async fn shell_execute_background_program(
         Err(e) => {
             error!("Background command failed: {} {:?} - {}", program, args, e);
             Ok(api_error!("shell.execute_command_failed"))
+        }
+    }
+}
+
+fn unix_timestamp_secs(timestamp: std::time::SystemTime, label: &str) -> Option<u64> {
+    use std::time::UNIX_EPOCH;
+
+    match timestamp.duration_since(UNIX_EPOCH) {
+        Ok(duration) => Some(duration.as_secs()),
+        Err(err) => {
+            warn!("Failed to convert {} to unix timestamp: {}", label, err);
+            None
         }
     }
 }

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-  import { workspaceApi, type SessionRecord, type WorkspaceRecord } from '@/api/workspace'
+  import { workspaceApi, type ExecutionNodeRecord, type SessionRecord, type WorkspaceRecord } from '@/api/workspace'
   import { useAIChatStore } from '@/components/AIChatSidebar'
   import { useLayoutStore } from '@/stores/layout'
   import { useWorkspaceStore } from '@/stores/workspace'
-  import { confirmDanger } from '@/ui'
+  import { getAgentColor } from '@/utils/agentColors'
   import { formatRelativeTime } from '@/utils/dateFormatter'
   import { onBeforeUnmount } from 'vue'
   import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -124,6 +124,7 @@
 
   const isExpanded = (path: string) => expandedPaths.value.has(path)
   const getNode = (path: string) => workspaceStore.getNode(path)
+  const getSessions = (path: string): SessionRecord[] => workspaceStore.getTopLevelSessions(path)
 
   const handleToggleWorkspace = async (path: string) => {
     workspaceStore.setActiveWorkspace(path)
@@ -132,8 +133,8 @@
     } else {
       expandedPaths.value.add(path)
       const node = workspaceStore.getNode(path)
-      if (node && node.sessions.length === 0 && !node.isLoading) {
-        await workspaceStore.loadSessions(path)
+      if (node && node.sessionViews.length === 0 && !node.isLoading) {
+        await workspaceStore.loadSessionViews(path)
       }
     }
     expandedPaths.value = new Set(expandedPaths.value)
@@ -167,7 +168,7 @@
       // Expand and load sessions
       expandedPaths.value.add(selected)
       expandedPaths.value = new Set(expandedPaths.value)
-      await workspaceStore.loadSessions(selected)
+      await workspaceStore.loadSessionViews(selected)
     }
   }
 
@@ -181,6 +182,43 @@
 
   const isSessionActive = (session: SessionRecord) => session.id === currentSessionId.value
   const isSessionLoading = (session: SessionRecord) => aiChatStore.isSessionRunning(session.id)
+  const getActiveChildAgents = (workspacePath: string, sessionId: number) => {
+    const sessionView = workspaceStore.getNode(workspacePath)?.sessionViews.find(view => view.session.id === sessionId)
+    if (!sessionView) return []
+
+    const nodes: Array<{
+      id: number
+      title: string
+      profile: string
+      status: ExecutionNodeRecord['status']
+      backingSessionId: number
+    }> = []
+
+    const collect = (node: ExecutionNodeRecord) => {
+      if (
+        node.role !== 'root' &&
+        typeof node.backingSessionId === 'number' &&
+        (node.status === 'queued' || node.status === 'running')
+      ) {
+        nodes.push({
+          id: node.id,
+          title: node.title,
+          profile: node.profile,
+          status: node.status,
+          backingSessionId: node.backingSessionId,
+        })
+      }
+      node.children.forEach(collect)
+    }
+
+    sessionView.executionTree.forEach(collect)
+    return nodes
+  }
+
+  const handleOpenChildAgent = async (event: MouseEvent, sessionId: number) => {
+    event.stopPropagation()
+    await aiChatStore.switchSession(sessionId)
+  }
 
   const handleNewSessionInWorkspace = async (event: MouseEvent, workspacePath: string) => {
     event.stopPropagation()
@@ -442,58 +480,73 @@
 
               <Transition name="tree-expand">
                 <div v-if="isExpanded(workspace.path)" class="sessions-list">
-                  <div v-if="!getNode(workspace.path)?.sessions.length" class="no-sessions">
+                  <div v-if="!getSessions(workspace.path).length" class="no-sessions">
                     {{ t('sidebar.no_threads') }}
                   </div>
-                  <div
-                    v-for="session in getNode(workspace.path)?.sessions || []"
-                    :key="session.id"
-                    class="session-item"
-                    :class="{ active: isSessionActive(session), loading: isSessionLoading(session) }"
-                    @click.stop="handleSelectSession(session)"
-                    @mouseleave="resetConfirming"
-                  >
-                    <span v-if="isSessionLoading(session)" class="session-loading">
-                      <svg viewBox="0 0 16 16" fill="none">
-                        <path d="M8 2a6 6 0 0 1 0 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                      </svg>
-                    </span>
-                    <span class="session-title">{{ getSessionTitle(session) }}</span>
-                    <span class="session-trailing">
-                      <span class="session-time">{{ formatRelativeTime(session.updatedAt * 1000) }}</span>
-                      <button
-                        class="delete-btn"
-                        :class="{ confirming: confirmingDeleteId === session.id }"
-                        :title="confirmingDeleteId === session.id ? t('common.confirm') : t('sidebar.delete_session')"
-                        @click="handleDeleteSession($event, session)"
-                      >
-                        <svg
-                          v-if="confirmingDeleteId === session.id"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        >
-                          <path d="M20 6L9 17l-5-5" />
+                  <template v-for="session in getSessions(workspace.path)" :key="session.id">
+                    <div
+                      class="session-item"
+                      :class="{ active: isSessionActive(session), loading: isSessionLoading(session) }"
+                      @click.stop="handleSelectSession(session)"
+                      @mouseleave="resetConfirming"
+                    >
+                      <span v-if="isSessionLoading(session)" class="session-loading">
+                        <svg viewBox="0 0 16 16" fill="none">
+                          <path
+                            d="M8 2a6 6 0 0 1 0 12"
+                            stroke="currentColor"
+                            stroke-width="1.5"
+                            stroke-linecap="round"
+                          />
                         </svg>
-                        <svg
-                          v-else
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="1.5"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
+                      </span>
+                      <span class="session-title">{{ getSessionTitle(session) }}</span>
+                      <span class="session-trailing">
+                        <span class="session-time">{{ formatRelativeTime(session.updatedAt * 1000) }}</span>
+                        <button
+                          class="delete-btn"
+                          :class="{ confirming: confirmingDeleteId === session.id }"
+                          :title="confirmingDeleteId === session.id ? t('common.confirm') : t('sidebar.delete_session')"
+                          @click="handleDeleteSession($event, session)"
                         >
-                          <path d="M3 6h18" />
-                          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                        </svg>
-                      </button>
-                    </span>
-                  </div>
+                          <svg
+                            v-if="confirmingDeleteId === session.id"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          >
+                            <path d="M20 6L9 17l-5-5" />
+                          </svg>
+                          <svg
+                            v-else
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.5"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          >
+                            <path d="M3 6h18" />
+                            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                          </svg>
+                        </button>
+                      </span>
+                    </div>
+                    <div
+                      v-for="(agent, idx) in getActiveChildAgents(workspace.path, session.id)"
+                      :key="`${session.id}-${agent.id}`"
+                      class="child-agent-item"
+                      @click.stop="handleOpenChildAgent($event, agent.backingSessionId)"
+                    >
+                      <span class="child-agent-dot" :style="{ background: getAgentColor(idx) }" />
+                      <span class="child-agent-name">{{ agent.title || agent.profile }}</span>
+                      <span class="child-agent-profile">{{ agent.profile }}</span>
+                    </div>
+                  </template>
                 </div>
               </Transition>
             </div>
@@ -535,7 +588,13 @@
   .sidebar {
     display: flex;
     flex-direction: column;
-    background: var(--sidebar-glass-bg);
+    background:
+      linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--bg-200-solid) 40%, transparent),
+        color-mix(in srgb, var(--bg-200-solid) 40%, transparent)
+      ),
+      var(--sidebar-glass-bg);
     transition:
       width 0.25s ease,
       background 0.25s ease;
@@ -602,13 +661,13 @@
     border-radius: var(--border-radius-lg);
     font-size: 13px;
     font-weight: 500;
-    color: var(--text-300);
+    color: var(--text-200);
     cursor: pointer;
   }
 
   .back-btn:hover {
     background: var(--color-hover);
-    color: var(--text-200);
+    color: var(--text-100);
   }
 
   .back-btn svg {
@@ -631,14 +690,14 @@
     border-radius: var(--border-radius-lg);
     font-size: 13px;
     font-weight: 500;
-    color: var(--text-300);
+    color: var(--text-200);
     cursor: pointer;
     text-align: left;
   }
 
   .nav-item:hover {
     background: var(--color-hover);
-    color: var(--text-200);
+    color: var(--text-100);
   }
 
   .nav-item.active {
@@ -656,7 +715,7 @@
     background: transparent;
     border: none;
     border-radius: var(--border-radius-lg);
-    color: var(--text-300);
+    color: var(--text-200);
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
@@ -665,13 +724,13 @@
 
   .new-thread-btn:hover {
     background: var(--color-hover);
-    color: var(--text-200);
+    color: var(--text-100);
   }
 
   .new-thread-btn svg {
     width: 18px;
     height: 18px;
-    opacity: 0.7;
+    opacity: 0.9;
     flex-shrink: 0;
   }
 
@@ -705,7 +764,7 @@
   .section-title {
     font-size: 11px;
     font-weight: 600;
-    color: var(--text-500);
+    color: var(--text-300);
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
@@ -719,7 +778,7 @@
     background: transparent;
     border: none;
     border-radius: var(--border-radius-sm);
-    color: var(--text-500);
+    color: var(--text-300);
     cursor: pointer;
   }
 
@@ -760,7 +819,7 @@
     background: transparent;
     border: none;
     border-radius: var(--border-radius-lg);
-    color: var(--text-300);
+    color: var(--text-200);
     font-size: 13px;
     font-weight: 500;
     text-align: left;
@@ -769,11 +828,11 @@
 
   .workspace-item:hover {
     background: var(--color-hover);
-    color: var(--text-200);
+    color: var(--text-100);
   }
 
   .workspace-item.expanded {
-    color: var(--text-200);
+    color: var(--text-100);
   }
 
   .workspace-item.active {
@@ -805,7 +864,7 @@
   }
 
   .workspace-icon-slot .folder-icon {
-    opacity: 0.6;
+    opacity: 0.8;
   }
 
   /* Hover: show arrow, hide folder */
@@ -875,7 +934,7 @@
     background: transparent;
     border: none;
     border-radius: var(--border-radius-sm);
-    color: var(--text-500);
+    color: var(--text-300);
     cursor: pointer;
     transition:
       background 0.15s ease,
@@ -890,7 +949,7 @@
 
   .action-btn:hover {
     background: var(--color-hover);
-    color: var(--text-200);
+    color: var(--text-100);
   }
 
   .action-btn.delete-btn:hover {
@@ -941,21 +1000,21 @@
 
   .loading-indicator {
     font-size: 12px;
-    color: var(--text-500);
+    color: var(--text-300);
     flex-shrink: 0;
   }
 
   .no-sessions {
     padding: 10px 12px;
     font-size: 12px;
-    color: var(--text-500);
+    color: var(--text-300);
   }
 
   .sessions-list {
     padding-left: 20px;
     padding-top: 4px;
     padding-bottom: 4px;
-    overflow: hidden;
+    overflow: visible;
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -985,10 +1044,11 @@
     background: transparent;
     border: none;
     border-radius: var(--border-radius-lg);
-    color: var(--text-300);
+    color: var(--text-200);
     font-size: 13px;
     text-align: left;
     cursor: pointer;
+    overflow: visible;
   }
 
   .session-item:hover {
@@ -1001,7 +1061,7 @@
   }
 
   .session-item.loading {
-    color: var(--text-200);
+    color: var(--text-100);
   }
 
   /* Loading indicator */
@@ -1017,7 +1077,7 @@
   .session-loading svg {
     width: 12px;
     height: 12px;
-    color: var(--text-400);
+    color: var(--text-300);
     animation: spin-loading 1s linear infinite;
   }
 
@@ -1040,6 +1100,7 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    overflow: visible;
   }
 
   .session-item:hover .session-trailing .session-time {
@@ -1052,15 +1113,53 @@
 
   .session-time {
     font-size: 12px;
-    color: var(--text-400);
+    color: var(--text-300);
     white-space: nowrap;
+  }
+
+  .child-agent-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 26px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: var(--border-radius-md);
+    color: var(--text-300);
+  }
+
+  .child-agent-item:hover {
+    background: var(--color-hover);
+    color: var(--text-100);
+  }
+
+  .child-agent-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .child-agent-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+
+  .child-agent-profile {
+    color: var(--text-400);
+    font-size: 11px;
+    flex-shrink: 0;
   }
 
   .empty-state {
     padding: 24px;
     text-align: center;
     font-size: 13px;
-    color: var(--text-500);
+    color: var(--text-300);
   }
 
   .sidebar-footer {
@@ -1077,18 +1176,19 @@
     background: transparent;
     border: none;
     border-radius: var(--border-radius-md);
-    color: var(--text-300);
+    color: var(--text-200);
     font-size: 14px;
     cursor: pointer;
   }
 
   .settings-btn:hover {
     background: var(--color-hover);
+    color: var(--text-100);
   }
 
   .settings-btn svg {
     width: 18px;
     height: 18px;
-    opacity: 0.7;
+    opacity: 0.9;
   }
 </style>

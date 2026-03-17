@@ -283,15 +283,31 @@ impl Drop for TerminalEventHandler {
             );
         }
 
-        if let Ok(mut handle) = self.context_task_handle.lock() {
-            if let Some(handle) = handle.take() {
-                handle.abort();
+        match self.context_task_handle.lock() {
+            Ok(mut handle) => {
+                if let Some(handle) = handle.take() {
+                    handle.abort();
+                }
+            }
+            Err(err) => {
+                warn!(
+                    "failed to acquire context_task_handle lock during drop: {}",
+                    err
+                );
             }
         }
 
-        if let Ok(mut handle) = self.shell_task_handle.lock() {
-            if let Some(handle) = handle.take() {
-                handle.abort();
+        match self.shell_task_handle.lock() {
+            Ok(mut handle) => {
+                if let Some(handle) = handle.take() {
+                    handle.abort();
+                }
+            }
+            Err(err) => {
+                warn!(
+                    "failed to acquire shell_task_handle lock during drop: {}",
+                    err
+                );
             }
         }
     }

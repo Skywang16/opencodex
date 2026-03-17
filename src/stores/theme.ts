@@ -33,6 +33,10 @@ interface StateSnapshot {
 }
 
 export const useThemeStore = defineStore('theme', () => {
+  const formatErrorMessage = (error: unknown): string => {
+    return error instanceof Error ? error.message : String(error)
+  }
+
   const configStatus = ref<ThemeConfigStatus | null>(null)
   const currentTheme = ref<Theme | null>(null)
   const availableThemes = ref<Theme[]>([])
@@ -136,7 +140,7 @@ export const useThemeStore = defineStore('theme', () => {
         // Rollback state
         this.restoreStateSnapshot(snapshot)
         this.store.operationState.value = ThemeOperationState.ERROR
-        this.store.error.value = err instanceof Error ? err.message : String(err)
+        this.store.error.value = formatErrorMessage(err)
         throw err
       }
     }
@@ -198,7 +202,7 @@ export const useThemeStore = defineStore('theme', () => {
       configStatus.value = status
       availableThemes.value = themes
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
+      error.value = formatErrorMessage(err)
       throw err
     } finally {
       operationState.value = ThemeOperationState.IDLE
@@ -215,7 +219,7 @@ export const useThemeStore = defineStore('theme', () => {
         applyThemeToUI(theme)
       }
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
+      error.value = formatErrorMessage(err)
       throw err
     }
   }

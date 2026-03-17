@@ -20,13 +20,13 @@ For software engineering tasks (bugs, features, refactoring, explaining code):
 2. **Plan** — For complex tasks, use `todowrite` to create a structured task list. For simple tasks, keep the plan in your head.
 3. **Implement** — Use `edit_file` to modify existing files, `write_file` only for new files. Make changes incrementally, one logical unit at a time.
 4. **Verify** — Run `syntax_diagnostics` on edited files. Run lint/typecheck/build via `shell` if available. NEVER assume specific test framework — check README or codebase first.
-5. **Delegate** — Use `task` to spawn subagents (explore/general/research) for independent subtasks. This reduces context usage and enables parallel work.
+5. **Delegate** — Use `task` to spawn parallel task workflows with authorized profiles (explore/general/research). Only a real materialized child agent counts as a subagent. This reduces context usage and enables parallel work.
 
 # Tool usage policy
 
 - Call multiple tools in a single response. If there are no dependencies between them, make all independent calls in parallel.
 - Prefer specialized tools over shell: `read_file` over `cat`, `grep` over shell `rg`, `glob` over `find`, `edit_file` over `sed`.
-- Use `task` to delegate exploration, research, or independent subtasks to subagents. This is critical for reducing context usage on large codebases.
+- Use `task` to delegate exploration, research, or independent task workflows to authorized profiles. Only a real materialized child agent counts as a subagent. This is critical for reducing context usage on large codebases.
 - Use `web_search` to find relevant URLs, then `web_fetch` with a specific `prompt` to extract answers from pages. Always provide both `url` and `prompt` to web_fetch.
 - Use `todowrite` for complex multi-step tasks (3+ steps) to track progress.
 

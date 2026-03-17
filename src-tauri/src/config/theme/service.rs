@@ -132,20 +132,32 @@ impl SystemThemeDetector {
             // Use osascript command to detect system theme
             use std::process::Command;
 
-            let output = Command::new("osascript")
+            let output = match Command::new("osascript")
                 .args(["-e", "tell application \"System Events\" to tell appearance preferences to get dark mode"])
                 .output()
-                .ok()?;
+            {
+                Ok(output) => output,
+                Err(err) => {
+                    tracing::debug!("Failed to execute osascript for theme detection: {}", err);
+                    return None;
+                }
+            };
 
             if output.status.success() {
                 let result = String::from_utf8_lossy(&output.stdout);
                 let is_dark = result.trim().eq_ignore_ascii_case("true");
                 Some(is_dark)
             } else {
-                let output = Command::new("defaults")
+                let output = match Command::new("defaults")
                     .args(["read", "-g", "AppleInterfaceStyle"])
                     .output()
-                    .ok()?;
+                {
+                    Ok(output) => output,
+                    Err(err) => {
+                        tracing::debug!("Failed to execute defaults for theme detection: {}", err);
+                        return None;
+                    }
+                };
 
                 if output.status.success() {
                     let result = String::from_utf8_lossy(&output.stdout);
@@ -166,12 +178,23 @@ impl SystemThemeDetector {
         #[cfg(target_os = "linux")]
         {
             // Linux system theme detection
-            if let Ok(theme) = std::env::var("GTK_THEME") {
-                Some(theme.to_lowercase().contains("dark"))
-            } else if let Ok(theme) = std::env::var("QT_STYLE_OVERRIDE") {
-                Some(theme.to_lowercase().contains("dark"))
-            } else {
-                None
+            match std::env::var("GTK_THEME") {
+                Ok(theme) => Some(theme.to_lowercase().contains("dark")),
+                Err(std::env::VarError::NotPresent) => match std::env::var("QT_STYLE_OVERRIDE") {
+                    Ok(theme) => Some(theme.to_lowercase().contains("dark")),
+                    Err(std::env::VarError::NotPresent) => None,
+                    Err(err) => {
+                        tracing::debug!(
+                            "Failed to read QT_STYLE_OVERRIDE for theme detection: {}",
+                            err
+                        );
+                        None
+                    }
+                },
+                Err(err) => {
+                    tracing::debug!("Failed to read GTK_THEME for theme detection: {}", err);
+                    None
+                }
             }
         }
 

@@ -121,8 +121,13 @@ pub async fn llm_get_providers(
 pub async fn llm_get_models_dev_providers(
     _state: State<'_, LLMManagerState>,
 ) -> TauriApiResult<Vec<super::models_dev::ProviderInfo>> {
-    let providers = super::models_dev::get_provider_infos().await;
-    Ok(api_success!(providers))
+    match super::models_dev::get_provider_infos().await {
+        Ok(providers) => Ok(api_success!(providers)),
+        Err(err) => {
+            tracing::error!("Failed to load models.dev providers: {}", err);
+            Ok(api_error!("llm.get_models_failed"))
+        }
+    }
 }
 
 /// Refresh models from models.dev API
@@ -146,8 +151,18 @@ pub async fn llm_get_model_info(
     provider_id: String,
     model_id: String,
 ) -> TauriApiResult<Option<super::models_dev::ModelInfo>> {
-    let model = super::models_dev::get_model(&provider_id, &model_id).await;
-    Ok(api_success!(
-        model.map(|m| super::models_dev::ModelInfo::from(&m))
-    ))
+    match super::models_dev::get_model(&provider_id, &model_id).await {
+        Ok(model) => Ok(api_success!(
+            model.map(|m| super::models_dev::ModelInfo::from(&m))
+        )),
+        Err(err) => {
+            tracing::error!(
+                "Failed to load model info for provider '{}' model '{}': {}",
+                provider_id,
+                model_id,
+                err
+            );
+            Ok(api_error!("llm.get_models_failed"))
+        }
+    }
 }

@@ -4,7 +4,7 @@
   import { AuthType, OAuthProvider, type OAuthConfig } from '@/types/oauth'
 
   import { aiApi } from '@/api'
-  import { useLLMRegistry, type ModelOption } from '@/composables/useLLMRegistry'
+  import { useLLMRegistry } from '@/composables/useLLMRegistry'
   import { useOAuth } from '@/composables/useOAuth'
   import { confirmDanger, XFormGroup, XInput } from '@/ui'
   import { computed, onMounted, reactive, ref } from 'vue'
@@ -13,7 +13,7 @@
 
   const { t } = useI18n()
   const aiSettingsStore = useAISettingsStore()
-  const { providers, providerOptions, getChatModelOptions, getModelInfo, loadProviders } = useLLMRegistry()
+  const { providers, providerOptions, loadProviders } = useLLMRegistry()
 
   const models = computed(() => aiSettingsStore.chatModels)
   const loading = computed(() => aiSettingsStore.isLoading)
@@ -21,7 +21,6 @@
   const editingId = ref<string | null>(null)
   const isTesting = ref(false)
   const isSaving = ref(false)
-  const showAdvancedOptions = ref(false)
   const showAddForm = ref(false)
   const showApiKey = ref(false)
 
@@ -34,8 +33,6 @@
     apiKey: '',
     model: '',
     displayName: '',
-    useCustomBaseUrl: false,
-    useCustomModel: false,
     oauthProvider: '' as string,
     oauthConfig: undefined as OAuthConfig | undefined,
     options: {
@@ -48,43 +45,19 @@
     },
   })
 
-  const availableModels = computed<ModelOption[]>(() => {
-    if (formData.authType === 'oauth') {
-      return [
-        { value: 'gpt-4o', label: 'GPT-4o', reasoning: false, toolCall: true, attachment: true },
-        { value: 'gpt-4o-mini', label: 'GPT-4o Mini', reasoning: false, toolCall: true, attachment: true },
-        { value: 'o1', label: 'o1', reasoning: true, toolCall: false, attachment: false },
-        { value: 'o1-mini', label: 'o1 Mini', reasoning: true, toolCall: false, attachment: false },
-      ]
-    }
-    return getChatModelOptions(formData.provider)
-  })
-
   const providerInfo = computed(() => {
     if (formData.authType === 'oauth') return null
-    return providers.value.find(p => p.providerType === formData.provider) || null
+    return providers.value.find(p => p.providerType === formData.provider) ?? null
   })
 
-  const hasPresetModels = computed(() => availableModels.value.length > 0)
+  const managedProviderOptions = computed(() => providerOptions.value.filter(option => option.apiUrl !== undefined))
 
-  // Get current model info for capability check
-  const selectedModelInfo = computed(() => {
-    if (!formData.provider || !formData.model) return null
-    return getModelInfo(formData.provider, formData.model)
-  })
+  const getProviderDefaultApiUrl = (provider: string): string => {
+    return providers.value.find(item => item.providerType === provider)?.defaultApiUrl ?? ''
+  }
 
   // Check if selected model supports reasoning (deep thinking)
-  const supportsDeepThinking = computed(() => {
-    // Custom model ID — user decides, always show the toggle
-    if (formData.useCustomModel) return true
-    // For OAuth models, check from availableModels
-    if (formData.authType === 'oauth') {
-      const model = availableModels.value.find(m => m.value === formData.model)
-      return model?.reasoning ?? false
-    }
-    // For API key models, check from preset capabilities
-    return selectedModelInfo.value?.capabilities?.reasoning ?? false
-  })
+  const supportsDeepThinking = computed(() => !!formData.model.trim())
 
   onMounted(async () => {
     await Promise.all([aiSettingsStore.loadModels(), loadProviders()])
@@ -101,8 +74,6 @@
     formData.apiKey = ''
     formData.model = ''
     formData.displayName = ''
-    formData.useCustomBaseUrl = false
-    formData.useCustomModel = false
     formData.oauthProvider = ''
     formData.oauthConfig = undefined
     formData.options = {
@@ -113,7 +84,6 @@
       enableDeepThinking: false,
       reasoningEffort: 'medium',
     }
-    showAdvancedOptions.value = false
     editingId.value = null
     showAddForm.value = false
   }
@@ -128,20 +98,18 @@
     showAddForm.value = true
     if (model.authType === AuthType.OAuth) {
       formData.authType = 'oauth'
-      formData.oauthProvider = model.oauthConfig?.provider || OAuthProvider.OpenAiCodex
+      formData.oauthProvider = model.oauthConfig?.provider ?? OAuthProvider.OpenAiCodex
       formData.oauthConfig = model.oauthConfig
       formData.model = model.model
-      formData.displayName = model.displayName || model.model
+      formData.displayName = model.displayName ?? model.model
       formData.provider = ''
     } else {
       formData.authType = 'apikey'
       formData.provider = model.provider
-      formData.apiUrl = model.apiUrl || ''
-      formData.apiKey = model.apiKey || ''
+      formData.apiUrl = model.apiUrl ?? getProviderDefaultApiUrl(model.provider)
+      formData.apiKey = model.apiKey ?? ''
       formData.model = model.model
-      formData.displayName = model.displayName || model.model
-      formData.useCustomBaseUrl = model.useCustomBaseUrl || false
-      formData.useCustomModel = !getChatModelOptions(model.provider).some(m => m.value === model.model)
+      formData.displayName = model.displayName ?? model.model
       formData.oauthProvider = ''
     }
     formData.options = {
@@ -162,7 +130,6 @@
       formData.apiKey = ''
       formData.apiUrl = ''
       formData.oauthProvider = OAuthProvider.OpenAiCodex
-      formData.model = 'gpt-4o'
     } else {
       formData.oauthConfig = undefined
       formData.oauthProvider = ''
@@ -173,24 +140,12 @@
     formData.provider = value
     const info = providerInfo.value
     if (info) {
-      formData.apiUrl = info.defaultApiUrl || ''
-      const models = getChatModelOptions(value)
-      formData.model = models.length > 0 ? models[0].value : ''
-      // Auto-set deep thinking based on first model's capability
-      if (models.length > 0) {
-        formData.options.enableDeepThinking = models[0].reasoning
-      }
+      formData.apiUrl = info.defaultApiUrl
     }
-    formData.useCustomBaseUrl = false
-    formData.useCustomModel = false
-  }
-
-  const handleCustomUrlToggle = () => {
-    formData.apiUrl = formData.useCustomBaseUrl ? '' : providerInfo.value?.defaultApiUrl || ''
   }
 
   const handleStartAuth = async () => {
-    const provider = (formData.oauthProvider as OAuthProvider) || OAuthProvider.OpenAiCodex
+    const provider = (formData.oauthProvider as OAuthProvider) ?? OAuthProvider.OpenAiCodex
     const config = await startOAuth(provider)
     if (config) {
       formData.oauthConfig = config
@@ -232,11 +187,10 @@
               apiUrl: '',
               apiKey: '',
               model: formData.model,
-              displayName: formData.displayName.trim() || formData.model.trim(),
+              displayName: formData.displayName.trim() === '' ? formData.model.trim() : formData.displayName.trim(),
               modelType: 'chat' as const,
               options: formData.options,
               oauthConfig: formData.oauthConfig,
-              useCustomBaseUrl: false,
             }
           : {
               provider: formData.provider as AIProvider,
@@ -244,11 +198,10 @@
               apiUrl: formData.apiUrl,
               apiKey: formData.apiKey,
               model: formData.model,
-              displayName: formData.displayName.trim() || formData.model.trim(),
+              displayName: formData.displayName.trim() === '' ? formData.model.trim() : formData.displayName.trim(),
               modelType: 'chat' as const,
               options: formData.options,
               oauthConfig: undefined,
-              useCustomBaseUrl: formData.useCustomBaseUrl,
             }
 
       if (editingId.value) {
@@ -263,29 +216,16 @@
   }
 
   const deleteModel = async (modelId: string) => {
-    const confirmed = await confirmDanger(
-      t('ai_model.delete_confirm'),
-      t('ai_model.delete_confirm_text') || 'Delete Model'
-    )
+    const confirmed = await confirmDanger(t('ai_model.delete_confirm'), t('ai_model.delete_confirm_text'))
     if (!confirmed) return
     await aiSettingsStore.removeModel(modelId)
   }
 
   const isFormValid = computed(() => {
     if (formData.authType === 'oauth') {
-      return (
-        !!formData.oauthConfig &&
-        !!formData.model &&
-        !!formData.oauthProvider &&
-        !!formData.displayName.trim()
-      )
+      return !!formData.oauthConfig && !!formData.model && !!formData.oauthProvider && !!formData.displayName.trim()
     }
-    return (
-      !!formData.provider &&
-      !!formData.model &&
-      !!formData.apiKey?.trim() &&
-      !!formData.displayName.trim()
-    )
+    return !!formData.provider && !!formData.model && !!formData.apiKey?.trim() && !!formData.displayName.trim()
   })
 </script>
 
@@ -300,13 +240,13 @@
       <!-- Configured Models List -->
       <div class="settings-group">
         <div class="group-header">
-          <h2 class="group-title">{{ t('ai_model.configured_models') || 'Configured Models' }}</h2>
+          <h2 class="group-title">{{ t('ai_model.configured_models') }}</h2>
           <button v-if="!showAddForm && models.length > 0" class="add-btn" @click="startAdding">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            {{ t('ai_model.add_model') || 'Add Model' }}
+            {{ t('ai_model.add_model') }}
           </button>
         </div>
 
@@ -321,9 +261,9 @@
               </svg>
             </div>
             <div class="empty-text">
-              <span class="empty-title">{{ t('ai_model.no_models') || 'No AI models configured' }}</span>
+              <span class="empty-title">{{ t('ai_model.no_models') }}</span>
               <span class="empty-desc">
-                {{ t('ai_model.add_model_hint') || 'Add a model to start using AI features' }}
+                {{ t('ai_model.add_model_hint') }}
               </span>
             </div>
             <button class="add-first-btn" @click="startAdding">
@@ -331,7 +271,7 @@
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
-              {{ t('ai_model.add_first_model') || 'Add Your First Model' }}
+              {{ t('ai_model.add_first_model') }}
             </button>
           </div>
         </div>
@@ -352,7 +292,7 @@
               </svg>
             </div>
             <div class="model-info">
-              <span class="model-name">{{ model.displayName || model.model }}</span>
+              <span class="model-name">{{ model.displayName ?? model.model }}</span>
               <div class="model-meta">
                 <span class="provider-name">{{ model.provider }}</span>
                 <span class="model-id">{{ model.model }}</span>
@@ -384,7 +324,7 @@
       <!-- Add/Edit Form -->
       <div v-if="showAddForm" class="settings-group">
         <h2 class="group-title">
-          {{ editingId ? t('ai_model.edit_model') || 'Edit Model' : t('ai_model.add_model') || 'Add Model' }}
+          {{ editingId ? t('ai_model.edit_model') : t('ai_model.add_model') }}
         </h2>
 
         <div class="settings-card form-card">
@@ -404,7 +344,7 @@
                 :class="{ active: formData.authType === 'oauth' }"
                 @click="switchAuthType('oauth')"
               >
-                {{ t('ai_model.subscription') || 'Subscription' }}
+                {{ t('ai_model.subscription') }}
               </button>
             </div>
           </div>
@@ -418,7 +358,7 @@
                 @change="handleProviderChange(($event.target as HTMLSelectElement).value)"
               >
                 <option value="" disabled>{{ t('ai_model.select_provider') }}</option>
-                <option v-for="p in providerOptions" :key="p.value" :value="p.value">{{ p.label }}</option>
+                <option v-for="p in managedProviderOptions" :key="p.value" :value="p.value">{{ p.label }}</option>
               </select>
             </XFormGroup>
 
@@ -445,31 +385,7 @@
               </XInput>
             </XFormGroup>
 
-            <div v-if="formData.provider && hasPresetModels" class="form-group inline">
-              <label class="form-label">{{ t('ai_model.use_custom_model') || 'Custom Model ID' }}</label>
-              <x-switch
-                :modelValue="formData.useCustomModel"
-                @update:modelValue="
-                  (v: boolean) => {
-                    formData.useCustomModel = v
-                    formData.model = ''
-                  }
-                "
-              />
-            </div>
-
-            <XFormGroup
-              v-if="formData.provider && hasPresetModels && !formData.useCustomModel"
-              :label="t('ai_model.model')"
-              required
-            >
-              <select v-model="formData.model" class="form-select">
-                <option value="" disabled>{{ t('ai_model.select_model') }}</option>
-                <option v-for="m in availableModels" :key="m.value" :value="m.value">{{ m.label }}</option>
-              </select>
-            </XFormGroup>
-
-            <XFormGroup v-else-if="formData.provider" :label="t('ai_model.model_name')" required>
+            <XFormGroup v-if="formData.provider" :label="t('ai_model.model_name')" required>
               <XInput v-model="formData.model" :placeholder="t('ai_model.model_name_placeholder')" />
             </XFormGroup>
 
@@ -477,32 +393,15 @@
               <XInput v-model="formData.displayName" :placeholder="t('ai_model.config_name_placeholder')" />
             </XFormGroup>
 
-            <div v-if="formData.provider && hasPresetModels" class="form-group inline">
-              <label class="form-label">{{ t('ai_model.use_custom_base_url') }}</label>
-              <x-switch
-                :modelValue="formData.useCustomBaseUrl"
-                @update:modelValue="
-                  (v: boolean) => {
-                    formData.useCustomBaseUrl = v
-                    handleCustomUrlToggle()
-                  }
-                "
-              />
-            </div>
-
-            <XFormGroup
-              v-if="formData.provider && (formData.useCustomBaseUrl || !hasPresetModels)"
-              :label="t('ai_model.api_url')"
-              required
-            >
+            <XFormGroup v-if="formData.provider" :label="t('ai_model.api_url')" required>
               <XInput v-model="formData.apiUrl" type="url" :placeholder="t('ai_model.api_url_placeholder')" />
             </XFormGroup>
 
             <!-- Responses API / Deep Thinking toggle -->
             <div v-if="formData.model && supportsDeepThinking" class="form-group inline">
               <div class="label-with-badge">
-                <label class="form-label">{{ t('ai_model.responses_api') || 'Responses API' }}</label>
-                <span class="feature-badge reasoning">{{ t('ai_model.reasoning_model') || 'Reasoning' }}</span>
+                <label class="form-label">{{ t('ai_model.responses_api') }}</label>
+                <span class="feature-badge reasoning">{{ t('ai_model.reasoning_model') }}</span>
               </div>
               <x-switch v-model="formData.options.enableDeepThinking" />
             </div>
@@ -535,7 +434,7 @@
                 <div class="oauth-provider-info">
                   <div class="oauth-provider-name">ChatGPT Plus/Pro</div>
                   <div class="oauth-provider-desc">
-                    {{ t('ai_model.oauth_description') || 'Use your ChatGPT subscription' }}
+                    {{ t('ai_model.oauth_description') }}
                   </div>
                 </div>
               </div>
@@ -570,10 +469,10 @@
                   <span>
                     {{
                       isAuthenticating
-                        ? t('ai_model.authorizing') || 'Authorizing...'
+                        ? t('ai_model.authorizing')
                         : formData.oauthConfig
-                          ? t('ai_model.authorized') || 'Authorized'
-                          : t('ai_model.not_authorized') || 'Not authorized'
+                          ? t('ai_model.authorized')
+                          : t('ai_model.not_authorized')
                     }}
                   </span>
                 </div>
@@ -583,20 +482,13 @@
                   :disabled="isAuthenticating"
                   @click="handleStartAuth"
                 >
-                  {{
-                    formData.oauthConfig
-                      ? t('ai_model.reauthorize') || 'Re-authorize'
-                      : t('ai_model.start_authorization') || 'Authorize'
-                  }}
+                  {{ formData.oauthConfig ? t('ai_model.reauthorize') : t('ai_model.start_authorization') }}
                 </button>
               </div>
             </div>
 
-            <XFormGroup v-if="formData.oauthConfig" :label="t('ai_model.model')" required>
-              <select v-model="formData.model" class="form-select">
-                <option value="" disabled>{{ t('ai_model.select_model') }}</option>
-                <option v-for="m in availableModels" :key="m.value" :value="m.value">{{ m.label }}</option>
-              </select>
+            <XFormGroup v-if="formData.oauthConfig" :label="t('ai_model.model_name')" required>
+              <XInput v-model="formData.model" :placeholder="t('ai_model.model_name_placeholder')" />
             </XFormGroup>
 
             <XFormGroup v-if="formData.oauthConfig" :label="t('ai_model.config_name')" required>

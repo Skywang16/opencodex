@@ -6,6 +6,7 @@ use crate::agent::common::llm_text::extract_text_from_llm_message;
 use crate::agent::error::AgentResult;
 use crate::agent::persistence::AgentPersistence;
 use crate::agent::prompt::BuiltinPrompts;
+use crate::agent::utils::count_message_param_tokens;
 use crate::agent::types::{Block, Message, MessageRole, MessageStatus, TextBlock};
 use crate::llm::anthropic_types::{
     CreateMessageRequest, MessageContent, MessageParam, SystemPrompt,
@@ -13,7 +14,7 @@ use crate::llm::anthropic_types::{
 use crate::llm::service::LLMService;
 use crate::storage::DatabaseManager;
 
-use super::config::CompactionConfig;
+use super::{CompactionConfig, SessionMessageLoader};
 
 #[derive(Debug, Clone, Copy)]
 pub enum CompactionTrigger {
@@ -59,10 +60,22 @@ impl CompactionService {
     pub async fn prepare_compaction(
         &self,
         session_id: i64,
-        _context_window: u32,
+        context_window: u32,
         _trigger: CompactionTrigger,
     ) -> AgentResult<PreparedCompaction> {
         if !self.config.enabled {
+            return Ok(PreparedCompaction { summary_job: None });
+        }
+
+        if context_window == 0 {
+            return Ok(PreparedCompaction { summary_job: None });
+        }
+
+        let loader = SessionMessageLoader::new(Arc::clone(&self.persistence));
+        let llm_messages = loader.load_for_llm(session_id).await?;
+        let tokens_used: usize = llm_messages.iter().map(count_message_param_tokens).sum();
+        let context_usage_ratio = tokens_used as f32 / context_window as f32;
+        if context_usage_ratio < self.config.min_context_usage_ratio {
             return Ok(PreparedCompaction { summary_job: None });
         }
 
@@ -71,18 +84,11 @@ impl CompactionService {
             .messages()
             .list_by_session(session_id)
             .await?;
-        if messages.len() < self.config.min_messages as usize {
-            return Ok(PreparedCompaction { summary_job: None });
-        }
 
         let last_summary_idx = messages
             .iter()
             .rposition(|m| m.is_summary && matches!(m.status, MessageStatus::Completed));
         let start_idx = last_summary_idx.map(|idx| idx + 1).unwrap_or(0);
-        let unsummarized = messages.len().saturating_sub(start_idx);
-        if unsummarized <= self.config.max_unsummarized_messages as usize {
-            return Ok(PreparedCompaction { summary_job: None });
-        }
 
         let keep = self.config.keep_recent_messages as usize;
         let tail_start_idx = messages.len().saturating_sub(keep).max(start_idx);
@@ -100,13 +106,18 @@ impl CompactionService {
 
         let agent_type = messages
             .last()
-            .map(|m| m.agent_type.clone())
-            .unwrap_or_else(|| "coder".to_string());
+            .map(|m| m.agent_type.as_str())
+            .filter(|agent_type| !agent_type.trim().is_empty())
+            .ok_or_else(|| {
+                crate::agent::error::AgentError::Internal(format!(
+                    "Cannot create compaction summary for session {session_id} without a source agent_type"
+                ))
+            })?;
 
         let summary_message = self
             .persistence
             .messages()
-            .create_summary_message(session_id, &agent_type, summary_created_at)
+            .create_summary_message(session_id, agent_type, summary_created_at)
             .await?;
 
         Ok(PreparedCompaction {
@@ -133,6 +144,7 @@ impl CompactionService {
             model: model_id.to_string(),
             max_tokens: 1024,
             system: Some(system),
+            developer_context: None,
             messages: vec![MessageParam {
                 role: crate::llm::anthropic_types::MessageRole::User,
                 content: MessageContent::Text(prompt),

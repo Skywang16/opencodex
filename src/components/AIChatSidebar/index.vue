@@ -1,10 +1,9 @@
 <script setup lang="ts">
   import { useAISettingsStore } from '@/components/settings/components/AI'
-  import { useAgentTerminalStore } from '@/stores/agentTerminal'
   import { type ImageAttachment } from '@/stores/imageLightbox'
   import { useLayoutStore } from '@/stores/layout'
   import { useWorkspaceStore } from '@/stores/workspace'
-  import { computed, onMounted, ref, watch } from 'vue'
+  import { computed, onMounted, ref } from 'vue'
   import { useI18n } from 'vue-i18n'
   import { useAIChatStore } from './store'
 
@@ -14,18 +13,17 @@
   import ResizeHandle from './components/layout/ResizeHandle.vue'
   import MessageList from './components/messages/MessageList.vue'
   import RollbackConfirmDialog from './components/messages/RollbackConfirmDialog.vue'
+  import SessionExecutionTimeline from './components/messages/SessionExecutionTimeline.vue'
   import ToolConfirmationDialog from './components/messages/ToolConfirmationDialog.vue'
 
   const aiChatStore = useAIChatStore()
-  const agentTerminalStore = useAgentTerminalStore()
   const aiSettingsStore = useAISettingsStore()
   const layoutStore = useLayoutStore()
   const workspaceStore = useWorkspaceStore()
 
   const currentSessions = computed(() => {
     const path = aiChatStore.currentWorkspacePath
-    const node = workspaceStore.getNode(path)
-    return node?.sessions ?? []
+    return workspaceStore.getTopLevelSessions(path)
   })
 
   const { t } = useI18n()
@@ -72,7 +70,7 @@
   const handleRefreshSessions = async () => {
     const path = aiChatStore.currentWorkspacePath
     if (path) {
-      await workspaceStore.loadSessions(path)
+      await workspaceStore.loadSessionViews(path)
     }
   }
 
@@ -140,7 +138,7 @@
     if (result.success) {
       const path = aiChatStore.currentWorkspacePath
       if (path) {
-        await workspaceStore.loadSessions(path)
+        await workspaceStore.loadSessionViews(path)
       }
       if (result.restoreContent && result.restoreContent.trim().length > 0) {
         messageInput.value = result.restoreContent
@@ -152,7 +150,6 @@
 
   onMounted(async () => {
     await aiChatStore.initialize()
-    await agentTerminalStore.setupListeners()
 
     const savedModelId = layoutStore.selectedModelId
     if (savedModelId) {
@@ -163,16 +160,6 @@
 
     await handleModelChange(selectedModelId.value)
   })
-
-  watch(
-    () => aiChatStore.currentSession?.id ?? null,
-    async sessionId => {
-      if (typeof sessionId === 'number') {
-        await agentTerminalStore.loadTerminals(sessionId)
-      }
-    },
-    { immediate: true }
-  )
 </script>
 
 <template>
@@ -190,6 +177,7 @@
       <ChatHeader
         :sessions="currentSessions"
         :current-session-id="aiChatStore.currentSession?.id ?? null"
+        :selected-label="workspaceStore.selectedSession?.title || null"
         :is-loading="aiChatStore.isCurrentSessionSending"
         @select-session="handleSessionSelect"
         @create-new-session="handleCreateSession"
@@ -209,7 +197,12 @@
 
         <!-- Normal message list -->
         <template v-else>
+          <SessionExecutionTimeline
+            :session-id="aiChatStore.currentSession?.id ?? null"
+            scroll-container-id="sidebar-chat-message-list"
+          />
           <MessageList
+            dom-id="sidebar-chat-message-list"
             :messages="aiChatStore.messageList"
             :is-loading="aiChatStore.isCurrentSessionSending"
             :session-id="aiChatStore.currentSession?.id ?? null"

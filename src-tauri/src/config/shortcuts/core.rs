@@ -224,13 +224,14 @@ impl ShortcutManager {
             .into_iter()
             .filter_map(|(key_str, bindings)| {
                 if bindings.len() > 1 {
+                    let parts: Vec<&str> = key_str.split('+').collect();
+                    let key = parts.last()?;
                     Some(ConflictInfo {
                         key_combination: KeyCombination::new(
-                            key_str.split('+').next_back().unwrap_or("").to_string(),
-                            key_str
-                                .split('+')
-                                .take(key_str.split('+').count() - 1)
-                                .map(|s| s.to_string())
+                            (*key).to_string(),
+                            parts[..parts.len().saturating_sub(1)]
+                                .iter()
+                                .map(|part| (*part).to_string())
                                 .collect(),
                         ),
                         conflicting_bindings: bindings,

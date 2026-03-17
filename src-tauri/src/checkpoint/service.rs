@@ -257,7 +257,10 @@ impl CheckpointService {
         to_id: i64,
         workspace_path: &Path,
     ) -> CheckpointResult<Vec<FileDiff>> {
-        let checkpoint_id = from_id.unwrap_or(to_id);
+        let checkpoint_id = match from_id {
+            Some(checkpoint_id) => checkpoint_id,
+            None => to_id,
+        };
         self.diff_from_snapshots(checkpoint_id, workspace_path)
             .await
     }
@@ -348,22 +351,26 @@ impl CheckpointService {
             let abs_path = workspace_root.join(&relative_path);
 
             match snapshot.change_type {
-                FileChangeType::Added => {
-                    if fs::metadata(&abs_path).await.is_ok() {
+                FileChangeType::Added => match fs::metadata(&abs_path).await {
+                    Ok(_) => {
                         diffs.push(FileDiff {
                             file_path: relative_path,
                             change_type: FileChangeType::Added,
                             diff_content: None,
                         });
                     }
-                }
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => {
+                        return Err(CheckpointError::Io(err));
+                    }
+                },
                 FileChangeType::Modified => {
-                    let current = fs::read(&abs_path).await.unwrap_or_default();
+                    let current = fs::read(&abs_path).await.map_err(CheckpointError::Io)?;
                     let original = self
                         .blob_store
                         .get(&snapshot.blob_hash)
                         .await?
-                        .unwrap_or_default();
+                        .ok_or_else(|| CheckpointError::BlobNotFound(snapshot.blob_hash.clone()))?;
 
                     if current != original {
                         diffs.push(FileDiff {
@@ -373,15 +380,19 @@ impl CheckpointService {
                         });
                     }
                 }
-                FileChangeType::Deleted => {
-                    if fs::metadata(&abs_path).await.is_err() {
+                FileChangeType::Deleted => match fs::metadata(&abs_path).await {
+                    Ok(_) => {}
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                         diffs.push(FileDiff {
                             file_path: relative_path,
                             change_type: FileChangeType::Deleted,
                             diff_content: None,
                         });
                     }
-                }
+                    Err(err) => {
+                        return Err(CheckpointError::Io(err));
+                    }
+                },
             }
         }
 

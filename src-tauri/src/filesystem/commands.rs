@@ -31,16 +31,22 @@ pub async fn fs_read_dir(path: String) -> TauriApiResult<Vec<DirEntryExt>> {
 
     // Try to manually add current directory's .gitignore file
     let gitignore_path = root.join(".gitignore");
-    if gitignore_path.exists() {
-        let _ = gi_builder.add(&gitignore_path);
+    if gitignore_path.exists() && gi_builder.add(&gitignore_path).is_some() {
+        tracing::warn!(
+            "failed to add gitignore file while reading directory: {}",
+            gitignore_path.display()
+        );
     }
 
     // Search upward and add parent directories' .gitignore
     let mut parent = root.parent();
     while let Some(p) = parent {
         let parent_gitignore = p.join(".gitignore");
-        if parent_gitignore.exists() {
-            let _ = gi_builder.add(&parent_gitignore);
+        if parent_gitignore.exists() && gi_builder.add(&parent_gitignore).is_some() {
+            tracing::warn!(
+                "failed to add parent gitignore file while reading directory: {}",
+                parent_gitignore.display()
+            );
         }
         // Check if reached git repository root or filesystem root
         if p.join(".git").exists() || p.parent().is_none() {
@@ -50,8 +56,15 @@ pub async fn fs_read_dir(path: String) -> TauriApiResult<Vec<DirEntryExt>> {
     }
 
     let gitignore = match gi_builder.build() {
-        Ok(g) => g,
-        Err(_) => GitignoreBuilder::new(&root).build().unwrap(),
+        Ok(gitignore) => gitignore,
+        Err(err) => {
+            tracing::warn!(
+                "failed to build gitignore matcher for {}: {}",
+                root.display(),
+                err
+            );
+            return Ok(api_error!("common.operation_failed"));
+        }
     };
 
     let mut entries = Vec::new();
@@ -61,7 +74,7 @@ pub async fn fs_read_dir(path: String) -> TauriApiResult<Vec<DirEntryExt>> {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("Failed to read directory: {}", e);
-            return Ok(api_success!(entries));
+            return Ok(api_error!("common.operation_failed"));
         }
     };
 
@@ -78,12 +91,34 @@ pub async fn fs_read_dir(path: String) -> TauriApiResult<Vec<DirEntryExt>> {
         let file_name = entry.file_name();
 
         let name = file_name.to_string_lossy().to_string();
-        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-        let is_file = entry.file_type().map(|ft| ft.is_file()).unwrap_or(false);
-        let is_symlink = entry.file_type().map(|ft| ft.is_symlink()).unwrap_or(false);
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(err) => {
+                tracing::warn!(
+                    "failed to inspect directory entry type for {}: {}",
+                    file_path.display(),
+                    err
+                );
+                continue;
+            }
+        };
+        let is_dir = file_type.is_dir();
+        let is_file = file_type.is_file();
+        let is_symlink = file_type.is_symlink();
 
         // Check if ignored by gitignore (relative to root directory)
-        let relative_path = file_path.strip_prefix(&root).unwrap_or(&file_path);
+        let relative_path = match file_path.strip_prefix(&root) {
+            Ok(relative_path) => relative_path,
+            Err(err) => {
+                tracing::warn!(
+                    "failed to strip root prefix {} from {}: {}",
+                    root.display(),
+                    file_path.display(),
+                    err
+                );
+                continue;
+            }
+        };
         let is_ignored = gitignore.matched(relative_path, is_dir).is_ignore();
 
         entries.push(DirEntryExt {
@@ -157,7 +192,10 @@ pub(crate) async fn fs_list_directory(
                 return true;
             }
             // Only filter directories
-            let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+            let is_dir = match entry.file_type() {
+                Some(file_type) => file_type.is_dir(),
+                None => return true,
+            };
             if is_dir {
                 let name = entry.file_name().to_string_lossy();
                 if BUILTIN_SKIP_DIRS.contains(&name.as_ref()) {
@@ -182,11 +220,28 @@ pub(crate) async fn fs_list_directory(
             continue;
         }
         let p = entry.path();
-        let rel = p.strip_prefix(&root).unwrap_or(p);
-        let is_dir = entry
-            .file_type()
-            .map(|ft| ft.is_dir())
-            .unwrap_or_else(|| p.is_dir());
+        let rel = match p.strip_prefix(&root) {
+            Ok(relative_path) => relative_path,
+            Err(err) => {
+                tracing::warn!(
+                    "failed to strip root prefix {} from {}: {}",
+                    root.display(),
+                    p.display(),
+                    err
+                );
+                continue;
+            }
+        };
+        let is_dir = match entry.file_type() {
+            Some(file_type) => file_type.is_dir(),
+            None => match std::fs::metadata(p) {
+                Ok(metadata) => metadata.is_dir(),
+                Err(err) => {
+                    tracing::warn!("failed to inspect walked path {}: {}", p.display(), err);
+                    continue;
+                }
+            },
+        };
         let mut name = rel.to_string_lossy().to_string();
         if is_dir && !name.ends_with('/') {
             name.push('/');

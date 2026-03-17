@@ -87,12 +87,17 @@ impl PaneInfo {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[derive(Default)]
 pub struct MuxSessionConfig {
     pub shell_config: MuxShellConfig,
 }
 
 impl MuxSessionConfig {
+    pub fn with_default_shell() -> Result<Self, String> {
+        Ok(Self {
+            shell_config: MuxShellConfig::with_default_shell()?,
+        })
+    }
+
     pub fn with_shell(shell_config: MuxShellConfig) -> Self {
         Self { shell_config }
     }
@@ -107,25 +112,14 @@ pub struct MuxShellConfig {
     pub env: Option<HashMap<String, String>>,
 }
 
-impl Default for MuxShellConfig {
-    fn default() -> Self {
-        Self {
-            shell_info: ShellManager::terminal_get_default_shell(),
-            args: Vec::new(),
-            working_directory: None,
-            env: None,
-        }
-    }
-}
-
 impl MuxShellConfig {
-    pub fn with_default_shell() -> Self {
-        Self {
-            shell_info: ShellManager::terminal_get_default_shell(),
+    pub fn with_default_shell() -> Result<Self, String> {
+        Ok(Self {
+            shell_info: ShellManager::terminal_get_default_shell()?,
             args: Vec::new(),
             working_directory: None,
             env: None,
-        }
+        })
     }
 
     pub fn with_shell(shell_info: ShellInfo) -> Self {

@@ -22,12 +22,13 @@ pub use registry::{ToolExecutionStats, ToolRegistry};
 
 // Builtin tool type re-exports
 pub use builtin::{
-    GlobTool, GrepTool, ListFilesTool, MultiEditTool, ReadFileTool, ReadTerminalTool,
+    GlobTool, GrepTool, ListFilesTool, LspQueryTool, MultiEditTool, ReadFileTool, ReadTerminalTool,
     SemanticSearchTool, ShellTool, SyntaxDiagnosticsTool, TaskTool, TodoWriteTool, UnifiedEditTool,
     WebFetchTool, WebSearchTool, WriteFileTool,
 };
 
 use std::sync::Arc;
+use tracing::error;
 
 pub async fn create_tool_registry(
     chat_mode: &str,
@@ -36,6 +37,7 @@ pub async fn create_tool_registry(
     confirmations: Arc<ToolConfirmationManager>,
     extra_tools: Vec<Arc<dyn RunnableTool>>,
     vector_search_engine: Option<Arc<crate::vector_db::search::SemanticSearchEngine>>,
+    lsp_manager: Option<Arc<crate::lsp::LspManager>>,
     skill_manager: Option<Arc<crate::agent::skill::SkillManager>>,
 ) -> Arc<ToolRegistry> {
     let checker = Arc::new(crate::agent::permissions::PermissionChecker::new(
@@ -58,16 +60,14 @@ pub async fn create_tool_registry(
         is_chat,
         &availability_ctx,
         vector_search_engine,
+        lsp_manager,
         skill_manager,
     )
     .await;
 
     for tool in extra_tools {
         let name = tool.name().to_string();
-        registry
-            .register(&name, tool, is_chat, &availability_ctx)
-            .await
-            .ok();
+        register_tool(&registry, &name, tool, is_chat, &availability_ctx).await;
     }
 
     registry
@@ -78,167 +78,177 @@ async fn register_builtin_tools(
     is_chat_mode: bool,
     availability_ctx: &ToolAvailabilityContext,
     vector_search_engine: Option<Arc<crate::vector_db::search::SemanticSearchEngine>>,
+    lsp_manager: Option<Arc<crate::lsp::LspManager>>,
     skill_manager: Option<Arc<crate::agent::skill::SkillManager>>,
 ) {
     use std::sync::Arc;
 
-    registry
-        .register(
-            "task",
-            Arc::new(TaskTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
+    register_tool(
+        registry,
+        "task",
+        Arc::new(TaskTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
 
-    registry
-        .register(
-            "todowrite",
-            Arc::new(TodoWriteTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
+    register_tool(
+        registry,
+        "todowrite",
+        Arc::new(TodoWriteTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
 
-    registry
-        .register(
-            "web_fetch",
-            Arc::new(WebFetchTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
+    register_tool(
+        registry,
+        "web_fetch",
+        Arc::new(WebFetchTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
 
-    registry
-        .register(
-            "web_search",
-            Arc::new(WebSearchTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
+    register_tool(
+        registry,
+        "web_search",
+        Arc::new(WebSearchTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
 
-    registry
-        .register(
-            "read_file",
-            Arc::new(ReadFileTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
-    registry
-        .register(
-            "write_file",
-            Arc::new(WriteFileTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
-    registry
-        .register(
-            "edit_file",
-            Arc::new(UnifiedEditTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
-    registry
-        .register(
-            "multi_edit_file",
-            Arc::new(MultiEditTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
-    registry
-        .register(
-            "list_files",
-            Arc::new(ListFilesTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
+    register_tool(
+        registry,
+        "read_file",
+        Arc::new(ReadFileTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
+    register_tool(
+        registry,
+        "write_file",
+        Arc::new(WriteFileTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
+    register_tool(
+        registry,
+        "edit_file",
+        Arc::new(UnifiedEditTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
+    register_tool(
+        registry,
+        "multi_edit_file",
+        Arc::new(MultiEditTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
+    register_tool(
+        registry,
+        "list_files",
+        Arc::new(ListFilesTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
 
-    registry
-        .register(
-            "shell",
-            Arc::new(ShellTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
+    register_tool(
+        registry,
+        "shell",
+        Arc::new(ShellTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
 
     // Search tools
-    registry
-        .register(
-            "grep",
-            Arc::new(GrepTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
-    registry
-        .register(
-            "glob",
-            Arc::new(GlobTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
+    register_tool(
+        registry,
+        "grep",
+        Arc::new(GrepTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
+    register_tool(
+        registry,
+        "glob",
+        Arc::new(GlobTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
     if let Some(engine) = vector_search_engine {
-        registry
-            .register(
-                "semantic_search",
-                Arc::new(SemanticSearchTool::new(engine)),
-                is_chat_mode,
-                availability_ctx,
-            )
-            .await
-            .ok();
+        register_tool(
+            registry,
+            "semantic_search",
+            Arc::new(SemanticSearchTool::new(engine)),
+            is_chat_mode,
+            availability_ctx,
+        )
+        .await;
+    }
+    if let Some(manager) = lsp_manager {
+        register_tool(
+            registry,
+            "lsp_query",
+            Arc::new(LspQueryTool::new(manager)),
+            is_chat_mode,
+            availability_ctx,
+        )
+        .await;
     }
 
-    registry
-        .register(
-            "read_terminal",
-            Arc::new(ReadTerminalTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
+    register_tool(
+        registry,
+        "read_terminal",
+        Arc::new(ReadTerminalTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
 
-    registry
-        .register(
-            "syntax_diagnostics",
-            Arc::new(SyntaxDiagnosticsTool::new()),
-            is_chat_mode,
-            availability_ctx,
-        )
-        .await
-        .ok();
+    register_tool(
+        registry,
+        "syntax_diagnostics",
+        Arc::new(SyntaxDiagnosticsTool::new()),
+        is_chat_mode,
+        availability_ctx,
+    )
+    .await;
 
     // Register Skill tool
     if let Some(manager) = skill_manager {
-        registry
-            .register(
-                "skill",
-                Arc::new(crate::agent::skill::SkillTool::new(manager)),
-                is_chat_mode,
-                availability_ctx,
-            )
-            .await
-            .ok();
+        register_tool(
+            registry,
+            "skill",
+            Arc::new(crate::agent::skill::SkillTool::new(manager)),
+            is_chat_mode,
+            availability_ctx,
+        )
+        .await;
+    }
+}
+
+async fn register_tool(
+    registry: &ToolRegistry,
+    name: &str,
+    tool: Arc<dyn RunnableTool>,
+    is_chat_mode: bool,
+    availability_ctx: &ToolAvailabilityContext,
+) {
+    if let Err(err) = registry
+        .register(name, tool, is_chat_mode, availability_ctx)
+        .await
+    {
+        error!("failed to register tool '{name}': {err}");
     }
 }

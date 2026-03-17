@@ -3,6 +3,9 @@ use crate::utils::{ApiResponse, EmptyData, TauriApiResult};
 use crate::{api_error, api_success};
 use tracing::warn;
 
+const DEFAULT_COMMITS_LIMIT: u32 = 50;
+const DEFAULT_COMMITS_SKIP: u32 = 0;
+
 fn map_git_error<T>(e: crate::git::GitError) -> ApiResponse<T> {
     match e.code {
         crate::git::GitErrorCode::GitNotInstalled
@@ -45,8 +48,14 @@ pub async fn git_get_commits(
     limit: Option<u32>,
     skip: Option<u32>,
 ) -> TauriApiResult<Vec<crate::git::CommitInfo>> {
-    let limit = limit.unwrap_or(50);
-    let skip = skip.unwrap_or(0);
+    let limit = match limit {
+        Some(limit) => limit,
+        None => DEFAULT_COMMITS_LIMIT,
+    };
+    let skip = match skip {
+        Some(skip) => skip,
+        None => DEFAULT_COMMITS_SKIP,
+    };
     match GitService::get_commits(&path, limit, skip).await {
         Ok(commits) => Ok(api_success!(commits)),
         Err(e) => Ok(map_git_error(e)),
@@ -73,7 +82,10 @@ pub async fn git_get_diff(
 ) -> TauriApiResult<crate::git::DiffContent> {
     let result = match commit_hash {
         Some(hash) => GitService::get_commit_file_diff(&path, &hash, &file_path).await,
-        None => GitService::get_diff(&path, &file_path, staged.unwrap_or(false)).await,
+        None => {
+            let staged = staged.unwrap_or_default();
+            GitService::get_diff(&path, &file_path, staged).await
+        }
     };
 
     match result {

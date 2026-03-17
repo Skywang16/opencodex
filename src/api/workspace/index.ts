@@ -30,10 +30,37 @@ export interface WorkspaceRecord {
 export interface SessionRecord {
   id: number
   workspacePath: string
+  parentId?: number | null
   title?: string | null
   messageCount: number
   createdAt: number
   updatedAt: number
+}
+
+export interface ExecutionNodeRecord {
+  id: number
+  backingSessionId?: number | null
+  role: 'root' | 'fork' | 'branch'
+  profile: string
+  title: string
+  status: 'queued' | 'running' | 'completed' | 'error' | 'cancelled'
+  startedAt?: number | null
+  finishedAt?: number | null
+  children: ExecutionNodeRecord[]
+}
+
+export interface SessionViewRecord {
+  session: SessionRecord
+  timeline: SessionTimelineItemRecord[]
+  executionTree: ExecutionNodeRecord[]
+}
+
+export interface SessionTimelineItemRecord {
+  id: string
+  messageId: number
+  title: string
+  createdAt: number
+  status?: 'queued' | 'running' | 'completed' | 'error' | 'cancelled' | null
 }
 
 export interface RunActionRecord {
@@ -60,8 +87,8 @@ export class WorkspaceApi {
 
   // ===== Session operations =====
 
-  listSessions = async (path: string): Promise<SessionRecord[]> => {
-    return invoke<SessionRecord[]>('workspace_list_sessions', { path })
+  listSessionViews = async (path: string): Promise<SessionViewRecord[]> => {
+    return invoke<SessionViewRecord[]>('workspace_list_session_views', { path })
   }
 
   createSession = async (path: string, title?: string): Promise<SessionRecord> => {

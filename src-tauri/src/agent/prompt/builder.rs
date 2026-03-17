@@ -32,6 +32,14 @@ pub struct SystemPromptParts {
     pub user_system: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PromptLayers {
+    /// Core persona/instructions mapped to Responses API `instructions`.
+    pub instructions: String,
+    /// Supplemental developer-role context blocks emitted as individual input messages.
+    pub developer_context: Vec<String>,
+}
+
 /// Prompt builder
 pub struct PromptBuilder {
     loader: PromptLoader,
@@ -41,6 +49,68 @@ impl PromptBuilder {
     pub fn new(workspace_path: Option<String>) -> Self {
         Self {
             loader: PromptLoader::new(workspace_path),
+        }
+    }
+
+    fn primary_instructions(parts: &SystemPromptParts) -> Option<String> {
+        let primary = if let Some(agent_prompt) = parts.agent_prompt.clone() {
+            let body = strip_frontmatter(&agent_prompt);
+            if body.trim().is_empty() {
+                None
+            } else {
+                Some(body)
+            }
+        } else {
+            None
+        };
+
+        primary.or_else(|| {
+            parts
+                .model_profile
+                .clone()
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+        })
+    }
+
+    fn developer_context_sections(parts: &SystemPromptParts) -> Vec<String> {
+        let mut sections: Vec<String> = Vec::new();
+
+        if let Some(env_info) = parts.env_info.as_deref().map(str::trim) {
+            if !env_info.is_empty() {
+                sections.push(env_info.to_string());
+            }
+        }
+
+        if let Some(custom) = parts.custom_instructions.as_deref().map(str::trim) {
+            if !custom.is_empty() {
+                sections.push(format!("# Project Instructions\n\n{custom}"));
+            }
+        }
+
+        if let Some(user_sys) = parts.user_system.as_deref().map(str::trim) {
+            if !user_sys.is_empty() {
+                sections.push(user_sys.to_string());
+            }
+        }
+
+        if let Some(reminder) = parts.reminder.as_deref().map(str::trim) {
+            if !reminder.is_empty() {
+                if reminder.starts_with("<system-reminder>") {
+                    sections.push(reminder.to_string());
+                } else {
+                    sections.push(format!("<system-reminder>\n{reminder}\n</system-reminder>"));
+                }
+            }
+        }
+
+        sections
+    }
+
+    pub fn build_prompt_layers(&self, parts: SystemPromptParts) -> PromptLayers {
+        PromptLayers {
+            instructions: Self::primary_instructions(&parts).unwrap_or_default(),
+            developer_context: Self::developer_context_sections(&parts),
         }
     }
 
@@ -55,60 +125,12 @@ impl PromptBuilder {
     /// If the agent defines a custom prompt it is used as the sole primary
     /// system prompt; otherwise the model-family profile takes that role.
     pub async fn build_system_prompt(&mut self, parts: SystemPromptParts) -> String {
+        let layers = self.build_prompt_layers(parts);
         let mut sections: Vec<String> = Vec::new();
-
-        // Primary system prompt: agent_prompt wins over model_profile
-        let primary = if let Some(agent_prompt) = parts.agent_prompt {
-            let body = strip_frontmatter(&agent_prompt);
-            if body.trim().is_empty() {
-                None
-            } else {
-                Some(body)
-            }
-        } else {
-            None
-        };
-
-        let primary = primary.or_else(|| {
-            parts
-                .model_profile
-                .map(|p| p.trim().to_string())
-                .filter(|p| !p.is_empty())
-        });
-
-        if let Some(p) = primary {
-            sections.push(p);
+        if !layers.instructions.trim().is_empty() {
+            sections.push(layers.instructions);
         }
-
-        // Environment information
-        if let Some(env_info) = parts.env_info {
-            sections.push(env_info);
-        }
-
-        // Project instructions (AGENTS.md / CLAUDE.md / user custom rules)
-        if let Some(custom) = parts.custom_instructions {
-            if !custom.trim().is_empty() {
-                sections.push(format!("# Project Instructions\n\n{}", custom.trim()));
-            }
-        }
-
-        // Per-user system message
-        if let Some(user_sys) = parts.user_system {
-            if !user_sys.trim().is_empty() {
-                sections.push(user_sys.trim().to_string());
-            }
-        }
-
-        // Runtime reminder (placed last, highest priority override)
-        if let Some(reminder) = parts.reminder {
-            let trimmed = reminder.trim();
-            if trimmed.starts_with("<system-reminder>") {
-                sections.push(trimmed.to_string());
-            } else {
-                sections.push(format!("<system-reminder>\n{trimmed}\n</system-reminder>"));
-            }
-        }
-
+        sections.extend(layers.developer_context);
         sections.join("\n\n").trim().to_string()
     }
 
@@ -230,5 +252,29 @@ This is the body."#;
 
         let result = PromptBuilder::render_template(template, &vars);
         assert_eq!(result, "Hello Alice, you have 5 messages.");
+    }
+
+    #[test]
+    fn test_build_prompt_layers() {
+        let builder = PromptBuilder::new(None);
+        let layers = builder.build_prompt_layers(SystemPromptParts {
+            agent_prompt: Some("---\nname: coder\n---\nCore persona".to_string()),
+            model_profile: Some("fallback".to_string()),
+            env_info: Some("ENV".to_string()),
+            reminder: Some("REMINDER".to_string()),
+            custom_instructions: Some("RULES".to_string()),
+            user_system: Some("USER_SYSTEM".to_string()),
+        });
+
+        assert_eq!(layers.instructions, "Core persona");
+        assert_eq!(
+            layers.developer_context,
+            vec![
+                "ENV".to_string(),
+                "# Project Instructions\n\nRULES".to_string(),
+                "USER_SYSTEM".to_string(),
+                "<system-reminder>\nREMINDER\n</system-reminder>".to_string(),
+            ]
+        );
     }
 }

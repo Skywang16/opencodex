@@ -2,6 +2,7 @@ use super::types::NodeVersionManager;
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
+use tracing::warn;
 
 // Detect the Node version manager used by the current system
 pub fn detect_version_manager() -> NodeVersionManager {
@@ -24,78 +25,113 @@ pub fn detect_version_manager() -> NodeVersionManager {
 }
 
 fn check_volta() -> bool {
-    if let Ok(volta_home) = env::var("VOLTA_HOME") {
-        let volta_path = PathBuf::from(volta_home);
-        if volta_path.exists() {
-            return true;
+    match env::var("VOLTA_HOME") {
+        Ok(volta_home) => {
+            let volta_path = PathBuf::from(volta_home);
+            if volta_path.exists() {
+                return true;
+            }
         }
+        Err(env::VarError::NotPresent) => {}
+        Err(err) => warn!("failed to read VOLTA_HOME: {}", err),
     }
 
-    if let Ok(home) = env::var("HOME") {
-        let volta_path = PathBuf::from(home).join(".volta");
-        if volta_path.exists() {
-            return true;
+    match env::var("HOME") {
+        Ok(home) => {
+            let volta_path = PathBuf::from(home).join(".volta");
+            if volta_path.exists() {
+                return true;
+            }
         }
+        Err(env::VarError::NotPresent) => {}
+        Err(err) => warn!("failed to read HOME while checking volta: {}", err),
     }
 
     false
 }
 
 fn check_fnm() -> bool {
-    if let Ok(fnm_dir) = env::var("FNM_DIR") {
-        let fnm_path = PathBuf::from(fnm_dir);
-        if fnm_path.exists() {
-            return true;
+    match env::var("FNM_DIR") {
+        Ok(fnm_dir) => {
+            let fnm_path = PathBuf::from(fnm_dir);
+            if fnm_path.exists() {
+                return true;
+            }
+        }
+        Err(env::VarError::NotPresent) => {}
+        Err(err) => warn!("failed to read FNM_DIR: {}", err),
+    }
+
+    match env::var("HOME") {
+        Ok(home) => {
+            let fnm_path = PathBuf::from(home).join(".local/share/fnm");
+            if fnm_path.exists() {
+                return true;
+            }
+        }
+        Err(env::VarError::NotPresent) => {}
+        Err(err) => warn!("failed to read HOME while checking fnm: {}", err),
+    }
+
+    match Command::new("fnm").arg("--version").output() {
+        Ok(output) => output.status.success(),
+        Err(err) => {
+            warn!("failed to execute fnm --version: {}", err);
+            false
         }
     }
-
-    if let Ok(home) = env::var("HOME") {
-        let fnm_path = PathBuf::from(home).join(".local/share/fnm");
-        if fnm_path.exists() {
-            return true;
-        }
-    }
-
-    if let Ok(output) = Command::new("fnm").arg("--version").output() {
-        return output.status.success();
-    }
-
-    false
 }
 
 fn check_nvm() -> bool {
-    if let Ok(nvm_dir) = env::var("NVM_DIR") {
-        let nvm_path = PathBuf::from(nvm_dir);
-        if nvm_path.exists() {
-            return true;
+    match env::var("NVM_DIR") {
+        Ok(nvm_dir) => {
+            let nvm_path = PathBuf::from(nvm_dir);
+            if nvm_path.exists() {
+                return true;
+            }
         }
+        Err(env::VarError::NotPresent) => {}
+        Err(err) => warn!("failed to read NVM_DIR: {}", err),
     }
 
-    if let Ok(home) = env::var("HOME") {
-        let nvm_path = PathBuf::from(home).join(".nvm");
-        if nvm_path.exists() {
-            return true;
+    match env::var("HOME") {
+        Ok(home) => {
+            let nvm_path = PathBuf::from(home).join(".nvm");
+            if nvm_path.exists() {
+                return true;
+            }
         }
+        Err(env::VarError::NotPresent) => {}
+        Err(err) => warn!("failed to read HOME while checking nvm: {}", err),
     }
 
     false
 }
 
 fn check_n() -> bool {
-    if let Ok(output) = Command::new("n").arg("--version").output() {
-        return output.status.success();
+    match Command::new("n").arg("--version").output() {
+        Ok(output) => output.status.success(),
+        Err(err) => {
+            warn!("failed to execute n --version: {}", err);
+            false
+        }
     }
-    false
 }
 
 fn check_asdf() -> bool {
-    if let Ok(output) = Command::new("asdf").arg("plugin").arg("list").output() {
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            return stdout.contains("nodejs");
+    match Command::new("asdf").arg("plugin").arg("list").output() {
+        Ok(output) => {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                return stdout.contains("nodejs");
+            }
+            false
+        }
+        Err(err) => {
+            warn!("failed to execute asdf plugin list: {}", err);
+            false
         }
     }
-    false
 }
 
 // Get currently active Node version
@@ -122,32 +158,41 @@ pub fn get_current_version(cwd: Option<&str>) -> Result<Option<String>, String> 
             }
             cmd.arg(shell_arg).arg(&command).output()
         };
-        if let Ok(output) = output_result {
-            if output.status.success() {
+        match output_result {
+            Ok(output) if output.status.success() => {
                 let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !version.is_empty() {
                     let cleaned = version.trim_start_matches('v');
                     return Ok(Some(format!("v{cleaned}")));
                 }
             }
+            Ok(output) => warn!(
+                "failed to get node version from cwd '{}': command exited with status {}",
+                dir, output.status
+            ),
+            Err(err) => warn!("failed to get node version from cwd '{}': {}", dir, err),
         }
     }
 
-    if let Ok(output) = Command::new("which").arg("node").output() {
-        if output.status.success() {
+    match Command::new("which").arg("node").output() {
+        Ok(output) if output.status.success() => {
             let path = String::from_utf8_lossy(&output.stdout);
             if let Some(version) = parse_node_path(&path) {
                 return Ok(Some(version));
             }
         }
+        Ok(_) => {}
+        Err(err) => warn!("failed to execute which node: {}", err),
     }
 
-    if let Ok(output) = Command::new("node").arg("--version").output() {
-        if output.status.success() {
+    match Command::new("node").arg("--version").output() {
+        Ok(output) if output.status.success() => {
             let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let cleaned = version.trim_start_matches('v');
             return Ok(Some(format!("v{cleaned}")));
         }
+        Ok(_) => {}
+        Err(err) => warn!("failed to execute node --version: {}", err),
     }
 
     Ok(None)
@@ -209,9 +254,7 @@ fn read_versions_from_dir(path: PathBuf, add_v_prefix: bool) -> Result<Vec<Strin
 
 // Get nvm version list
 fn get_nvm_versions() -> Result<Vec<String>, String> {
-    let nvm_dir = env::var("NVM_DIR")
-        .or_else(|_| env::var("HOME").map(|h| format!("{h}/.nvm")))
-        .map_err(|_| "Cannot determine NVM_DIR".to_string())?;
+    let nvm_dir = env_path_or_home_suffix("NVM_DIR", ".nvm")?;
 
     let versions_path = PathBuf::from(nvm_dir).join("versions/node");
     // nvm directories usually already have v prefix, but for unified frontend display, enable v prefix normalization here
@@ -220,21 +263,19 @@ fn get_nvm_versions() -> Result<Vec<String>, String> {
 
 // Semantic version comparison
 fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
-    let a_nums: Vec<u32> = a
-        .trim_start_matches('v')
-        .split('.')
-        .filter_map(|s| s.parse().ok())
-        .collect();
-    let b_nums: Vec<u32> = b
-        .trim_start_matches('v')
-        .split('.')
-        .filter_map(|s| s.parse().ok())
-        .collect();
+    let a_nums = parse_semver_components(a);
+    let b_nums = parse_semver_components(b);
 
     for i in 0..a_nums.len().max(b_nums.len()) {
-        let a_num = a_nums.get(i).unwrap_or(&0);
-        let b_num = b_nums.get(i).unwrap_or(&0);
-        match a_num.cmp(b_num) {
+        let a_num = match a_nums.get(i) {
+            Some(value) => *value,
+            None => 0,
+        };
+        let b_num = match b_nums.get(i) {
+            Some(value) => *value,
+            None => 0,
+        };
+        match a_num.cmp(&b_num) {
             std::cmp::Ordering::Equal => continue,
             other => return other,
         }
@@ -245,9 +286,7 @@ fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
 
 // Get fnm version list
 fn get_fnm_versions() -> Result<Vec<String>, String> {
-    let fnm_dir = env::var("FNM_DIR")
-        .or_else(|_| env::var("HOME").map(|h| format!("{h}/.local/share/fnm")))
-        .map_err(|_| "Cannot determine FNM_DIR".to_string())?;
+    let fnm_dir = env_path_or_home_suffix("FNM_DIR", ".local/share/fnm")?;
 
     let versions_path = PathBuf::from(fnm_dir).join("node-versions");
     // Use version strings with v prefix uniformly
@@ -256,9 +295,7 @@ fn get_fnm_versions() -> Result<Vec<String>, String> {
 
 // Get volta version list
 fn get_volta_versions() -> Result<Vec<String>, String> {
-    let volta_home = env::var("VOLTA_HOME")
-        .or_else(|_| env::var("HOME").map(|h| format!("{h}/.volta")))
-        .map_err(|_| "Cannot determine VOLTA_HOME".to_string())?;
+    let volta_home = env_path_or_home_suffix("VOLTA_HOME", ".volta")?;
 
     let inventory_path = PathBuf::from(volta_home).join("tools/inventory/node");
     read_versions_from_dir(inventory_path, true)
@@ -266,7 +303,14 @@ fn get_volta_versions() -> Result<Vec<String>, String> {
 
 // Get n version list
 fn get_n_versions() -> Result<Vec<String>, String> {
-    let n_prefix = env::var("N_PREFIX").unwrap_or_else(|_| "/usr/local".to_string());
+    let n_prefix = match env::var("N_PREFIX") {
+        Ok(path) => path,
+        Err(env::VarError::NotPresent) => "/usr/local".to_string(),
+        Err(err) => {
+            warn!("failed to read N_PREFIX: {}", err);
+            "/usr/local".to_string()
+        }
+    };
 
     let versions_path = PathBuf::from(n_prefix).join("n/versions/node");
     read_versions_from_dir(versions_path, true)
@@ -274,10 +318,39 @@ fn get_n_versions() -> Result<Vec<String>, String> {
 
 // Get asdf version list
 fn get_asdf_versions() -> Result<Vec<String>, String> {
-    let asdf_dir = env::var("ASDF_DATA_DIR")
-        .or_else(|_| env::var("HOME").map(|h| format!("{h}/.asdf")))
-        .map_err(|_| "Cannot determine ASDF_DATA_DIR".to_string())?;
+    let asdf_dir = env_path_or_home_suffix("ASDF_DATA_DIR", ".asdf")?;
 
     let versions_path = PathBuf::from(asdf_dir).join("installs/nodejs");
     read_versions_from_dir(versions_path, true)
+}
+
+fn env_path_or_home_suffix(var_name: &str, home_suffix: &str) -> Result<String, String> {
+    match env::var(var_name) {
+        Ok(value) => Ok(value),
+        Err(env::VarError::NotPresent) => match env::var("HOME") {
+            Ok(home) => Ok(format!("{home}/{home_suffix}")),
+            Err(env::VarError::NotPresent) => Err(format!("Cannot determine {var_name}")),
+            Err(err) => {
+                warn!("failed to read HOME while resolving {}: {}", var_name, err);
+                Err(format!("Cannot determine {var_name}"))
+            }
+        },
+        Err(err) => {
+            warn!("failed to read {}: {}", var_name, err);
+            Err(format!("Cannot determine {var_name}"))
+        }
+    }
+}
+
+fn parse_semver_components(version: &str) -> Vec<u32> {
+    let mut components = Vec::new();
+
+    for segment in version.trim_start_matches('v').split('.') {
+        match segment.parse::<u32>() {
+            Ok(number) => components.push(number),
+            Err(err) => warn!("failed to parse semver segment '{}': {}", segment, err),
+        }
+    }
+
+    components
 }

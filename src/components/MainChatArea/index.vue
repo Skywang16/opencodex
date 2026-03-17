@@ -5,7 +5,6 @@
    */
   import { useAIChatStore } from '@/components/AIChatSidebar/store'
   import { useAISettingsStore } from '@/components/settings/components/AI'
-  import { useAgentTerminalStore } from '@/stores/agentTerminal'
   import { useGitStore } from '@/stores/git'
   import { useLayoutStore } from '@/stores/layout'
   import { useRunActionsStore, type RunActionRecord } from '@/stores/runActions'
@@ -22,6 +21,7 @@
   import ImageLightbox from '@/components/AIChatSidebar/components/input/ImageLightbox.vue'
   import MessageList from '@/components/AIChatSidebar/components/messages/MessageList.vue'
   import RollbackConfirmDialog from '@/components/AIChatSidebar/components/messages/RollbackConfirmDialog.vue'
+  import SessionExecutionTimeline from '@/components/AIChatSidebar/components/messages/SessionExecutionTimeline.vue'
   import ToolConfirmationDialog from '@/components/AIChatSidebar/components/messages/ToolConfirmationDialog.vue'
   import AddActionDialog from './AddActionDialog.vue'
   import AnimatedNumber from './AnimatedNumber.vue'
@@ -34,7 +34,6 @@
   defineProps<Props>()
 
   const aiChatStore = useAIChatStore()
-  const agentTerminalStore = useAgentTerminalStore()
   const aiSettingsStore = useAISettingsStore()
   const workspaceStore = useWorkspaceStore()
   const gitStore = useGitStore()
@@ -222,7 +221,7 @@
     if (result.success) {
       const path = currentWorkspacePath.value
       if (path) {
-        await workspaceStore.loadSessions(path)
+        await workspaceStore.loadSessionViews(path)
       }
       if (result.restoreContent && result.restoreContent.trim().length > 0) {
         messageInput.value = result.restoreContent
@@ -234,7 +233,6 @@
 
   onMounted(async () => {
     await aiChatStore.initialize()
-    await agentTerminalStore.setupListeners()
 
     const savedModelId = layoutStore.selectedModelId
     if (savedModelId) {
@@ -248,16 +246,6 @@
     // Refresh Git status
     await gitStore.refreshStatus()
   })
-
-  watch(
-    () => currentSession.value?.id ?? null,
-    async sessionId => {
-      if (typeof sessionId === 'number') {
-        await agentTerminalStore.loadTerminals(sessionId)
-      }
-    },
-    { immediate: true }
-  )
 
   // Watch workspace path changes, refresh Git status
   watch(currentWorkspacePath, async () => {
@@ -402,7 +390,9 @@
 
     <!-- Messages Area -->
     <div class="messages-area">
+      <SessionExecutionTimeline :session-id="currentSession?.id ?? null" scroll-container-id="main-chat-message-list" />
       <MessageList
+        dom-id="main-chat-message-list"
         :messages="messageList"
         :is-loading="isCurrentSessionSending"
         :session-id="currentSession?.id ?? null"
@@ -440,6 +430,12 @@
     flex-direction: column;
     height: 100%;
     background: var(--bg-100);
+  }
+
+  .messages-area {
+    position: relative;
+    flex: 1;
+    min-height: 0;
   }
 
   .chat-header {

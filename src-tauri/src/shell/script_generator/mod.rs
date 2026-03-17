@@ -15,7 +15,7 @@ impl ShellType {
         let program_name = std::path::Path::new(program)
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or(program)
+            .map_or_else(|| program.to_string(), ToString::to_string)
             .to_lowercase();
 
         match program_name.as_str() {

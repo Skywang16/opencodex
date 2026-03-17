@@ -75,6 +75,8 @@
     "personality_description": "Does not apply to current model",
     "plan_mode": "Plan mode",
     "plan_mode_description": "Turn plan mode on",
+    "orchestrate_mode": "Orchestrate mode",
+    "orchestrate_mode_description": "Coordinate parallel child-agent execution for explored tasks",
     "status": "Status",
     "status_description": "Show thread id, context usage, and rate limits",
     "skill_creator": "Skill Creator",
@@ -158,6 +160,29 @@
   "ai": {
     "select_model": "Select AI model"
   },
+  "lsp": {
+    "title": "Language Servers",
+    "description": "LSP powers semantic navigation, references, hover details, and richer diagnostics for the agent.",
+    "status": {
+      "ready": "Ready",
+      "starting": "Starting",
+      "offline": "Offline"
+    },
+    "summary": {
+      "ready": "Ready Servers",
+      "detected": "Visible Servers",
+      "workspace": "Workspace",
+      "no_workspace": "No workspace selected"
+    },
+    "fields": {
+      "documents": "Open Documents",
+      "diagnostics": "Diagnostic Files"
+    },
+    "empty": {
+      "title": "No LSP servers active",
+      "description": "Language servers start automatically when needed."
+    }
+  },
   "ai_model": {
     "add_title": "Add AI Model",
     "edit_title": "Edit AI Model",
@@ -192,8 +217,6 @@
     "api_key_placeholder": "Enter your API Key",
     "max_tokens": "Max Tokens",
     "max_tokens_placeholder": "4096",
-    "use_custom_base_url": "Use Custom Base URL",
-    "use_custom_model": "Custom Model ID",
     "responses_api": "Responses API Format",
     "reasoning_model": "Reasoning",
     "add_model_hint": "Add a model to start using AI features",
@@ -412,7 +435,8 @@
     "delete_workspace": "Delete Workspace",
     "delete_workspace_confirm": "Are you sure you want to delete this workspace?",
     "delete_session": "Delete Thread",
-    "delete_session_confirm": "Are you sure you want to delete this session?"
+    "delete_session_confirm": "Are you sure you want to delete this session?",
+    "just_now": "just now"
   },
   "skills_page": {
     "title": "Skills",

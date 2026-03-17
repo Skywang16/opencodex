@@ -29,9 +29,10 @@ impl<'a> AppPreferences<'a> {
             .fetch_optional(self.pool())
             .await?;
 
-        Ok(row
-            .and_then(|r| r.try_get::<Option<String>, _>("value").ok())
-            .flatten())
+        row.map(|row| row.try_get::<Option<String>, _>("value"))
+            .transpose()
+            .map_err(Into::into)
+            .map(Option::flatten)
     }
 
     /// Batch get values for multiple keys
@@ -40,10 +41,7 @@ impl<'a> AppPreferences<'a> {
             return Ok(HashMap::new());
         }
         let placeholders = keys.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let query = format!(
-            "SELECT key, value FROM app_preferences WHERE key IN ({})",
-            placeholders
-        );
+        let query = format!("SELECT key, value FROM app_preferences WHERE key IN ({placeholders})");
         let mut q = sqlx::query(&query);
         for key in keys {
             q = q.bind(*key);
@@ -51,8 +49,8 @@ impl<'a> AppPreferences<'a> {
         let rows = q.fetch_all(self.pool()).await?;
         let mut result = HashMap::new();
         for row in rows {
-            let k: String = row.try_get("key").unwrap_or_default();
-            let v: Option<String> = row.try_get("value").unwrap_or(None);
+            let k: String = row.try_get("key")?;
+            let v: Option<String> = row.try_get("value")?;
             if let Some(v) = v {
                 result.insert(k, v);
             }

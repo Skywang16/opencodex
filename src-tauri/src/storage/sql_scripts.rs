@@ -178,13 +178,12 @@ fn strip_line(line: &str, in_block_comment: &mut bool) -> Option<String> {
 }
 
 fn parse_order(filename: &str) -> SqlScriptResult<u32> {
-    let digits: String = filename
-        .split(['_', '-'])
-        .next()
-        .unwrap_or_default()
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
+    let Some(prefix) = filename.split(['_', '-']).next() else {
+        return Err(SqlScriptError::MissingOrder {
+            filename: filename.to_string(),
+        });
+    };
+    let digits: String = prefix.chars().take_while(|c| c.is_ascii_digit()).collect();
     if digits.is_empty() {
         return Err(SqlScriptError::MissingOrder {
             filename: filename.to_string(),

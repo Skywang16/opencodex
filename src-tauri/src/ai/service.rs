@@ -1,6 +1,6 @@
 use crate::ai::error::{AIServiceError, AIServiceResult};
 use crate::ai::types::{AIModelConfig, AIProvider, ModelType};
-use crate::storage::repositories::{AIModels, AuthType, OAuthConfig};
+use crate::storage::repositories::{AIModels, AIModelsConfig, AuthType, OAuthConfig};
 use crate::storage::DatabaseManager;
 use chrono::Utc;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
@@ -28,7 +28,6 @@ struct AIModelUpdatePayload {
     model_type: Option<ModelType>,
     oauth_config: Option<Option<OAuthConfig>>,
     options: Option<Value>,
-    use_custom_base_url: Option<bool>,
 }
 
 struct ProviderHttpRequest {
@@ -63,7 +62,7 @@ impl AIService {
             })
     }
 
-    pub async fn add_model(&self, mut config: AIModelConfig) -> AIServiceResult<()> {
+    pub async fn add_model(&self, config: AIModelConfig) -> AIServiceResult<()> {
         let repo = AIModels::new(&self.database);
 
         if config.auth_type == AuthType::ApiKey {
@@ -113,6 +112,23 @@ impl AIService {
             })
     }
 
+    pub async fn get_models_config(&self) -> AIServiceResult<AIModelsConfig> {
+        AIModels::new(&self.database)
+            .get_config()
+            .await
+            .map_err(|err| AIServiceError::Repository {
+                operation: "ai_models.get_config",
+                source: err,
+            })
+    }
+
+    pub fn get_models_config_path(&self) -> String {
+        AIModels::new(&self.database)
+            .config_path()
+            .display()
+            .to_string()
+    }
+
     pub async fn update_model(&self, model_id: &str, updates: Value) -> AIServiceResult<()> {
         let update_payload: AIModelUpdatePayload =
             serde_json::from_value(updates).map_err(AIServiceError::InvalidUpdatePayload)?;
@@ -156,9 +172,6 @@ impl AIService {
         if let Some(options) = update_payload.options {
             existing.options = Some(options);
         }
-        if let Some(use_custom_base_url) = update_payload.use_custom_base_url {
-            existing.use_custom_base_url = Some(use_custom_base_url);
-        }
 
         // Keep authentication data consistent when auth mode changes.
         match existing.auth_type {
@@ -172,12 +185,11 @@ impl AIService {
 
         existing.updated_at = Utc::now();
 
-        if existing
-            .display_name
-            .as_ref()
-            .map(|s| s.trim().is_empty())
-            .unwrap_or(true)
-        {
+        let display_name_empty = match existing.display_name.as_ref() {
+            Some(display_name) => display_name.trim().is_empty(),
+            None => true,
+        };
+        if display_name_empty {
             return Err(AIServiceError::Configuration {
                 message: "display_name_empty".to_string(),
             });
@@ -399,10 +411,13 @@ impl AIService {
 
         // Authentication failure: 401/403 - this is a clear error and should not be tolerated
         if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unauthorized".to_string());
+            let error_text = match response.text().await {
+                Ok(text) => text,
+                Err(err) => {
+                    warn!("Failed to read unauthorized response body: {}", err);
+                    "Unauthorized".to_string()
+                }
+            };
             warn!(
                 "{} authentication failed: {}",
                 request.provider_label, status
@@ -422,10 +437,13 @@ impl AIService {
         }
 
         // Other error status codes
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "(failed to read response body)".to_string());
+        let error_text = match response.text().await {
+            Ok(text) => text,
+            Err(err) => {
+                warn!("Failed to read provider error response body: {}", err);
+                "(failed to read response body)".to_string()
+            }
+        };
         let error_msg = format!(
             "{} API error: {} - {}",
             request.provider_label, status, error_text
@@ -453,11 +471,17 @@ impl AIService {
 }
 
 fn normalize_url(url: Option<&str>) -> String {
-    url.unwrap_or_default().trim().trim_end_matches('/').to_string()
+    match url {
+        Some(url) => url.trim().trim_end_matches('/').to_string(),
+        None => String::new(),
+    }
 }
 
 fn normalize_key(key: Option<&str>) -> String {
-    key.unwrap_or_default().trim().to_string()
+    match key {
+        Some(key) => key.trim().to_string(),
+        None => String::new(),
+    }
 }
 
 fn header_map(entries: &[(&'static str, String)]) -> AIServiceResult<HeaderMap> {

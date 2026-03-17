@@ -72,6 +72,7 @@ tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = { version = "0.7", features = ["io"] }
 async-stream = "0.3"
 tiktoken-rs = "0.5"
+lsp-types = "0.97"
 
 base64 = "0.22"
 bincode = "1.3"

@@ -51,11 +51,16 @@ impl RunnableTool for McpToolAdapter {
         let res = self.client.call_tool(&self.tool_def.name, args).await;
         match res {
             Ok(call) => {
+                let serialized_content = match serde_json::to_string(&call.content) {
+                    Ok(content) => content,
+                    Err(err) => {
+                        tracing::warn!("Failed to serialize MCP tool content: {}", err);
+                        format!("<failed to serialize MCP tool content: {err}>")
+                    }
+                };
                 if call.is_error {
                     Ok(ToolResult {
-                        content: vec![ToolResultContent::Error(
-                            serde_json::to_string(&call.content).unwrap_or_default(),
-                        )],
+                        content: vec![ToolResultContent::Error(serialized_content.clone())],
                         status: ToolResultStatus::Error,
                         cancel_reason: None,
                         execution_time_ms: None,
@@ -63,9 +68,7 @@ impl RunnableTool for McpToolAdapter {
                     })
                 } else {
                     Ok(ToolResult {
-                        content: vec![ToolResultContent::Success(
-                            serde_json::to_string(&call.content).unwrap_or_default(),
-                        )],
+                        content: vec![ToolResultContent::Success(serialized_content)],
                         status: ToolResultStatus::Success,
                         cancel_reason: None,
                         execution_time_ms: None,

@@ -145,7 +145,13 @@ impl CommandInfo {
     /// Get command execution duration
     pub fn duration(&self) -> Option<std::time::Duration> {
         if let Some(end_time) = self.end_time {
-            end_time.duration_since(self.start_time).ok()
+            match end_time.duration_since(self.start_time) {
+                Ok(duration) => Some(duration),
+                Err(err) => {
+                    tracing::warn!("terminal command end_time precedes start_time: {}", err);
+                    None
+                }
+            }
         } else {
             None
         }

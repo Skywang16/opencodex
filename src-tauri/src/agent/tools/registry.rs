@@ -17,6 +17,7 @@ use super::r#trait::{
 use crate::agent::common::truncate_chars;
 use crate::agent::core::context::TaskContext;
 use crate::agent::error::{ToolExecutorError, ToolExecutorResult};
+use crate::agent::tools::builtin::file_utils::{ensure_absolute, normalize_path};
 use crate::agent::types::TaskEvent;
 use crate::agent::{
     permissions::PermissionChecker, permissions::PermissionDecision, permissions::ToolAction,
@@ -93,7 +94,7 @@ pub struct ToolRegistry {
 
 /// Global (per-process) confirmation queue/state.
 ///
-/// Multiple ToolRegistry instances exist in multi-agent/subtask mode; the UI only supports one
+/// Multiple ToolRegistry instances exist in multi-agent/task-execution mode; the UI only supports one
 /// confirmation dialog at a time, so confirmation state must be shared to avoid deadlocks.
 pub struct ToolConfirmationManager {
     pending_confirmations: DashMap<String, PendingConfirmation>,
@@ -165,13 +166,22 @@ impl ToolRegistry {
         let always_patterns = pending.always_patterns.clone();
 
         let ok = pending.tx.send(decision).is_ok();
+        if !ok {
+            warn!(
+                "Failed to deliver tool confirmation decision for request '{}'",
+                request_id
+            );
+        }
 
         match decision {
             ToolConfirmationDecision::AllowAlways => {
                 let db = context.session().repositories();
-                let _ =
+                if let Err(err) =
                     persist_approval_rules(db.as_ref(), &workspace, &permission, &always_patterns)
-                        .await;
+                        .await
+                {
+                    warn!("Failed to persist tool approval rules: {}", err);
+                }
                 cascade_approvals(
                     db.as_ref(),
                     &workspace,
@@ -243,7 +253,16 @@ impl ToolRegistry {
 
         for id in to_resolve {
             if let Some((_, pending)) = self.confirmations.pending_confirmations.remove(&id) {
-                let _ = pending.tx.send(ToolConfirmationDecision::AllowOnce);
+                if pending
+                    .tx
+                    .send(ToolConfirmationDecision::AllowOnce)
+                    .is_err()
+                {
+                    warn!(
+                        "Failed to cascade allow-once tool confirmation for request '{}'",
+                        id
+                    );
+                }
             }
         }
     }
@@ -304,7 +323,12 @@ impl ToolRegistry {
         decision: ToolConfirmationDecision,
     ) {
         if let Some((_, pending)) = self.confirmations.pending_confirmations.remove(request_id) {
-            let _ = pending.tx.send(decision);
+            if pending.tx.send(decision).is_err() {
+                warn!(
+                    "Failed to deliver dropped tool confirmation for request '{}'",
+                    request_id
+                );
+            }
         }
         let mut state = self.confirmations.confirmation_state.lock().await;
         if state.active_request_id.as_deref() == Some(request_id) {
@@ -460,14 +484,13 @@ impl ToolRegistry {
         };
 
         let action = build_tool_action(&resolved, &metadata, context, &args);
-        let (settings_decision, settings_matched) = self
-            .settings_permissions
-            .as_ref()
-            .map(|checker| {
+        let (settings_decision, settings_matched) =
+            if let Some(checker) = self.settings_permissions.as_ref() {
                 let (decision, matched) = checker.check_with_match(&action);
                 (Some(decision), matched)
-            })
-            .unwrap_or((None, false));
+            } else {
+                (None, false)
+            };
         // Good taste: "no matching rule" is not the same thing as "Ask".
         // If the user's allow/deny/ask lists don't match this action, treat it as "no decision"
         // and let tool metadata + workspace boundary checks drive whether we prompt.
@@ -604,10 +627,10 @@ impl ToolRegistry {
             return PermissionDecision::Deny;
         }
 
-        self.settings_permissions
-            .as_ref()
-            .map(|checker| checker.check(action))
-            .unwrap_or(PermissionDecision::Allow)
+        match self.settings_permissions.as_ref() {
+            Some(checker) => checker.check(action),
+            None => PermissionDecision::Allow,
+        }
     }
 
     async fn check_rate_limit(&self, tool_name: &str) -> ToolExecutorResult<()> {
@@ -631,22 +654,22 @@ impl ToolRegistry {
             return false;
         }
 
-        let path = args.get("path").and_then(|v| v.as_str()).or_else(|| {
-            metadata
-                .summary_key_arg
-                .and_then(|key| args.get(key))
-                .and_then(|v| v.as_str())
-        });
-
-        let Some(path) = path else {
+        let Some(path) = tool_path_arg(args, metadata) else {
             return false;
         };
 
-        let resolved_path =
-            match crate::agent::tools::builtin::file_utils::ensure_absolute(path, &context.cwd) {
-                Ok(p) => p,
-                Err(_) => return false,
-            };
+        let resolved_path = match ensure_absolute(&path, &context.cwd) {
+            Ok(path) => path,
+            Err(err) => {
+                warn!(
+                    "Failed to resolve tool path for workspace confirmation (tool={}, path={}): {}",
+                    metadata.category.as_str(),
+                    path,
+                    err
+                );
+                return false;
+            }
+        };
 
         let workspace_root = PathBuf::from(context.cwd.as_ref());
         if !workspace_root.is_absolute() {
@@ -993,6 +1016,9 @@ impl ToolRegistry {
             .iter()
             .filter(|entry| {
                 let tool_name = entry.value().tool.name();
+                if tool_name == "task" && context.allowed_task_profiles.is_empty() {
+                    return false;
+                }
                 let action = build_tool_action_for_prompt(tool_name, workspace_root.clone());
 
                 // Agent tool filter: hide tools not available to this agent
@@ -1015,9 +1041,10 @@ impl ToolRegistry {
             })
             .map(|entry| {
                 let tool = &entry.value().tool;
-                let description = tool
-                    .description_with_context(context)
-                    .unwrap_or_else(|| tool.description().to_string());
+                let description = match tool.description_with_context(context) {
+                    Some(description) => description,
+                    None => tool.description().to_string(),
+                };
 
                 ToolSchema {
                     name: tool.name().to_string(),
@@ -1065,11 +1092,12 @@ fn build_tool_action(
 
     match tool_name {
         "shell" => {
-            let command = args
-                .get("command")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            ToolAction::new("shell", workspace_root, bash_param_variants(command))
+            let command = trimmed_string_arg(args, "command");
+            ToolAction::new(
+                "shell",
+                workspace_root,
+                command.map_or_else(Vec::new, |command| bash_param_variants(&command)),
+            )
         }
         "read_file" => ToolAction::new(
             "read",
@@ -1096,52 +1124,28 @@ fn build_tool_action(
             workspace_root,
             path_variants(args, metadata, context),
         ),
-        "grep" => {
-            let query = args
-                .get("query")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            ToolAction::new("grep", workspace_root, vec![query.to_string()])
-        }
+        "grep" => ToolAction::new("grep", workspace_root, single_arg_variants(args, "query")),
         "semantic_search" => ToolAction::new("semantic_search", workspace_root, vec![]),
         "web_fetch" => {
-            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
-            ToolAction::new("web_fetch", workspace_root, web_fetch_variants(url))
+            let variants = match trimmed_string_arg(args, "url") {
+                Some(url) => web_fetch_variants(&url),
+                None => Vec::new(),
+            };
+            ToolAction::new("web_fetch", workspace_root, variants)
         }
-        "web_search" => {
-            let q = args
-                .get("query")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            ToolAction::new("web_search", workspace_root, vec![q.to_string()])
-        }
+        "web_search" => ToolAction::new(
+            "web_search",
+            workspace_root,
+            single_arg_variants(args, "query"),
+        ),
         "read_terminal" => ToolAction::new("terminal", workspace_root, vec![]),
         "syntax_diagnostics" => ToolAction::new("syntax_diagnostics", workspace_root, vec![]),
         "todowrite" => ToolAction::new("todowrite", workspace_root, vec![]),
-        "task" => {
-            let agent = args
-                .get("subagent_type")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            let variants = if agent.trim().is_empty() {
-                vec![]
-            } else {
-                vec![agent.trim().to_string()]
-            };
-            ToolAction::new("task", workspace_root, variants)
-        }
+        "task" => ToolAction::new("task", workspace_root, single_arg_variants(args, "profile")),
         _ => {
-            let summary = metadata
-                .summary_key_arg
-                .and_then(|key| args.get(key))
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string();
-
-            let variants = if summary.is_empty() {
-                vec![]
-            } else {
-                vec![summary]
+            let variants = match metadata.summary_key_arg {
+                Some(key) => single_arg_variants(args, key),
+                None => Vec::new(),
             };
             ToolAction::new(tool_name, workspace_root, variants)
         }
@@ -1153,21 +1157,40 @@ fn path_variants(
     metadata: &ToolMetadata,
     context: &TaskContext,
 ) -> Vec<String> {
-    let path = args.get("path").and_then(|v| v.as_str()).or_else(|| {
-        metadata
-            .summary_key_arg
-            .and_then(|key| args.get(key))
-            .and_then(|v| v.as_str())
-    });
-
-    let Some(path) = path else {
-        return vec![context.cwd.to_string()];
+    let Some(path) = tool_path_arg(args, metadata) else {
+        return vec![];
     };
 
-    match crate::agent::tools::builtin::file_utils::ensure_absolute(path, &context.cwd) {
+    match ensure_absolute(&path, &context.cwd) {
         Ok(resolved) => vec![resolved.to_string_lossy().to_string()],
-        Err(_) => vec![path.to_string()],
+        Err(err) => {
+            warn!("Failed to resolve tool path variant '{}': {}", path, err);
+            Vec::new()
+        }
     }
+}
+
+fn trimmed_string_arg(args: &serde_json::Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn single_arg_variants(args: &serde_json::Value, key: &str) -> Vec<String> {
+    match trimmed_string_arg(args, key) {
+        Some(value) => vec![value],
+        None => Vec::new(),
+    }
+}
+
+fn tool_path_arg(args: &serde_json::Value, metadata: &ToolMetadata) -> Option<String> {
+    trimmed_string_arg(args, "path").or_else(|| {
+        metadata
+            .summary_key_arg
+            .and_then(|key| trimmed_string_arg(args, key))
+    })
 }
 
 fn bash_param_variants(command: &str) -> Vec<String> {
@@ -1183,14 +1206,14 @@ fn bash_param_variants(command: &str) -> Vec<String> {
 
     for split_at in 1..=tokens.len().min(3) {
         // Safe slicing
-        let prefix = tokens
-            .get(..split_at)
-            .map(|t| t.join(" "))
-            .unwrap_or_default();
-        let suffix = tokens
-            .get(split_at..)
-            .map(|t| t.join(" "))
-            .unwrap_or_default();
+        let Some(prefix_tokens) = tokens.get(..split_at) else {
+            continue;
+        };
+        let Some(suffix_tokens) = tokens.get(split_at..) else {
+            continue;
+        };
+        let prefix = prefix_tokens.join(" ");
+        let suffix = suffix_tokens.join(" ");
         if suffix.is_empty() {
             variants.push(prefix);
         } else {
@@ -1208,11 +1231,14 @@ fn web_fetch_variants(url: &str) -> Vec<String> {
     }
 
     let mut out = vec![format!("url:{url}"), url.to_string()];
-    if let Ok(parsed) = url::Url::parse(url) {
-        if let Some(host) = parsed.host_str() {
-            out.push(format!("domain:{host}"));
-            out.push(host.to_string());
+    match url::Url::parse(url) {
+        Ok(parsed) => {
+            if let Some(host) = parsed.host_str() {
+                out.push(format!("domain:{host}"));
+                out.push(host.to_string());
+            }
         }
+        Err(err) => warn!("Failed to parse web_fetch URL '{}': {}", url, err),
     }
     out
 }
@@ -1243,11 +1269,10 @@ fn confirmation_scope(action: &ToolAction, metadata: &ToolMetadata) -> (String, 
         return (permission, vec!["*".to_string()]);
     }
 
-    let pattern = action
-        .param_variants
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "*".to_string());
+    let pattern = match action.param_variants.first() {
+        Some(pattern) => pattern.clone(),
+        None => "*".to_string(),
+    };
     (permission, vec![pattern])
 }
 
@@ -1263,16 +1288,18 @@ async fn external_directory_always_patterns(
         return None;
     }
 
-    let path = args.get("path").and_then(|v| v.as_str()).or_else(|| {
-        metadata
-            .summary_key_arg
-            .and_then(|key| args.get(key))
-            .and_then(|v| v.as_str())
-    })?;
+    let path = tool_path_arg(args, metadata)?;
 
-    let resolved = crate::agent::tools::builtin::file_utils::ensure_absolute(path, &context.cwd)
-        .ok()
-        .unwrap_or_else(|| PathBuf::from(path));
+    let resolved = match ensure_absolute(&path, &context.cwd) {
+        Ok(path) => path,
+        Err(err) => {
+            warn!(
+                "Failed to resolve external-directory approval path '{}': {}",
+                path, err
+            );
+            return None;
+        }
+    };
     if !resolved.is_absolute() {
         return None;
     }
@@ -1286,8 +1313,20 @@ async fn external_directory_always_patterns(
         return None;
     }
 
-    let dir = resolved.parent().unwrap_or(&resolved).to_path_buf();
-    let canon = tokio::fs::canonicalize(&dir).await.unwrap_or(dir);
+    let dir = resolved
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| resolved.clone());
+    let canon = match canonicalize_for_workspace_check(&dir).await {
+        Some(path) => path,
+        None => {
+            warn!(
+                "Failed to canonicalize external-directory approval path '{}'",
+                dir.display()
+            );
+            return None;
+        }
+    };
     let canon_str = canon.to_string_lossy();
     Some(vec![format!("{canon_str}/*")])
 }
@@ -1297,17 +1336,31 @@ async fn load_approval_rules(
     workspace_path: &str,
 ) -> std::collections::HashSet<(String, String)> {
     let key = approval_rules_preference_key(workspace_path);
-    let stored = AppPreferences::new(db)
-        .get(&key)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    let stored = match AppPreferences::new(db).get(&key).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return std::collections::HashSet::new(),
+        Err(err) => {
+            tracing::warn!(
+                "Failed to load approval rules for workspace {}: {}",
+                workspace_path,
+                err
+            );
+            return std::collections::HashSet::new();
+        }
+    };
     if stored.trim().is_empty() {
         return std::collections::HashSet::new();
     }
-    let Ok(list) = serde_json::from_str::<Vec<StoredApprovalRule>>(&stored) else {
-        return std::collections::HashSet::new();
+    let list = match serde_json::from_str::<Vec<StoredApprovalRule>>(&stored) {
+        Ok(list) => list,
+        Err(err) => {
+            tracing::warn!(
+                "Invalid approval rules JSON for workspace {}: {}",
+                workspace_path,
+                err
+            );
+            return std::collections::HashSet::new();
+        }
     };
     list.into_iter()
         .map(|r| (r.permission, r.pattern))
@@ -1335,11 +1388,32 @@ async fn persist_approval_rules(
     let key = approval_rules_preference_key(workspace_path);
     let prefs = AppPreferences::new(db);
 
-    let existing = prefs.get(&key).await.ok().flatten().unwrap_or_default();
-    let mut rules = if existing.trim().is_empty() {
+    let existing = prefs
+        .get(&key)
+        .await
+        .map_err(|err| ToolExecutorError::ExecutionFailed {
+            tool_name: "approval_rules".to_string(),
+            error: format!("Failed to load existing approval rules: {err}"),
+        })?;
+    let mut rules = if existing
+        .as_deref()
+        .is_none_or(|stored| stored.trim().is_empty())
+    {
         Vec::<StoredApprovalRule>::new()
     } else {
-        serde_json::from_str::<Vec<StoredApprovalRule>>(&existing).unwrap_or_default()
+        let existing_rules =
+            existing
+                .as_deref()
+                .ok_or_else(|| ToolExecutorError::ExecutionFailed {
+                    tool_name: "approval_rules".to_string(),
+                    error: "Approval rules value disappeared before parsing".to_string(),
+                })?;
+        serde_json::from_str::<Vec<StoredApprovalRule>>(existing_rules).map_err(|err| {
+            ToolExecutorError::ExecutionFailed {
+                tool_name: "approval_rules".to_string(),
+                error: format!("Failed to parse approval rules JSON: {err}"),
+            }
+        })?
     };
 
     for p in patterns {
@@ -1355,8 +1429,16 @@ async fn persist_approval_rules(
         });
     }
 
-    let json = serde_json::to_string(&rules).unwrap_or_default();
-    let _ = prefs.set(&key, Some(json.as_str())).await;
+    let json = serde_json::to_string(&rules).map_err(|err| ToolExecutorError::ExecutionFailed {
+        tool_name: "approval_rules".to_string(),
+        error: format!("Failed to serialize approval rules: {err}"),
+    })?;
+    prefs.set(&key, Some(json.as_str())).await.map_err(|err| {
+        ToolExecutorError::ExecutionFailed {
+            tool_name: "approval_rules".to_string(),
+            error: format!("Failed to persist approval rules: {err}"),
+        }
+    })?;
     Ok(())
 }
 
@@ -1385,7 +1467,16 @@ async fn cascade_approvals(
 
     for id in to_resolve {
         if let Some((_, pending)) = pending.remove(&id) {
-            let _ = pending.tx.send(ToolConfirmationDecision::AllowAlways);
+            if pending
+                .tx
+                .send(ToolConfirmationDecision::AllowAlways)
+                .is_err()
+            {
+                tracing::warn!(
+                    "Failed to auto-resolve tool confirmation '{}' with AllowAlways",
+                    id
+                );
+            }
         }
     }
 }
@@ -1441,13 +1532,34 @@ impl ToolConfirmationManager {
 }
 
 async fn is_within_workspace(workspace_root: &Path, resolved: &Path) -> bool {
-    let workspace_canon = tokio::fs::canonicalize(workspace_root)
-        .await
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
-
-    let resolved_canon = tokio::fs::canonicalize(resolved)
-        .await
-        .unwrap_or_else(|_| resolved.to_path_buf());
-
+    let Some(workspace_canon) = canonicalize_for_workspace_check(workspace_root).await else {
+        warn!(
+            "Failed to canonicalize workspace root for boundary check: {}",
+            workspace_root.display()
+        );
+        return false;
+    };
+    let Some(resolved_canon) = canonicalize_for_workspace_check(resolved).await else {
+        warn!(
+            "Failed to canonicalize target path for boundary check: {}",
+            resolved.display()
+        );
+        return false;
+    };
     resolved_canon.starts_with(&workspace_canon)
+}
+
+async fn canonicalize_for_workspace_check(path: &Path) -> Option<PathBuf> {
+    match tokio::fs::canonicalize(path).await {
+        Ok(path) => Some(path),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Some(normalize_path(path)),
+        Err(err) => {
+            warn!(
+                "Failed to canonicalize path for workspace boundary check (path={}): {}",
+                path.display(),
+                err
+            );
+            None
+        }
+    }
 }

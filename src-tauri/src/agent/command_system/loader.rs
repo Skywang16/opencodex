@@ -20,6 +20,10 @@ static BUILTIN_COMMANDS: LazyLock<HashMap<String, CommandConfig>> = LazyLock::ne
             include_str!("../../../prompts/commands/plan-mode.md"),
         ),
         (
+            "orchestrate-mode",
+            include_str!("../../../prompts/commands/orchestrate-mode.md"),
+        ),
+        (
             "skill-installer",
             include_str!("../../../prompts/commands/skill-installer.md"),
         ),
@@ -30,7 +34,11 @@ static BUILTIN_COMMANDS: LazyLock<HashMap<String, CommandConfig>> = LazyLock::ne
             CommandConfig {
                 name: name.to_string(),
                 description: None,
-                agent: Some("coder".to_string()),
+                agent: Some(match *name {
+                    "plan-mode" => "plan".to_string(),
+                    "orchestrate-mode" => "orchestrate".to_string(),
+                    _ => "coder".to_string(),
+                }),
                 model: None,
                 subtask: false,
                 template: template.trim().to_string(),

@@ -9,10 +9,16 @@ use super::models::{
 };
 
 fn now_timestamp() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs() as i64,
+        Err(err) => {
+            tracing::warn!(
+                "System clock is before UNIX_EPOCH while generating checkpoint timestamp: {}",
+                err
+            );
+            0
+        }
+    }
 }
 
 /// Checkpoint data access

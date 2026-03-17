@@ -40,11 +40,16 @@ impl RetryConfig {
 
         let final_ms = if self.jitter {
             let jitter = delay_ms / 4;
-            let rand = (std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .subsec_nanos()
-                % 1000) as u64;
+            let rand = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                Ok(duration) => (duration.subsec_nanos() % 1000) as u64,
+                Err(err) => {
+                    tracing::warn!(
+                        "System clock is before UNIX_EPOCH while computing retry jitter: {}",
+                        err
+                    );
+                    0
+                }
+            };
             delay_ms.saturating_sub(jitter) + (rand * jitter * 2 / 1000)
         } else {
             delay_ms
@@ -78,6 +83,7 @@ fn is_anthropic_retryable(e: &AnthropicError) -> bool {
         AnthropicError::Http { source } => is_reqwest_retryable(source),
         AnthropicError::Api { status, .. } => is_status_retryable(*status),
         AnthropicError::Stream { .. } => true,
+        AnthropicError::Configuration { .. } => false,
         _ => false,
     }
 }
@@ -145,9 +151,10 @@ where
     Fut: Future<Output = Result<T, E>>,
     E: std::fmt::Display,
 {
+    let max_retries = config.max_retries.max(1);
     let mut last_err: Option<E> = None;
 
-    for attempt in 0..config.max_retries {
+    for attempt in 0..max_retries {
         match op().await {
             Ok(v) => {
                 if attempt > 0 {
@@ -156,13 +163,13 @@ where
                 return Ok(v);
             }
             Err(e) => {
-                let is_last = attempt == config.max_retries - 1;
+                let is_last = attempt == max_retries - 1;
                 if !is_last && is_retryable(&e) {
                     let delay = config.delay_for_attempt(attempt);
                     tracing::warn!(
                         "LLM failed (attempt {}/{}): {}. Retry in {:?}",
                         attempt + 1,
-                        config.max_retries,
+                        max_retries,
                         e,
                         delay
                     );
@@ -170,7 +177,7 @@ where
                     last_err = Some(e);
                 } else {
                     if is_last && is_retryable(&e) {
-                        tracing::error!("LLM failed after {} retries: {}", config.max_retries, e);
+                        tracing::error!("LLM failed after {} retries: {}", max_retries, e);
                     }
                     return Err(e);
                 }
@@ -178,7 +185,10 @@ where
         }
     }
 
-    Err(last_err.expect("retry loop should have returned"))
+    match last_err {
+        Some(err) => Err(err),
+        None => unreachable!("retry loop exited without a result"),
+    }
 }
 
 #[cfg(test)]

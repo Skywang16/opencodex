@@ -9,6 +9,7 @@
   interface Props {
     sessions: SessionRecord[]
     currentSessionId: number | null
+    selectedLabel?: string | null
     loading?: boolean
   }
 
@@ -35,13 +36,7 @@
   })
 
   const displayValue = computed(() => {
-    // When there's no current session, show "New Session"
-    if (!props.currentSessionId) {
-      return t('chat.new_session')
-    }
-    // When there's a current session, find the title
-    const session = props.sessions.find(s => s.id === props.currentSessionId)
-    return session?.title || t('chat.new_session')
+    return props.selectedLabel || t('chat.new_session')
   })
 
   import { formatSessionTime } from '@/utils/dateFormatter'

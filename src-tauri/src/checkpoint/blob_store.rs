@@ -10,6 +10,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::config::CheckpointConfig;
 use super::models::CheckpointResult;
 
+fn current_timestamp() -> i64 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs() as i64,
+        Err(err) => {
+            tracing::warn!(
+                "System clock is before UNIX_EPOCH while generating blob timestamp: {}",
+                err
+            );
+            0
+        }
+    }
+}
+
 /// Content-addressable storage
 pub struct BlobStore {
     pool: SqlitePool,
@@ -48,10 +61,7 @@ impl BlobStore {
         }
 
         let size = content.len() as i64;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
+        let now = current_timestamp();
 
         // Insert new blob
         let result = sqlx::query(

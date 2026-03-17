@@ -61,17 +61,23 @@ impl FileStore {
         })?;
 
         // Create corresponding directory structure under vectors directory
-        let vector_dir = self
-            .vectors_path
-            .join(relative_path.parent().unwrap_or_else(|| Path::new("")));
+        let vector_dir = self.vectors_path.join(match relative_path.parent() {
+            Some(parent) => parent,
+            None => Path::new(""),
+        });
 
         // Use source file name + .oxi suffix
         let file_name = format!(
             "{}.oxi",
             relative_path
                 .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("unknown")
+                .ok_or_else(|| {
+                    VectorDbError::Index(format!(
+                        "Source file has no file name: {}",
+                        source_file.display()
+                    ))
+                })?
+                .to_string_lossy()
         );
 
         Ok(vector_dir.join(file_name))

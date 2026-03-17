@@ -7,7 +7,8 @@ mod web_fetch_tests {
     use tempfile::TempDir;
     use terminal_lib::agent::config::TaskExecutionConfig;
     use terminal_lib::agent::core::context::{
-        SubtaskRequest, SubtaskResponse, SubtaskRunner, TaskContext, TaskContextDeps,
+        TaskContext, TaskContextDeps, TaskContextInit, TaskExecutionRequest, TaskExecutionResponse,
+        TaskExecutionRunner,
     };
     use terminal_lib::agent::error::{TaskExecutorError, TaskExecutorResult};
     use terminal_lib::agent::persistence::AgentPersistence;
@@ -16,17 +17,17 @@ mod web_fetch_tests {
     use terminal_lib::agent::workspace_changes::WorkspaceChangeJournal;
     use terminal_lib::storage::{DatabaseManager, DatabaseOptions, StoragePathsBuilder};
 
-    struct NoopSubtaskRunner;
+    struct NoopTaskExecutionRunner;
 
     #[async_trait::async_trait]
-    impl SubtaskRunner for NoopSubtaskRunner {
-        async fn run_subtask(
+    impl TaskExecutionRunner for NoopTaskExecutionRunner {
+        async fn run_task_execution(
             &self,
             _parent: &TaskContext,
-            _request: SubtaskRequest,
-        ) -> TaskExecutorResult<SubtaskResponse> {
+            _request: TaskExecutionRequest,
+        ) -> TaskExecutorResult<TaskExecutionResponse> {
             Err(TaskExecutorError::InternalError(
-                "NoopSubtaskRunner does not execute subtasks".to_string(),
+                "NoopTaskExecutionRunner does not execute child tasks".to_string(),
             ))
         }
     }
@@ -43,8 +44,10 @@ mod web_fetch_tests {
             .ensure_directories()
             .expect("failed to create storage directories");
 
-        let mut options = DatabaseOptions::default();
-        options.encryption = false;
+        let options = DatabaseOptions {
+            encryption: false,
+            ..DatabaseOptions::default()
+        };
 
         let database = Arc::new(
             DatabaseManager::new(paths, options)
@@ -61,24 +64,27 @@ mod web_fetch_tests {
             .to_string_lossy()
             .to_string();
 
-        TaskContext::new(
-            "web-fetch-test".to_string(),
-            1,
-            "test prompt".to_string(),
-            "chat".to_string(),
-            TaskExecutionConfig::default(),
-            cwd,
-            false,
-            None,
-            TaskContextDeps {
+        TaskContext::new(TaskContextInit {
+            task_id: "web-fetch-test".to_string(),
+            session_id: 1,
+            run_id: 1,
+            node_id: 1,
+            user_prompt: "test prompt".to_string(),
+            agent_type: "chat".to_string(),
+            config: TaskExecutionConfig::default(),
+            workspace_path: cwd,
+            updates_run_status: true,
+            emit_task_events: false,
+            progress_channel: None,
+            deps: TaskContextDeps {
                 tool_registry: Arc::new(ToolRegistry::default()),
                 repositories: Arc::clone(&database),
                 agent_persistence: Arc::new(AgentPersistence::new(Arc::clone(&database))),
                 checkpoint_service: None,
                 workspace_changes: Arc::new(WorkspaceChangeJournal::new()),
-                subtask_runner: Arc::new(NoopSubtaskRunner),
+                task_execution_runner: Arc::new(NoopTaskExecutionRunner),
             },
-        )
+        })
         .await
         .expect("failed to create test task context")
     }
@@ -105,7 +111,7 @@ mod web_fetch_tests {
                 println!("Success: {:?}", tool_result.status);
             }
             Ok(Err(e)) => {
-                println!("Tool error: {:?}", e);
+                println!("Tool error: {e:?}");
             }
             Err(_) => {
                 panic!("WebFetch timed out after 10 seconds!");

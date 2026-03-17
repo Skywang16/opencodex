@@ -141,7 +141,7 @@ impl GrepTool {
             .build(pattern)
             .map_err(|e| format!("Invalid regex pattern: {e}"))?;
 
-        let walker = build_walker(path, include);
+        let walker = build_walker(path, include)?;
         let mut files = Vec::with_capacity(max_results);
 
         for entry in walker.flatten() {
@@ -152,22 +152,37 @@ impl GrepTool {
             if entry_path.is_dir() {
                 continue;
             }
-            if let Ok(meta) = entry_path.metadata() {
-                if meta.len() > 1024 * 1024 {
-                    continue;
+            match entry_path.metadata() {
+                Ok(meta) => {
+                    if meta.len() > 1024 * 1024 {
+                        continue;
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        path = %entry_path.display(),
+                        "Failed to read metadata in grep files mode: {}",
+                        err
+                    );
                 }
             }
 
             let mut found = false;
             let mut searcher = Searcher::new();
-            let _ = searcher.search_path(
+            if let Err(err) = searcher.search_path(
                 &matcher,
                 entry_path,
                 UTF8(|_line_num, _line| {
                     found = true;
                     Ok(false) // stop after first match
                 }),
-            );
+            ) {
+                tracing::warn!(
+                    path = %entry_path.display(),
+                    "grep file scan failed in files mode: {}",
+                    err
+                );
+            }
             if found {
                 files.push(entry_path.display().to_string());
             }
@@ -214,7 +229,7 @@ impl GrepTool {
             .build(pattern)
             .map_err(|e| format!("Invalid regex pattern: {e}"))?;
 
-        let walker = build_walker(path, include);
+        let walker = build_walker(path, include)?;
         let mut entries = Vec::with_capacity(max_results);
 
         for entry in walker.flatten() {
@@ -225,22 +240,37 @@ impl GrepTool {
             if entry_path.is_dir() {
                 continue;
             }
-            if let Ok(meta) = entry_path.metadata() {
-                if meta.len() > 1024 * 1024 {
-                    continue;
+            match entry_path.metadata() {
+                Ok(meta) => {
+                    if meta.len() > 1024 * 1024 {
+                        continue;
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        path = %entry_path.display(),
+                        "Failed to read metadata in grep count mode: {}",
+                        err
+                    );
                 }
             }
 
             let mut count = 0usize;
             let mut searcher = Searcher::new();
-            let _ = searcher.search_path(
+            if let Err(err) = searcher.search_path(
                 &matcher,
                 entry_path,
                 UTF8(|_line_num, _line| {
                     count += 1;
                     Ok(true)
                 }),
-            );
+            ) {
+                tracing::warn!(
+                    path = %entry_path.display(),
+                    "grep file scan failed in count mode: {}",
+                    err
+                );
+            }
             if count > 0 {
                 entries.push(GrepCountEntry {
                     file_path: entry_path.display().to_string(),
@@ -299,7 +329,7 @@ impl GrepTool {
         // When context_lines == 0, we collect individual line matches directly.
         let results = RefCell::new(Vec::with_capacity(max_results));
 
-        let walker = build_walker(path, include);
+        let walker = build_walker(path, include)?;
 
         'outer: for entry in walker.flatten() {
             if results.borrow().len() >= max_results {
@@ -312,9 +342,18 @@ impl GrepTool {
             }
 
             // Skip large files (> 1MB)
-            if let Ok(meta) = entry_path.metadata() {
-                if meta.len() > 1024 * 1024 {
-                    continue;
+            match entry_path.metadata() {
+                Ok(meta) => {
+                    if meta.len() > 1024 * 1024 {
+                        continue;
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        path = %entry_path.display(),
+                        "Failed to read metadata in grep content mode: {}",
+                        err
+                    );
                 }
             }
 
@@ -326,7 +365,7 @@ impl GrepTool {
                 let file_matches: RefCell<BTreeMap<usize, String>> = RefCell::new(BTreeMap::new());
 
                 let mut searcher = Searcher::new();
-                let _ = searcher.search_path(
+                if let Err(err) = searcher.search_path(
                     &matcher,
                     entry_path,
                     UTF8(|line_num, line| {
@@ -335,7 +374,13 @@ impl GrepTool {
                             .insert(line_num as usize, line.to_string());
                         Ok(true)
                     }),
-                );
+                ) {
+                    tracing::warn!(
+                        path = %entry_path.display(),
+                        "grep file scan failed while collecting context matches: {}",
+                        err
+                    );
+                }
 
                 let matches = file_matches.into_inner();
                 if matches.is_empty() {
@@ -381,7 +426,7 @@ impl GrepTool {
             } else {
                 // Simple mode: one entry per match line
                 let mut searcher = Searcher::new();
-                let _ = searcher.search_path(
+                if let Err(err) = searcher.search_path(
                     &matcher,
                     entry_path,
                     UTF8(|line_num, line| {
@@ -400,7 +445,13 @@ impl GrepTool {
 
                         Ok(res.len() < max_results)
                     }),
-                );
+                ) {
+                    tracing::warn!(
+                        path = %entry_path.display(),
+                        "grep file scan failed in content mode: {}",
+                        err
+                    );
+                }
             }
 
             if results.borrow().len() >= max_results {
@@ -524,6 +575,11 @@ Examples:
 
         let ignore_case = args.ignore_case.unwrap_or(false);
         let output_mode = args.output_mode.as_deref().unwrap_or("content");
+        if !matches!(output_mode, "content" | "files_with_matches" | "count") {
+            return Ok(validation_error(format!(
+                "Unsupported outputMode '{output_mode}'. Expected one of: content, files_with_matches, count"
+            )));
+        }
 
         let search_path = match resolve_to_absolute(args.path.as_deref(), &context.cwd) {
             Ok(path) => path,
@@ -578,14 +634,30 @@ Examples:
             Ok(outcome) => {
                 // Track all matched files
                 for file_path in &outcome.file_paths {
-                    if let Ok(p) = PathBuf::from(file_path).canonicalize() {
-                        let _ = context
-                            .file_tracker()
-                            .track_file_operation(FileOperationRecord::new(
-                                p.as_path(),
-                                FileRecordSource::FileMentioned,
-                            ))
-                            .await;
+                    match PathBuf::from(file_path).canonicalize() {
+                        Ok(p) => {
+                            if let Err(err) = context
+                                .file_tracker()
+                                .track_file_operation(FileOperationRecord::new(
+                                    p.as_path(),
+                                    FileRecordSource::FileMentioned,
+                                ))
+                                .await
+                            {
+                                tracing::warn!(
+                                    "Failed to track grep file mention '{}': {}",
+                                    p.display(),
+                                    err
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                "Failed to canonicalize grep file mention '{}': {}",
+                                file_path,
+                                err
+                            );
+                        }
                     }
                 }
 
@@ -625,7 +697,7 @@ struct GrepOutcome {
 // ============================================================================
 
 /// Shared walker builder used by all grep modes
-fn build_walker(path: &Path, include: Option<&str>) -> ignore::Walk {
+fn build_walker(path: &Path, include: Option<&str>) -> Result<ignore::Walk, String> {
     let mut builder = WalkBuilder::new(path);
     builder
         .hidden(false)
@@ -635,11 +707,14 @@ fn build_walker(path: &Path, include: Option<&str>) -> ignore::Walk {
 
     if let Some(glob_pattern) = include {
         let mut types_builder = ignore::types::TypesBuilder::new();
-        types_builder.add("custom", glob_pattern).ok();
+        types_builder
+            .add("custom", glob_pattern)
+            .map_err(|err| format!("Invalid include glob '{glob_pattern}': {err}"))?;
         types_builder.select("custom");
-        if let Ok(types) = types_builder.build() {
-            builder.types(types);
-        }
+        let types = types_builder
+            .build()
+            .map_err(|err| format!("Failed to build include matcher '{glob_pattern}': {err}"))?;
+        builder.types(types);
     }
 
     builder.filter_entry(|entry| {
@@ -656,7 +731,7 @@ fn build_walker(path: &Path, include: Option<&str>) -> ignore::Walk {
         true
     });
 
-    builder.build()
+    Ok(builder.build())
 }
 
 fn language_from_path(path: &Path) -> String {

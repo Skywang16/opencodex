@@ -101,7 +101,7 @@ fn block_anchor_replacer(content: &str, find: &str) -> Vec<String> {
     }
 
     // Remove trailing empty line if present
-    if search_lines.last().map(|l| l.is_empty()).unwrap_or(false) {
+    if search_lines.last().is_some_and(|line| line.is_empty()) {
         search_lines.pop();
     }
     if search_lines.len() < 3 {
@@ -164,7 +164,11 @@ fn block_anchor_replacer(content: &str, find: &str) -> Vec<String> {
             1.0
         };
 
-        if similarity >= threshold && (best.is_none() || similarity > best.unwrap().2) {
+        if similarity >= threshold
+            && best
+                .as_ref()
+                .is_none_or(|candidate| similarity > candidate.2)
+        {
             best = Some((c.start, c.end, similarity));
         }
     }
@@ -367,7 +371,7 @@ fn context_aware_replacer(content: &str, find: &str) -> Vec<String> {
     if find_lines.len() < 3 {
         return vec![];
     }
-    if find_lines.last().map(|l| l.is_empty()).unwrap_or(false) {
+    if find_lines.last().is_some_and(|line| line.is_empty()) {
         find_lines.pop();
     }
     if find_lines.len() < 3 {
@@ -467,7 +471,10 @@ pub(crate) fn replace(
             }
 
             // Check uniqueness: must have exactly one occurrence
-            let last_index = content.rfind(search.as_str()).unwrap_or(index);
+            let last_index = match content.rfind(search.as_str()) {
+                Some(last_index) => last_index,
+                None => continue,
+            };
             if index != last_index {
                 continue; // multiple matches, try next candidate/replacer
             }
@@ -627,30 +634,10 @@ Parameters:
             Err(err) => return Ok(err),
         };
 
-        // Handle empty old_text as "create file with content"
         if args.old_text.is_empty() {
-            let content_new = &args.new_text;
-
-            context.note_agent_write_intent(path.as_path()).await;
-            snapshot_before_edit(context, self.name(), path.as_path()).await?;
-
-            if let Err(err) = fs::write(&path, content_new).await {
-                return Ok(error_result(format!(
-                    "Failed to write file {}: {}",
-                    path.display(),
-                    err
-                )));
-            }
-
-            track_edit(context, &path).await?;
-
-            return Ok(success_result(
-                format!("edit_file applied\nfile={}", path.display()),
-                json!({
-                    "file": path.display().to_string(),
-                    "old": "",
-                    "new": args.new_text,
-                }),
+            return Ok(error_result(
+                "oldString cannot be empty for edit_file. Use write_file to create or replace an entire file."
+                    .to_string(),
             ));
         }
 

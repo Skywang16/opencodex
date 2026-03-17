@@ -106,11 +106,21 @@ Usage:
             }
         }
 
-        if let Ok(meta) = fs::metadata(&path).await {
-            if meta.is_dir() {
+        match fs::metadata(&path).await {
+            Ok(meta) => {
+                if meta.is_dir() {
+                    return Ok(error_result(format!(
+                        "Path {} is a directory, not a file",
+                        path.display()
+                    )));
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
                 return Ok(error_result(format!(
-                    "Path {} is a directory, not a file",
-                    path.display()
+                    "Failed to inspect path {}: {}",
+                    path.display(),
+                    err
                 )));
             }
         }

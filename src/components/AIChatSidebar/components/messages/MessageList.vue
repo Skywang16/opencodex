@@ -22,6 +22,7 @@
     isLoading?: boolean
     sessionId?: number | null
     workspacePath?: string
+    domId?: string
   }
 
   const props = defineProps<Props>()
@@ -29,9 +30,7 @@
   // Get the last 3 historical sessions for the current workspace (excluding the current session)
   const recentSessions = computed(() => {
     const path = props.workspacePath || workspaceStore.currentWorkspacePath
-    const node = workspaceStore.getNode(path)
-    if (!node) return []
-    return node.sessions.filter(s => s.id !== props.sessionId).slice(0, 3)
+    return workspaceStore.getTopLevelSessions(path).filter(s => s.id !== props.sessionId).slice(0, 3)
   })
 
   // Current workspace display name
@@ -59,7 +58,7 @@
           })
           if (selected && typeof selected === 'string') {
             await workspaceStore.loadTree()
-            await workspaceStore.loadSessions(selected)
+            await workspaceStore.loadSessionViews(selected)
           }
         },
       },
@@ -69,7 +68,7 @@
             ...workspaces.slice(0, 8).map(ws => ({
               label: ws.displayName || ws.path.split('/').pop() || ws.path,
               onClick: async () => {
-                await workspaceStore.loadSessions(ws.path)
+                await workspaceStore.loadSessionViews(ws.path)
               },
             })),
           ]
@@ -149,10 +148,14 @@
     }
     await scrollToBottom()
   })
+
+  defineExpose({
+    getScrollElement: () => messageListRef.value,
+  })
 </script>
 
 <template>
-  <div ref="messageListRef" class="message-list" @scroll="onScroll">
+  <div :id="domId" ref="messageListRef" class="message-list" @scroll="onScroll">
     <div v-if="messages.length === 0" class="empty-state">
       <!-- No model configured -->
       <div v-if="!aiSettingsStore.hasModels && aiSettingsStore.isInitialized" class="no-model-state">
@@ -226,8 +229,15 @@
   </div>
 </template>
 
+<script lang="ts">
+  export interface MessageListExposed {
+    getScrollElement: () => HTMLElement | null
+  }
+</script>
+
 <style scoped>
   .message-list {
+    position: relative;
     flex: 1;
     overflow-y: auto;
     width: 100%;
